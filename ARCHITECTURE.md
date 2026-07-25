@@ -184,7 +184,7 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
 ```bash
 # Frontend (repo root)
 # .env.development (committed): VITE_ANSWER_API_URL=http://localhost:8787/answer
-# .env.production (not yet created): VITE_ANSWER_API_URL=<deployed Worker URL>/answer
+# .env.production (committed): VITE_ANSWER_API_URL=https://pocketrag-answer.abhiram-dev.workers.dev/answer
 
 # worker/.dev.vars (gitignored, local dev only — see worker/.dev.vars.example)
 GEMINI_API_KEY=
@@ -192,6 +192,11 @@ GEMINI_API_KEY=
 # Deployed Worker secret (never in a file):
 #   cd worker && wrangler secret put GEMINI_API_KEY
 ```
+
+**Live Worker:** `https://pocketrag-answer.abhiram-dev.workers.dev` (deployed
+Session 4, subdomain registered by user Session 5). Not directly reachable from this
+dev sandbox for testing (see Known Technical Debt) — test via `wrangler dev` locally
+instead, which makes the same real Gemini calls.
 
 ---
 
@@ -205,6 +210,16 @@ GEMINI_API_KEY=
       Decisions above. Schema supports it; UI doesn't exist yet.
 - [ ] `checkGrounding()` only catches citation-level inconsistency, not content-level
       hallucination against a correctly-cited page — see Key Architectural Decisions.
+- [ ] The answer-generation call has no client-side timeout or retry. Session 4 saw a
+      one-time 30s-280s latency outlier that Session 5 could not reproduce (four
+      separate timed tests, all under 1.5s — see AGENTS.md Session 5). Root cause
+      unconfirmed. Recommended fix (not yet built, pending go-ahead): a ~60s
+      client-side timeout with a manual retry button, not a pre-warm request.
+- [ ] This dev sandbox cannot reach `*.workers.dev` subdomains directly (DNS resolves,
+      connections fail on both IPv4/IPv6) even though the base `workers.dev` domain
+      and `generativelanguage.googleapis.com` are reachable — an egress allowlist gap,
+      not a real-world issue. Test the deployed Worker via local `wrangler dev`
+      instead of curling the live URL from this environment.
 - [ ] Deployed Worker has no public URL yet — the Cloudflare account has never
       registered a `workers.dev` subdomain. Code is deployed and correct (verified via
       `wrangler dev` + real browser); publishing needs one interactive confirmation

@@ -7,14 +7,14 @@ Claude reads this at the START of every new session to understand what happened 
 
 ## Project State
 **Last updated:** 2026-07-25
-**Current branch:** master (git initialized Session 3; commits: `e8b1344` Milestone
-1+2, Milestone 3 commit, Session 4 not yet committed — see below)
-**Overall status:** Milestone 4 (answer composition) code-complete and verified with a
-real Gemini call end-to-end — drag/drop a PDF, ask a real question, get a real
-Gemini-composed answer with correct page citations, raw ranked chunks visible
-underneath as sources. Worker code is deployed to Cloudflare but has **no public URL
-yet** — the account has never registered a `workers.dev` subdomain, and that step
-needs one interactive confirmation only the user can give. No restore-on-reload UI
+**Current branch:** master (commits: `e8b1344` Milestone 1+2, Milestone 3 commit,
+`b224cde` Milestone 4; Session 5's changes not yet committed — see below)
+**Overall status:** Milestone 4 fully live — Worker deployed at
+`https://pocketrag-answer.abhiram-dev.workers.dev`, `.env.production` points at it.
+Drag/drop a PDF, ask a real question, get a real Gemini-composed answer with correct
+page citations, raw ranked chunks visible underneath as sources. Session 5
+investigated a latency concern (see below) and added an honest wait-time UI note. No
+restore-on-reload UI
 (deliberate, Session 3) and no frontend deploy yet.
 
 ---
@@ -351,6 +351,89 @@ correctly-cited page) as a known limitation rather than pretending full coverage
 - Milestone 5 (likely): Cloudflare Pages deploy for the frontend, then wire
   `VITE_ANSWER_API_URL` / `PAGES_ORIGIN` to the real URLs and redeploy the Worker once
   more with the correct CORS origin.
+
+---
+
+### Session 5 — 2026-07-25
+**Goal:** User registered the `workers.dev` subdomain and deployed (Worker live at
+`https://pocketrag-answer.abhiram-dev.workers.dev`). Wire the real URL into
+`.env.production`, then investigate last session's 30s–280s Gemini latency before
+Milestone 5 — is it consistent, cold-start, request-size-related, or Gemini-side —
+with real measured numbers, not a guess. Add an honest wait-time UI note regardless.
+
+**Completed:**
+- [x] `.env.production` created: `VITE_ANSWER_API_URL=https://pocketrag-answer.abhiram-dev.workers.dev/answer`
+- [x] Latency investigation, four separate timed tests:
+  1. Direct to Gemini (`generativelanguage.googleapis.com`, bypassing our Worker
+     entirely), minimal prompt, 3 sequential calls: **1.00s, 0.77s, 1.27s**
+  2. Direct to Gemini, full-size grounded-QA prompt (~3 chunks worth of text,
+     matching real usage), 3 sequential calls: **0.88s, 0.87s, 0.77s**
+  3. Through our Worker code (`wrangler dev`, warm/already-running), 5 sequential
+     calls: **1.24s, 0.88s, 0.99s, 0.80s, 0.79s**
+  4. Through our Worker code, **freshly restarted** `wrangler dev` (true cold
+     start), first call only: **1.44s**
+  - All four tests: consistently under 1.5s. Rules out request/response size and
+    Worker/fetch-subsystem cold start as causes. Did **not** reproduce anything
+    resembling the earlier 277s/30-280s observation under any condition tested.
+- [x] Attempted to test the actual live `pocketrag-answer.abhiram-dev.workers.dev`
+    URL directly via curl — discovered this sandbox cannot reach it (DNS resolves to
+    real Cloudflare anycast IPs, but both IPv4 and IPv6 connections fail immediately,
+    not slowly). Confirmed it's specific to this subdomain, not a general network
+    outage: `generativelanguage.googleapis.com` returns 404 (real HTTP response) and
+    base `workers.dev` returns 301 (real HTTP response) from the same shell. Looks
+    like an egress allowlist gap for this specific new subdomain. Documented in
+    TODO.md so future sessions don't waste time on the same dead end — test via
+    `wrangler dev` locally instead (same code, real Gemini calls, no egress issue).
+- [x] `src/components/QueryPanel.tsx` — added an `awaitingAnswer` state, scoped
+    specifically to the Gemini-wait phase (not the fast local embed+retrieve phase
+    that precedes it), with a visible, honest message: "Generating an answer… this
+    usually takes a few seconds, but can occasionally take up to a few minutes on
+    the free tier. Please don't close this tab." Not a fake progress bar — no signal
+    exists to build one from (Gemini's `generateContent` is non-streaming).
+- [x] Frontend tests (31), typecheck, lint all still pass after the change.
+
+**Grill-me answer given (recorded here for the decision record):** asked whether the
+latency is inherent/unfixable, and if so whether the fallback should be a hard
+timeout+retry or a pre-warmed request fired at embed-completion. Given today's
+findings — the delay did not reproduce under controlled testing (cold start, warm
+repeats, large prompts) — the "inherent and unfixable" premise isn't supported by
+evidence collected so far. Recommendation given: **skip the pre-warm request** (it
+only helps if the same TCP/TLS connection could be reused across the warm-up and the
+real call, which isn't guaranteed across serverless Worker invocations anyway, and
+today's cold-start test showed no meaningful cold-start penalty to warm against).
+**Do add a client-side timeout with manual retry** (~60s) regardless of root cause —
+independent of whether the outlier was environmental noise or a rare Gemini-side
+slowdown, a hard timeout with a retry button is strictly better than an indefinite
+wait with no escape hatch, which is what would make a demo look broken. **Not yet
+implemented** — this is a recommendation pending the user's go-ahead, not done this
+session (scope was explicitly "investigate + report numbers" and "add the
+expectation-setter"; the timeout/retry is additional scope raised by the grill-me
+question itself).
+
+**Problems encountered:** none blocking. The inability to curl the live URL directly
+was a real finding, not a blocker — pivoted to testing through local `wrangler dev`
+against the real Gemini API, which is equally valid for isolating whether the delay
+is Gemini-side/request-side vs something in our Worker code (it is not reproducibly
+either, based on today's numbers).
+
+**Left incomplete:**
+- Timeout + manual retry mechanism — recommended, not built. Needs explicit
+  go-ahead before implementing (see Grill-me answer above).
+- Root cause of the original 277s/30-280s observation remains **unconfirmed**, not
+  "fixed" — it simply didn't reproduce under today's testing conditions. If it
+  recurs, the next thing to check would be Gemini-side per-minute rate limits
+  triggering soft throttling under bursty request patterns (several rapid calls
+  were made while debugging the model-ID issue in Session 4, which is when the slow
+  calls were observed) rather than the endpoint being inherently slow.
+- Everything else from Milestone 4 (Cloudflare Pages deploy, `PAGES_ORIGIN`) still
+  pending, unchanged from Session 4's handoff.
+- Session 5's changes not yet committed — `.env.production`, `QueryPanel.tsx`, this
+  doc round. Ask before committing.
+
+**Next session should start with:**
+- Decide on the timeout+retry mechanism (or explicitly decide against it).
+- Milestone 5: Cloudflare Pages deploy for the frontend, then set `PAGES_ORIGIN` in
+  `worker/wrangler.jsonc` to the real Pages URL and redeploy the Worker.
 
 ---
 

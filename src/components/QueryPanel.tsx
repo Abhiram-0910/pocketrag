@@ -34,6 +34,7 @@ async function requestAnswer(question: string, chunks: ScoredChunk<ChunkRecord>[
 export function QueryPanel() {
   const [query, setQuery] = useState('')
   const [busy, setBusy] = useState(false)
+  const [awaitingAnswer, setAwaitingAnswer] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [results, setResults] = useState<ScoredChunk<ChunkRecord>[] | null>(null)
   const [answer, setAnswer] = useState<string | null>(null)
@@ -67,6 +68,7 @@ export function QueryPanel() {
               const ranked = rankChunks(msg.embedding, chunks, TOP_K)
               setResults(ranked)
 
+              setAwaitingAnswer(true)
               try {
                 const { answer: text, groundingWarning: warning } = await requestAnswer(question, ranked)
                 setAnswer(text)
@@ -74,6 +76,8 @@ export function QueryPanel() {
               } catch (err) {
                 const reason = err instanceof Error ? err.message : 'unknown error'
                 setAnswerError(`Answer generation failed (${reason}) — showing raw matched passages below.`)
+              } finally {
+                setAwaitingAnswer(false)
               }
             })
             .catch((err) => setError(err instanceof Error ? err.message : 'Failed to retrieve chunks.'))
@@ -109,6 +113,13 @@ export function QueryPanel() {
       </form>
 
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+
+      {awaitingAnswer && (
+        <p className="mt-4 text-sm text-gray-500">
+          Generating an answer… this usually takes a few seconds, but can occasionally take up to a few
+          minutes on the free tier. Please don't close this tab.
+        </p>
+      )}
 
       {answer && (
         <div className="mt-4 rounded border border-blue-200 bg-blue-50 p-4">

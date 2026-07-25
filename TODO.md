@@ -6,19 +6,18 @@ Read this at the start of every session to know what to work on next.
 ---
 
 ## 🔴 Current Sprint
-Milestone 4 (Worker code) complete — one manual step left: register a `workers.dev`
-subdomain (see 🐛 Known Bugs) so the already-deployed Worker gets a public URL.
+Milestone 4 complete: Worker deployed and live at
+`https://pocketrag-answer.abhiram-dev.workers.dev`, `.env.production` points at it,
+UI has an honest wait-time expectation-setter. See 🟡 Up Next for Milestone 5.
 
 ---
 
 ## 🟡 Up Next
-- [ ] After the `workers.dev` subdomain exists: put the real URL in `.env.production`
-      (`VITE_ANSWER_API_URL`)
 - [ ] Deploy the frontend (Cloudflare Pages) — then set `PAGES_ORIGIN` in
       `worker/wrangler.jsonc` to the real Pages URL and redeploy the Worker
-- [ ] UX: the Gemini call has been observed taking ~30s–280s in this environment.
-      "Searching…" on the button isn't enough — add an explicit "this can take a
-      minute" expectation-setter so it doesn't look hung.
+- [ ] Decide on the timeout+retry question from the Session 4 latency investigation
+      (see AGENTS.md) — recommended: client-side ~60s timeout with a manual retry
+      button, not a pre-warm request. Not yet implemented, needs your go-ahead.
 
 ---
 
@@ -70,14 +69,21 @@ subdomain (see 🐛 Known Bugs) so the already-deployed Worker gets a public URL
       collapsible "Sources," visible (non-silent) failure note if the Worker call
       fails — Session 4, 2026-07-25
 - [x] Worker deployed (code is live) — Session 4, 2026-07-25
+- [x] `workers.dev` subdomain registered by user; live at
+      `pocketrag-answer.abhiram-dev.workers.dev`; `.env.production` set — Session 5, 2026-07-25
+- [x] Latency investigation: direct-to-Gemini and through-Worker calls both
+      consistently under 1.5s (cold start, warm repeats, minimal and full-size
+      prompts all tested) — the earlier 277s/30-280s observation did not reproduce.
+      See AGENTS.md Session 5 for full numbers and caveats — Session 5, 2026-07-25
+- [x] Honest "this can take up to a few minutes" expectation-setter added to
+      QueryPanel, scoped to just the Gemini-wait phase (not the fast
+      embed/retrieve phase) — Session 5, 2026-07-25
 
 ---
 
 ## 🐛 Known Bugs
-- [ ] Deployed Worker has no public URL yet — this Cloudflare account has never
-      registered a `workers.dev` subdomain. `wrangler deploy` needs an interactive
-      yes/no to register one; couldn't be done non-interactively. Run
-      `cd worker && wrangler deploy` yourself to complete it (see AGENTS.md Session 4).
+(none currently tracked — see AGENTS.md Session 5 for the latency investigation's
+open questions, which aren't quite "bugs" since the issue didn't reproduce)
 
 ---
 
@@ -96,3 +102,9 @@ subdomain (see 🐛 Known Bugs) so the already-deployed Worker gets a public URL
   404 "no longer available to new users" for this project's API key. Pinned to
   `gemini-3.5-flash-lite` instead — deliberately, not via the floating
   `gemini-flash-lite-latest` alias. CLAUDE.md/ARCHITECTURE.md updated to match.
+- This dev sandbox cannot reach the live `*.workers.dev` subdomain directly (DNS
+  resolves, both IPv4/IPv6 connections fail immediately) even though the base
+  `workers.dev` domain and `generativelanguage.googleapis.com` are reachable —
+  looks like an egress allowlist gap for this specific subdomain, not a real-world
+  issue. Future sessions: test the deployed Worker through `wrangler dev` locally
+  (real Gemini calls, same code) instead of curling the live URL directly.
