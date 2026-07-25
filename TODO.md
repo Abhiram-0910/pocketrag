@@ -15,9 +15,6 @@ UI has an honest wait-time expectation-setter. See 🟡 Up Next for Milestone 5.
 ## 🟡 Up Next
 - [ ] Deploy the frontend (Cloudflare Pages) — then set `PAGES_ORIGIN` in
       `worker/wrangler.jsonc` to the real Pages URL and redeploy the Worker
-- [ ] Decide on the timeout+retry question from the Session 4 latency investigation
-      (see AGENTS.md) — recommended: client-side ~60s timeout with a manual retry
-      button, not a pre-warm request. Not yet implemented, needs your go-ahead.
 
 ---
 
@@ -78,12 +75,16 @@ UI has an honest wait-time expectation-setter. See 🟡 Up Next for Milestone 5.
 - [x] Honest "this can take up to a few minutes" expectation-setter added to
       QueryPanel, scoped to just the Gemini-wait phase (not the fast
       embed/retrieve phase) — Session 5, 2026-07-25
+- [x] Client-side ~60s timeout + manual "Try again" retry on the answer-composition
+      request. Retry reuses the in-memory ranked chunks (no re-embed). A second
+      timeout on retry falls back to the standard hard-failure note. Pure timeout
+      logic (`attemptAnswer()`) unit-tested with a mocked hanging fetch + fake
+      timers — Session 5, 2026-07-25
 
 ---
 
 ## 🐛 Known Bugs
-(none currently tracked — see AGENTS.md Session 5 for the latency investigation's
-open questions, which aren't quite "bugs" since the issue didn't reproduce)
+(none currently tracked)
 
 ---
 

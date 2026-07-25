@@ -8,14 +8,15 @@ Claude reads this at the START of every new session to understand what happened 
 ## Project State
 **Last updated:** 2026-07-25
 **Current branch:** master (commits: `e8b1344` Milestone 1+2, Milestone 3 commit,
-`b224cde` Milestone 4; Session 5's changes not yet committed — see below)
-**Overall status:** Milestone 4 fully live — Worker deployed at
+`b224cde` Milestone 4; Session 5's changes committed separately — see below)
+**Overall status:** Milestone 4 fully live and hardened — Worker deployed at
 `https://pocketrag-answer.abhiram-dev.workers.dev`, `.env.production` points at it.
 Drag/drop a PDF, ask a real question, get a real Gemini-composed answer with correct
 page citations, raw ranked chunks visible underneath as sources. Session 5
-investigated a latency concern (see below) and added an honest wait-time UI note. No
-restore-on-reload UI
-(deliberate, Session 3) and no frontend deploy yet.
+investigated a latency concern (didn't reproduce under controlled testing — see
+below), added an honest wait-time UI note, and added a 60s timeout with manual retry
+as a demo-day safety net regardless of root cause. No restore-on-reload UI
+(deliberate, Session 3) and no frontend deploy yet — that's Milestone 5.
 
 ---
 
@@ -391,47 +392,48 @@ with real measured numbers, not a guess. Add an honest wait-time UI note regardl
     the free tier. Please don't close this tab." Not a fake progress bar — no signal
     exists to build one from (Gemini's `generateContent` is non-streaming).
 - [x] Frontend tests (31), typecheck, lint all still pass after the change.
+- [x] `src/lib/answerRequest.ts` — extracted `attemptAnswer()`, a pure function
+    wrapping one answer attempt in an `AbortController`-based timeout, following the
+    project's established pattern (injectable `FetchAnswerFn`, no React/DOM
+    dependency, same shape as `resolveBackend()` in Session 2). Returns a discriminated
+    `{outcome: 'success'|'timeout'|'error'}` rather than throwing, so the caller
+    doesn't need try/catch gymnastics to tell a timeout apart from a real failure.
+- [x] `answerRequest.test.ts` — 6 tests using `vi.useFakeTimers()` and a
+    `hangingFetchAnswer()` mock that mimics real `fetch()`'s abort behavior (never
+    resolves on its own, rejects with a real `DOMException('...', 'AbortError')` when
+    the signal fires): success, timeout-after-60s, no-false-positive-just-before-
+    deadline, plain error (non-timeout), and two tests specifically proving the retry
+    path works identically to the first attempt with no leftover state between calls
+    (the explicit ask: "verify the timeout actually fires and the retry path
+    re-triggers correctly").
+- [x] `QueryPanel.tsx` wired to `attemptAnswer`: first timeout shows a "This is
+    taking longer than expected" + "Try again" button (reuses the already-in-memory
+    `results` and `submittedQuestion` — retry never re-embeds the query or re-hits
+    IndexedDB); a second timeout on retry produces the same amber hard-failure note
+    as any other failure, not another retry loop. The "Generating an answer…" wait
+    message from earlier this session is unchanged for the first 60s — `timedOut`
+    only flips after the deadline, so the two messages never overlap.
+- [x] 37 frontend tests (31 + 6 new), typecheck, lint, build all pass clean.
 
-**Grill-me answer given (recorded here for the decision record):** asked whether the
-latency is inherent/unfixable, and if so whether the fallback should be a hard
-timeout+retry or a pre-warmed request fired at embed-completion. Given today's
-findings — the delay did not reproduce under controlled testing (cold start, warm
-repeats, large prompts) — the "inherent and unfixable" premise isn't supported by
-evidence collected so far. Recommendation given: **skip the pre-warm request** (it
-only helps if the same TCP/TLS connection could be reused across the warm-up and the
-real call, which isn't guaranteed across serverless Worker invocations anyway, and
-today's cold-start test showed no meaningful cold-start penalty to warm against).
-**Do add a client-side timeout with manual retry** (~60s) regardless of root cause —
-independent of whether the outlier was environmental noise or a rare Gemini-side
-slowdown, a hard timeout with a retry button is strictly better than an indefinite
-wait with no escape hatch, which is what would make a demo look broken. **Not yet
-implemented** — this is a recommendation pending the user's go-ahead, not done this
-session (scope was explicitly "investigate + report numbers" and "add the
-expectation-setter"; the timeout/retry is additional scope raised by the grill-me
-question itself).
+**Grill-me answer given earlier this session, now acted on:** recommended a ~60s
+client-side timeout with manual retry over a pre-warm request (see reasoning above,
+unchanged) — approved and implemented as described.
 
-**Problems encountered:** none blocking. The inability to curl the live URL directly
-was a real finding, not a blocker — pivoted to testing through local `wrangler dev`
-against the real Gemini API, which is equally valid for isolating whether the delay
-is Gemini-side/request-side vs something in our Worker code (it is not reproducibly
-either, based on today's numbers).
+**Problems encountered:** none. The inability to curl the live URL directly (found
+earlier this session) remained a non-issue — all new work is frontend-only and
+doesn't touch the Worker.
 
 **Left incomplete:**
-- Timeout + manual retry mechanism — recommended, not built. Needs explicit
-  go-ahead before implementing (see Grill-me answer above).
 - Root cause of the original 277s/30-280s observation remains **unconfirmed**, not
-  "fixed" — it simply didn't reproduce under today's testing conditions. If it
+  "fixed" — it simply didn't reproduce under this session's testing conditions. If it
   recurs, the next thing to check would be Gemini-side per-minute rate limits
-  triggering soft throttling under bursty request patterns (several rapid calls
-  were made while debugging the model-ID issue in Session 4, which is when the slow
-  calls were observed) rather than the endpoint being inherently slow.
-- Everything else from Milestone 4 (Cloudflare Pages deploy, `PAGES_ORIGIN`) still
-  pending, unchanged from Session 4's handoff.
-- Session 5's changes not yet committed — `.env.production`, `QueryPanel.tsx`, this
-  doc round. Ask before committing.
+  triggering soft throttling under bursty request patterns (several rapid calls were
+  made while debugging the model-ID issue in Session 4, which is when the slow calls
+  were observed) rather than the endpoint being inherently slow. The new timeout+retry
+  means this no longer blocks a demo even if unexplained — worst case, one retry click.
+- Cloudflare Pages deploy (Milestone 5) — not started, see below.
 
 **Next session should start with:**
-- Decide on the timeout+retry mechanism (or explicitly decide against it).
 - Milestone 5: Cloudflare Pages deploy for the frontend, then set `PAGES_ORIGIN` in
   `worker/wrangler.jsonc` to the real Pages URL and redeploy the Worker.
 

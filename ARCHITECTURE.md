@@ -175,8 +175,19 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
   Durable Object, if exact accounting is ever needed.
 - **Embedding request latency observed at 30s–280s in this sandbox** (a real Gemini
   API call, not the model itself being slow to load — the model loads once and is
-  cached). The frontend's "Searching…" button state doesn't set this expectation
-  explicitly; flagged in TODO.md as a real UX gap, not fixed this session.
+  cached). A follow-up investigation (Session 5) could not reproduce this under
+  controlled testing (cold start, warm repeats, minimal and full-size prompts — all
+  consistently under 1.5s); root cause remains unconfirmed.
+- **`attemptAnswer()` (`src/lib/answerRequest.ts`) wraps one answer attempt in an
+  `AbortController`-based ~60s timeout, returning a discriminated `{outcome}` instead
+  of throwing** — mirrors `resolveBackend()`'s pattern (pure function, injectable
+  dependency, no React/DOM coupling) so the timeout logic is unit-testable with a
+  mocked hanging `fetch` and `vi.useFakeTimers()`, without rendering the component.
+  On a first timeout, `QueryPanel` shows a "Try again" button that reuses the
+  already-ranked chunks in memory — retry never re-embeds the query or re-reads
+  IndexedDB. A second timeout on retry falls back to the same visible hard-failure
+  note as any other failure, not another retry loop (deliberately: one friendly
+  retry, then treat it like any other failure).
 
 ---
 
@@ -210,11 +221,11 @@ instead, which makes the same real Gemini calls.
       Decisions above. Schema supports it; UI doesn't exist yet.
 - [ ] `checkGrounding()` only catches citation-level inconsistency, not content-level
       hallucination against a correctly-cited page — see Key Architectural Decisions.
-- [ ] The answer-generation call has no client-side timeout or retry. Session 4 saw a
-      one-time 30s-280s latency outlier that Session 5 could not reproduce (four
-      separate timed tests, all under 1.5s — see AGENTS.md Session 5). Root cause
-      unconfirmed. Recommended fix (not yet built, pending go-ahead): a ~60s
-      client-side timeout with a manual retry button, not a pre-warm request.
+- [ ] Root cause of Session 4's one-time 30s-280s latency outlier remains unconfirmed
+      — Session 5 could not reproduce it (four separate timed tests, all under 1.5s).
+      A 60s client-side timeout + manual retry now bounds the worst case regardless
+      (`src/lib/answerRequest.ts`), so this is no longer a demo-day risk, just an
+      open question if it recurs.
 - [ ] This dev sandbox cannot reach `*.workers.dev` subdomains directly (DNS resolves,
       connections fail on both IPv4/IPv6) even though the base `workers.dev` domain
       and `generativelanguage.googleapis.com` are reachable — an egress allowlist gap,

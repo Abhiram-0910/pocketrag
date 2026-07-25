@@ -2,41 +2,20 @@ import { useCallback, useState, type FormEvent } from 'react'
 import { embedQuery } from '../lib/embeddingClient'
 import { getChunksForDocument, type ChunkRecord } from '../lib/db'
 import { rankChunks, type ScoredChunk } from '../lib/retrieval'
+import { attemptAnswer, fetchAnswerFromWorker } from '../lib/answerRequest'
 import { useDocumentStore } from '../store/documentStore'
 
 const TOP_K = 3
-const ANSWER_API_URL = import.meta.env.VITE_ANSWER_API_URL
-
-interface AnswerResponse {
-  answer: string
-  groundingWarning: boolean
-}
-
-async function requestAnswer(question: string, chunks: ScoredChunk<ChunkRecord>[]): Promise<AnswerResponse> {
-  if (!ANSWER_API_URL) {
-    throw new Error('Answer generation is not configured yet (VITE_ANSWER_API_URL is unset).')
-  }
-  const res = await fetch(ANSWER_API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      question,
-      chunks: chunks.map(({ chunk, score }) => ({ text: chunk.text, page: chunk.page, score })),
-    }),
-  })
-  if (!res.ok) {
-    const data = (await res.json().catch(() => null)) as { error?: string } | null
-    throw new Error(data?.error ?? `Answer request failed (${res.status}).`)
-  }
-  return (await res.json()) as AnswerResponse
-}
+const ANSWER_TIMEOUT_MS = 60_000
 
 export function QueryPanel() {
   const [query, setQuery] = useState('')
   const [busy, setBusy] = useState(false)
   const [awaitingAnswer, setAwaitingAnswer] = useState(false)
+  const [timedOut, setTimedOut] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [results, setResults] = useState<ScoredChunk<ChunkRecord>[] | null>(null)
+  const [submittedQuestion, setSubmittedQuestion] = useState<string | null>(null)
   const [answer, setAnswer] = useState<string | null>(null)
   const [groundingWarning, setGroundingWarning] = useState(false)
   const [answerError, setAnswerError] = useState<string | null>(null)
@@ -44,6 +23,32 @@ export function QueryPanel() {
   const status = useDocumentStore((s) => s.status)
   const documentId = useDocumentStore((s) => s.documentId)
   const canQuery = status === 'ready' && documentId != null
+
+  const runAnswerAttempt = useCallback(
+    async (question: string, chunks: ScoredChunk<ChunkRecord>[], isRetry: boolean) => {
+      setAwaitingAnswer(true)
+      setTimedOut(false)
+      if (!isRetry) setAnswerError(null)
+
+      const requestChunks = chunks.map(({ chunk, score }) => ({ text: chunk.text, page: chunk.page, score }))
+      const result = await attemptAnswer(fetchAnswerFromWorker, question, requestChunks, ANSWER_TIMEOUT_MS)
+
+      if (result.outcome === 'success') {
+        setAnswer(result.answer)
+        setGroundingWarning(result.groundingWarning)
+      } else if (result.outcome === 'timeout') {
+        if (isRetry) {
+          setAnswerError('Answer generation timed out again — showing raw matched passages below.')
+        } else {
+          setTimedOut(true)
+        }
+      } else {
+        setAnswerError(`Answer generation failed (${result.message}) — showing raw matched passages below.`)
+      }
+      setAwaitingAnswer(false)
+    },
+    [],
+  )
 
   const handleSubmit = useCallback(
     (e: FormEvent) => {
@@ -54,8 +59,10 @@ export function QueryPanel() {
       setBusy(true)
       setError(null)
       setResults(null)
+      setSubmittedQuestion(question)
       setAnswer(null)
       setAnswerError(null)
+      setTimedOut(false)
       setGroundingWarning(false)
 
       embedQuery(question, {
@@ -67,18 +74,7 @@ export function QueryPanel() {
             .then(async (chunks) => {
               const ranked = rankChunks(msg.embedding, chunks, TOP_K)
               setResults(ranked)
-
-              setAwaitingAnswer(true)
-              try {
-                const { answer: text, groundingWarning: warning } = await requestAnswer(question, ranked)
-                setAnswer(text)
-                setGroundingWarning(warning)
-              } catch (err) {
-                const reason = err instanceof Error ? err.message : 'unknown error'
-                setAnswerError(`Answer generation failed (${reason}) — showing raw matched passages below.`)
-              } finally {
-                setAwaitingAnswer(false)
-              }
+              await runAnswerAttempt(question, ranked, false)
             })
             .catch((err) => setError(err instanceof Error ? err.message : 'Failed to retrieve chunks.'))
             .finally(() => setBusy(false))
@@ -89,8 +85,14 @@ export function QueryPanel() {
         },
       })
     },
-    [canQuery, documentId, query, busy],
+    [canQuery, documentId, query, busy, runAnswerAttempt],
   )
+
+  const handleRetry = useCallback(() => {
+    if (!submittedQuestion || !results) return
+    setBusy(true)
+    runAnswerAttempt(submittedQuestion, results, true).finally(() => setBusy(false))
+  }, [submittedQuestion, results, runAnswerAttempt])
 
   return (
     <div className="mt-8 text-left">
@@ -114,11 +116,24 @@ export function QueryPanel() {
 
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
 
-      {awaitingAnswer && (
+      {awaitingAnswer && !timedOut && (
         <p className="mt-4 text-sm text-gray-500">
           Generating an answer… this usually takes a few seconds, but can occasionally take up to a few
           minutes on the free tier. Please don't close this tab.
         </p>
+      )}
+
+      {timedOut && (
+        <div className="mt-4 rounded border border-amber-200 bg-amber-50 p-4">
+          <p className="text-sm text-amber-800">This is taking longer than expected.</p>
+          <button
+            type="button"
+            onClick={handleRetry}
+            className="mt-2 rounded bg-amber-600 px-3 py-1.5 text-sm text-white"
+          >
+            Try again
+          </button>
+        </div>
       )}
 
       {answer && (
