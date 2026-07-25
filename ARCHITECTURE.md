@@ -14,7 +14,7 @@ Keep this updated as the project evolves.
 | PDF parsing | pdf.js | Runs entirely client-side via WASM, no server upload |
 | Embeddings | `@huggingface/transformers` (Xenova/all-MiniLM-L6-v2, q8) | Runs in-browser via WebGPU/WASM in a Worker, keeps documents local. Not `@xenova/transformers` — that package is deprecated and pulled in a critical protobufjs RCE via its bundled onnxruntime-web; `@huggingface/transformers` is the maintained successor, same API, same model IDs |
 | Storage | IndexedDB (via `idb`) | Persistent client-side storage for documents/chunks/vectors |
-| Answer composition | Cloudflare Worker (TS) + Gemini 2.5 Flash-Lite | Only network hop; sees retrieved snippets + question, never the source file — not yet built (Milestone 4) |
+| Answer composition | Cloudflare Worker (TS) + Gemini 3.5 Flash-Lite | Only network hop; sees retrieved snippets + question, never the source file. Model pinned to 3.5 — `gemini-2.5-flash-lite` (originally specified) 404s as "no longer available to new users" for this project's API key |
 
 ---
 
@@ -27,7 +27,9 @@ pocketrag/
 │   │                         # db.ts, embeddingClient.ts
 │   ├── store/               # documentStore.ts (Zustand)
 │   └── workers/             # embedding.worker.ts, backend.ts, embedding.types.ts
-├── worker/                  # Cloudflare Worker (answer composition, separate deploy) — not started
+├── worker/                  # Cloudflare Worker — separate npm project, separate deploy
+│   └── src/                 # index.ts, validate.ts, prompt.ts, grounding.ts,
+│                             # rateLimit.ts, cors.ts, gemini.ts
 ├── CLAUDE.md
 ├── AGENTS.md
 ├── ARCHITECTURE.md
@@ -48,6 +50,13 @@ pocketrag/
 | `src/workers/embedding.worker.ts` | Loads tokenizer + model, chunks each page, embeds, and separately embeds single query strings — all model logic lives here, never on the main thread |
 | `src/workers/backend.ts` | `resolveBackend()` — pure, worker-independent WebGPU/WASM detection and fallback logic, unit-tested without a browser |
 | `src/store/documentStore.ts` | Zustand store: documentId, fileName, chunks (with embeddings), status, backend state, progress |
+| `src/components/QueryPanel.tsx` | Query input → embed → rank from IndexedDB → POST to the Worker → composed answer as primary result, raw ranked chunks as collapsible "Sources," visible failure note (not silent fallback) if the Worker call fails |
+| `worker/src/index.ts` | `POST /answer` handler: CORS → rate limit → validate → build prompt → call Gemini → groundedness check → JSON response |
+| `worker/src/validate.ts` | Caps chunk count (5) and per-chunk text length (2000 chars) server-side — never trusts the client |
+| `worker/src/prompt.ts` | Grounded-QA prompt: answer only from passages, cite pages, admit gaps |
+| `worker/src/grounding.ts` | `checkGrounding()` — citation-level groundedness heuristic (see Key Architectural Decisions) |
+| `worker/src/rateLimit.ts` | KV counter-per-IP-per-day, 50/day default |
+| `worker/src/gemini.ts` | Thin, injectable-`fetch` wrapper around Gemini's `generateContent` endpoint |
 
 ---
 
@@ -66,8 +75,18 @@ and persists Document + Chunk records (with embeddings) to IndexedDB.
 stored chunks back out of IndexedDB (`getChunksForDocument`) → `rankChunks()` cosine-
 ranks them → top 3 rendered with page number and real score.
 
-**Not yet built (Milestone 4):** no LLM-generated answer — the query UI shows raw
-ranked chunks, not a composed response. Cloudflare Worker + Gemini call is next.
+**Answer composition:** ranked top-3 chunks (text, page, score) POSTed to the
+Cloudflare Worker's `/answer` endpoint → Worker rate-limits by `CF-Connecting-IP` (KV,
+50/day) → validates and caps the input → builds a grounded-QA prompt → calls Gemini
+3.5 Flash-Lite → runs a citation-level groundedness check on the response → returns
+`{ answer, groundingWarning }` → frontend shows the answer as the primary result, with
+a caveat banner if `groundingWarning` is true, and the raw ranked chunks underneath as
+a collapsible "Sources" section. If the Worker call fails for any reason, the frontend
+falls back to just the raw ranked chunks with a **visible** failure note — never a
+silent swap.
+
+**Not yet built:** frontend deploy (Cloudflare Pages), so `PAGES_ORIGIN` CORS config
+and `.env.production`'s `VITE_ANSWER_API_URL` are both still placeholders.
 
 Note: chunking happens **inside the embedding Worker**, not on the main thread as
 Milestone 1's diagram had it — the real tokenizer is model logic (CLAUDE.md: "All
@@ -120,13 +139,58 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
 - **No restore-on-reload:** confirmed with the user rather than guessed. Dropping a
   file again after a reload is required for now; the `documentId` foreign key already
   supports multi-document / restore UI later without a schema migration.
+- **Gemini model pinned to `gemini-3.5-flash-lite`, not the floating
+  `gemini-flash-lite-latest` alias:** the spec named `gemini-2.5-flash-lite`, which
+  404s ("no longer available to new users") for this project's API key. Confirmed via
+  the live models list and direct test calls before swapping — not guessed. Pinning to
+  an explicit version means the model only changes when someone deliberately updates
+  `MODEL_ID` in `worker/src/gemini.ts`, not silently when Google repoints "latest."
+- **`worker/` is a fully separate npm project** (own `package.json`, `tsconfig.json`,
+  `node_modules`), not part of the frontend's Vite/Vitest setup — it has a different
+  runtime (Workers, not a browser), different ambient types
+  (`@cloudflare/workers-types`, generated `Env` via `wrangler types`), and a genuinely
+  separate deploy target.
+- **Worker tests use plain Vitest with mocked KV and mocked `fetch`, not
+  `@cloudflare/vitest-pool-workers`:** the user explicitly wanted the test suite
+  runnable without a live Gemini call or a full Workers runtime. All Worker logic
+  (`validate.ts`, `prompt.ts`, `grounding.ts`, `rateLimit.ts`, `gemini.ts`) is written
+  as pure functions taking injected dependencies (a `KVLike` interface, an injectable
+  `fetchImpl`) specifically to make this possible.
+- **Citation-level groundedness check (`checkGrounding`), not semantic verification:**
+  from the Milestone 4 grill-me discussion — flags an answer if it cites a page number
+  that wasn't in the input passages, or cites nothing at all without an explicit
+  "not in the passages" disclaimer. Does not catch a real page being cited with
+  content that isn't actually there — that needs a second verification LLM call or
+  human review, deliberately not built (would double Gemini usage against the free
+  quota this rate limiter exists to protect). Documented as a known limitation, not
+  silently absent.
+- **Chunk count/text length capped server-side, not just validated:** the Worker
+  truncates to 5 chunks / 2000 chars each rather than rejecting an oversized request —
+  the honest client only ever sends 3 short chunks, so this is purely an abuse/bug
+  guard, not a user-facing validation error.
+- **Rate limiter is a KV counter with `expirationTtl`, not exact:** `ponytail:`-marked
+  in `rateLimit.ts` — KV `get` then `put` isn't atomic, so concurrent requests from the
+  same IP in the same instant could both read the same count. Acceptable for abuse
+  protection (soft cap), not for exact billing-grade accounting. Upgrade path: a
+  Durable Object, if exact accounting is ever needed.
+- **Embedding request latency observed at 30s–280s in this sandbox** (a real Gemini
+  API call, not the model itself being slow to load — the model loads once and is
+  cached). The frontend's "Searching…" button state doesn't set this expectation
+  explicitly; flagged in TODO.md as a real UX gap, not fixed this session.
 
 ---
 
 ## Environment Variables Required
 ```bash
-# Cloudflare Worker (worker/.env or wrangler secrets) — not needed until Milestone 4
+# Frontend (repo root)
+# .env.development (committed): VITE_ANSWER_API_URL=http://localhost:8787/answer
+# .env.production (not yet created): VITE_ANSWER_API_URL=<deployed Worker URL>/answer
+
+# worker/.dev.vars (gitignored, local dev only — see worker/.dev.vars.example)
 GEMINI_API_KEY=
+
+# Deployed Worker secret (never in a file):
+#   cd worker && wrangler secret put GEMINI_API_KEY
 ```
 
 ---
@@ -139,3 +203,12 @@ GEMINI_API_KEY=
       sandbox has no GPU) — re-verify when real hardware is available.
 - [ ] No restore-on-reload UI (deliberate, confirmed with user) — see Key Architectural
       Decisions above. Schema supports it; UI doesn't exist yet.
+- [ ] `checkGrounding()` only catches citation-level inconsistency, not content-level
+      hallucination against a correctly-cited page — see Key Architectural Decisions.
+- [ ] Deployed Worker has no public URL yet — the Cloudflare account has never
+      registered a `workers.dev` subdomain. Code is deployed and correct (verified via
+      `wrangler dev` + real browser); publishing needs one interactive confirmation
+      only the user can give (`cd worker && wrangler deploy`, say yes to the subdomain
+      prompt). See AGENTS.md Session 4.
+- [ ] `PAGES_ORIGIN` in `worker/wrangler.jsonc` is still an empty placeholder — set it
+      once the frontend is deployed to Cloudflare Pages.

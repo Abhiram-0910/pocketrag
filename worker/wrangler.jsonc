@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pocketrag-answer",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-25",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "kv_namespaces": [
+    { "binding": "RATE_LIMIT_KV", "id": "dbb361aa6f4b4f15ba99d657377bf85c" }
+  ],
+  "vars": {
+    // Allowed CORS origin for the deployed frontend — update once the Pages
+    // site has a real URL. localhost is allowed in code regardless of this value.
+    "PAGES_ORIGIN": ""
+  }
+}

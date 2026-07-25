@@ -5,9 +5,11 @@
 documents never leave the browser except the few retrieved snippets sent for final
 answer composition.
 **Stack:** React + Vite + TypeScript + Tailwind + Zustand, pdf.js, transformers.js,
-IndexedDB, Cloudflare Worker + Gemini 2.5 Flash-Lite
-**Current phase:** MVP — Milestone 1 (ingestion pipeline)
-**Primary goal this sprint:** Drag a PDF in, extract + chunk its text, show chunks in UI
+IndexedDB, Cloudflare Worker + Gemini 3.5 Flash-Lite (`gemini-2.5-flash-lite` is no
+longer available to new API keys — pinned to 3.5 instead, see ARCHITECTURE.md)
+**Current phase:** MVP — Milestone 4 (answer composition) done; one manual step left
+(registering a `workers.dev` subdomain) before the Worker has a public URL
+**Primary goal this sprint:** Milestone 5 TBD — likely frontend deploy (Cloudflare Pages)
 
 ---
 
@@ -70,6 +72,8 @@ Before starting any new feature, ask these questions:
 ---
 
 ## Testing Requirements
-- Vitest for chunking/retrieval logic unit tests
-- Manual checklist for the browser pipeline until Playwright is added (stretch)
-- Run: `npm run test`
+- Vitest for chunking/retrieval/storage/Worker logic unit tests (frontend: `npm run test`
+  at repo root; Worker: `npm run test` inside `worker/`)
+- Worker tests mock KV and `fetch` — no live Gemini call or Wrangler runtime required
+- Playwright is used for one-off real-browser verification each session (installed,
+  used, then uninstalled — not a standing dependency; see AGENTS.md session logs)

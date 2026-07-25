@@ -7,12 +7,15 @@ Claude reads this at the START of every new session to understand what happened 
 
 ## Project State
 **Last updated:** 2026-07-25
-**Current branch:** master (git initialized Session 3; first commit `e8b1344` covers
-Milestone 1+2, second commit covers Milestone 3 — see below)
-**Overall status:** Milestone 3 (storage + retrieval) done — drag/drop a PDF, extract
-per-page text, chunk + embed in a Web Worker, persist chunks/embeddings to IndexedDB,
-type a real question, get real cosine-ranked top-3 chunks with page numbers and scores.
-No LLM-generated answer yet (Milestone 4) and no restore-on-reload UI (deliberate).
+**Current branch:** master (git initialized Session 3; commits: `e8b1344` Milestone
+1+2, Milestone 3 commit, Session 4 not yet committed — see below)
+**Overall status:** Milestone 4 (answer composition) code-complete and verified with a
+real Gemini call end-to-end — drag/drop a PDF, ask a real question, get a real
+Gemini-composed answer with correct page citations, raw ranked chunks visible
+underneath as sources. Worker code is deployed to Cloudflare but has **no public URL
+yet** — the account has never registered a `workers.dev` subdomain, and that step
+needs one interactive confirmation only the user can give. No restore-on-reload UI
+(deliberate, Session 3) and no frontend deploy yet.
 
 ---
 
@@ -233,6 +236,121 @@ against stored embeddings.
   Flash-Lite — send the top-K retrieved chunks + question, get back a real generated
   answer with citations, wire it into the UI in place of (or alongside) the raw
   ranked-chunks display. Per TODO.md's "Up Next" section.
+
+---
+
+### Session 4 — 2026-07-25
+**Goal:** Cloudflare Worker answer-composition endpoint: real Gemini call, grounded-QA
+prompt, KV rate limiting, CORS, wired into QueryPanel with composed answer as the
+primary result and raw ranked chunks as a fallback/sources view.
+
+**Environment check (before writing code, as instructed):** Wrangler was authenticated
+(`dvabhiram2005@gmail.com`, account `da55acd99cee5a43df7d397dd80af4e3`); `GEMINI_API_KEY`
+was not set anywhere in this environment. Reported both clearly and got explicit "Go —
+build everything you can without the key first" before touching code.
+
+**Grill-me answer given before starting:** asked how we'd notice a hallucinated-but-
+plausible answer despite the prompt. Answer: we wouldn't, by default — added a real
+(if limited) check: `checkGrounding()` flags an answer if it cites a page number not
+in the input passages, or cites nothing without an explicit "not in the passages"
+disclaimer. Documented what it does *not* catch (content misattributed to a real,
+correctly-cited page) as a known limitation rather than pretending full coverage.
+
+**Completed:**
+- [x] `worker/` — standalone npm project, own `package.json`/`tsconfig.json`/
+      `vitest.config.ts`, `wrangler.jsonc` (name `pocketrag-answer`, `nodejs_compat`,
+      observability enabled)
+- [x] Created the real `RATE_LIMIT_KV` KV namespace via `wrangler kv namespace create`
+      (needed no Gemini key) and ran `wrangler types` to generate `Env` — never
+      hand-wrote the binding interface, per workers-best-practices guidance
+- [x] `worker/.dev.vars` (placeholder, gitignored) + `.dev.vars.example` (committed)
+      created so `wrangler types` would pick up `GEMINI_API_KEY: string` in `Env`
+      before the real key existed
+- [x] Verified the exact Gemini `generateContent` REST contract (endpoint, body,
+      response shape) via the official docs before writing `gemini.ts` — did not
+      trust pre-trained knowledge of an external API contract
+- [x] `worker/src/validate.ts` — caps chunks to 5 and chunk text to 2000 chars
+      server-side (truncates, doesn't reject — the honest client only ever sends 3
+      short chunks, this is an abuse guard)
+- [x] `worker/src/prompt.ts`, `grounding.ts`, `rateLimit.ts` (KV counter + TTL,
+      `ponytail:`-marked as a soft/non-atomic cap), `cors.ts` (localhost always
+      allowed, production origin via `PAGES_ORIGIN` var), `gemini.ts` (injectable
+      `fetchImpl` for testing) — all pure functions per the user's explicit testing
+      requirement
+- [x] `worker/src/index.ts` — `POST /answer` handler wiring all of the above,
+      `satisfies ExportedHandler<Env>`
+- [x] 40 Worker unit tests (mocked `KVLike`, mocked `fetch`, real `Request`/`Response`
+      Web APIs in plain Node — no `@cloudflare/vitest-pool-workers`, per the user's
+      explicit "don't require a live Gemini call or full Wrangler runtime" instruction)
+- [x] `QueryPanel.tsx` rewritten: composed answer as primary result (with a caveat
+      banner when `groundingWarning` is true), raw ranked chunks as a native
+      `<details>` "Sources" section (collapsed when there's an answer, open when
+      there isn't), visible amber failure note — not a silent fallback — when the
+      Worker call fails
+- [x] `.env.development` (`VITE_ANSWER_API_URL=http://localhost:8787/answer`),
+      `src/vite-env.d.ts` for the `ImportMetaEnv` augmentation
+- [x] User set the secret (`wrangler secret put GEMINI_API_KEY`, run from the wrong
+      directory once — needs to be run from `worker/`, told them so) and created
+      `worker/.dev.vars` locally
+- [x] Live verification: `wrangler dev` + Vite dev together, direct `curl` to the
+      Worker first (faster feedback than a full browser round-trip), then a full
+      Playwright-driven browser run — dropped the topic-diverse test PDF, asked "How
+      does a cell produce energy?", got a real Gemini-composed answer citing page 1
+      correctly, `groundingWarning: false`, zero console errors. Screenshot inspected:
+      answer shown as primary result, "Sources (3)" collapsed underneath, matches the
+      design exactly.
+- [x] 71 total tests (31 frontend + 40 Worker), both typecheck clean, both lint clean
+      (frontend), both build clean. Playwright installed and removed again after
+      verification; confirmed no leftover.
+
+**Decisions made / problems encountered (the two are the same list this session):**
+- **`gemini-2.5-flash-lite` (the model named in the original spec) is dead for this
+  key.** First real Worker call returned `404: This model ... is no longer available
+  to new users`. Verified this wasn't transient (tested twice), then queried the live
+  models list with the real key to find what's actually available. Found
+  `gemini-flash-lite-latest` works but silently resolves to `gemini-3.5-flash-lite`
+  under the hood — a moving target, not a pin. Stopped and asked the user rather than
+  picking one myself; they chose to pin explicitly to `gemini-3.5-flash-lite`. Updated
+  `gemini.ts`, `gemini.test.ts`, `CLAUDE.md`, `ARCHITECTURE.md` to match.
+- **`wrangler secret put` implicitly deployed the Worker** — before I'd fixed the model
+  ID. Caught this by running `wrangler deployments list` after the fact (habit: verify,
+  don't assume) and found the live deployment predated the fix. Redeployed with
+  `wrangler deploy` after fixing the model.
+- **`wrangler deploy` then failed**: this Cloudflare account has never registered a
+  `workers.dev` subdomain, and registering one requires an interactive yes/no that
+  can't be given non-interactively. The Worker code itself uploaded successfully
+  (confirmed via the deploy output) — it's just not reachable at a public URL yet.
+  Told the user clearly; left `cd worker && wrangler deploy` (say yes to the subdomain
+  prompt) as their action item. This does not block anything else — local
+  `wrangler dev` fully proved the code is correct.
+- **Gemini call latency: 30s–280s observed in this sandbox**, not model-load time (the
+  model loads once). The frontend's "Searching…" state doesn't set this expectation —
+  a real UX gap, flagged in TODO.md, not fixed this session (out of scope, not asked).
+- **Two `tsc` friction points fixed, both worth remembering:** (1) a `vars` value
+  left as `""` in `wrangler.jsonc` gets inferred as the *literal* type `""`, not
+  `string` — test code needed a local `TestEnv` widening type, not a change to the
+  real `Env`. (2) A locally-constructed `new Request(...)` doesn't structurally match
+  the ambient `IncomingRequestCfProperties`-typed `Request` that `ExportedHandler`
+  expects (missing edge-only `cf` fields the handler never reads) — needed one
+  documented cast helper (`asIncoming`) in test code only, never in `index.ts` itself.
+- **Only 2 of the 3 backend states get exercised by anything live this session** (see
+  Session 2's note) — unchanged, not revisited.
+
+**Left incomplete:**
+- `wrangler deploy`'s interactive subdomain registration (user's action item, see above).
+- Once that URL exists: `.env.production`'s `VITE_ANSWER_API_URL`, and `PAGES_ORIGIN`
+  in `worker/wrangler.jsonc`, both still placeholders.
+- Frontend not yet deployed to Cloudflare Pages at all — out of this milestone's scope.
+- Session 4's changes are **not yet committed** — 596+ lines across `worker/`,
+  `QueryPanel.tsx`, `.env.development`, `vite-env.d.ts`, plus the `CLAUDE.md`/
+  `ARCHITECTURE.md`/`TODO.md` doc updates. Ask before committing, per this project's
+  standing git rule.
+
+**Next session should start with:**
+- Confirm the `workers.dev` subdomain got registered and grab the real Worker URL.
+- Milestone 5 (likely): Cloudflare Pages deploy for the frontend, then wire
+  `VITE_ANSWER_API_URL` / `PAGES_ORIGIN` to the real URLs and redeploy the Worker once
+  more with the correct CORS origin.
 
 ---
 
