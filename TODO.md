@@ -6,23 +6,26 @@ Read this at the start of every session to know what to work on next.
 ---
 
 ## 🔴 Current Sprint
-Milestone 2 complete — see 🟡 Up Next for Milestone 3.
+Milestone 3 complete — see 🟡 Up Next for Milestone 4.
 
 ---
 
 ## 🟡 Up Next
-- [ ] IndexedDB storage layer (Document/Chunk/embedding schema, via `idb`) — hold
-      embeddings across reloads instead of only in-memory
-- [ ] Cosine similarity retrieval over stored embeddings
+- [ ] Cloudflare Worker answer-composition endpoint + Gemini 2.5 Flash-Lite call —
+      send retrieved top-K chunks + question, get a real generated answer with citations
+- [ ] Wire the answer into the UI (replace/augment the raw ranked-chunks display)
 
 ---
 
 ## 🟢 Backlog
-- [ ] Cloudflare Worker answer-composition endpoint + Gemini call
 - [ ] Rate limiting (Cloudflare KV)
 - [ ] Citations UI, landing page, styling pass
 - [ ] Code-split `embedding.worker.ts` / onnxruntime-web WASM (currently a 23MB
       asset bundled eagerly) — only matters once this ships past local dev
+- [ ] Restore-most-recent-document-on-load UI (explicitly deferred in Milestone 3 —
+      re-dropping the file is required for now; schema already supports it via
+      `documentId`, no migration needed when this gets built)
+- [ ] Multi-document UI (list/switch between stored documents) — same reasoning as above
 
 ---
 
@@ -39,6 +42,16 @@ Milestone 2 complete — see 🟡 Up Next for Milestone 3.
       tokenizer (Milestone-1 `ponytail:` debt resolved) — Session 2, 2026-07-24
 - [x] In-memory embeddings for current document + vector-dimension/similarity proof
       in UI — Session 2, 2026-07-24
+- [x] git init, .gitignore, first commit (Milestone 1+2) — Session 3, 2026-07-25
+- [x] Per-page text extraction (pdf.js) so every chunk has an unambiguous page number
+      — Session 3, 2026-07-25
+- [x] IndexedDB storage layer (`idb`): Document + Chunk stores, `documentId` index,
+      tested with `fake-indexeddb` — Session 3, 2026-07-25
+- [x] Chunks + embeddings persisted to IndexedDB after each document embed —
+      Session 3, 2026-07-25
+- [x] Query UI: embed query text through the same Worker/model, cosine-rank against
+      stored chunk embeddings pulled from IndexedDB, show top-3 with page + real
+      score — Session 3, 2026-07-25
 
 ---
 
@@ -53,3 +66,8 @@ Milestone 2 complete — see 🟡 Up Next for Milestone 3.
   `webgpu` and `wasm-failed` states are covered by exhaustive unit tests with a
   mocked GPU/pipeline instead of a live browser run. Re-verify against real WebGPU
   hardware when available.
+- Milestone 3 deliberately does not restore documents from IndexedDB on page load —
+  re-dropping the file is required. Confirmed with the user (2026-07-24 session) to
+  avoid guessing at multi-document UX before it's actually decided. Schema already
+  supports it (`documentId` foreign key) so this is a UI-only addition later, not a
+  migration.

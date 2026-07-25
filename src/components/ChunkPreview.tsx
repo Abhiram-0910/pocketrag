@@ -25,7 +25,7 @@ export function ChunkPreview() {
             className="rounded border border-gray-200 p-3 text-sm text-gray-700"
           >
             <p className="mb-1 text-xs tracking-wide text-gray-400 uppercase">
-              Chunk {chunk.index} · {chunk.tokenCount} tokens
+              Chunk {chunk.index} · page {chunk.page} · {chunk.tokenCount} tokens
             </p>
             {chunk.text}
           </li>

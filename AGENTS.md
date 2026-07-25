@@ -6,12 +6,13 @@ Claude reads this at the START of every new session to understand what happened 
 ---
 
 ## Project State
-**Last updated:** 2026-07-24
-**Current branch:** (no git repo initialized yet)
-**Overall status:** Milestone 2 (embedding pipeline) done — drag/drop a PDF, extract text,
-chunk it with real per-atom token counts, embed every chunk in a Web Worker (WebGPU/WASM),
-see backend badge + model download progress + vector dimension + sample similarity in the
-UI. Embeddings are in-memory only — no IndexedDB, no retrieval, no chat yet.
+**Last updated:** 2026-07-25
+**Current branch:** master (git initialized Session 3; first commit `e8b1344` covers
+Milestone 1+2, second commit covers Milestone 3 — see below)
+**Overall status:** Milestone 3 (storage + retrieval) done — drag/drop a PDF, extract
+per-page text, chunk + embed in a Web Worker, persist chunks/embeddings to IndexedDB,
+type a real question, get real cosine-ranked top-3 chunks with page numbers and scores.
+No LLM-generated answer yet (Milestone 4) and no restore-on-reload UI (deliberate).
 
 ---
 
@@ -148,6 +149,90 @@ WebGPU hardware before trusting those two states in production.
 - Milestone 3: IndexedDB storage layer (Document/Chunk/embedding schema via `idb`) so
   documents and embeddings survive a reload, then cosine-similarity retrieval over stored
   vectors. Per TODO.md's "Up Next" section.
+
+---
+
+### Session 3 — 2026-07-25
+**Goal:** Git init + first commit (housekeeping), then Milestone 3: per-page text
+extraction, IndexedDB persistence, and a query UI doing real cosine-ranked retrieval
+against stored embeddings.
+
+**Completed:**
+- [x] `git init`, confirmed `.gitignore` already covered `node_modules`/`dist` from the
+      Milestone 1 scaffold, first commit `e8b1344` (Milestone 1+2, 32 files)
+- [x] `src/lib/pdf.ts` — `extractPdfText()` now returns `PageText[]` (one entry per PDF
+      page) instead of one joined string
+- [x] `src/workers/embedding.types.ts` / `embedding.worker.ts` — chunking moved to
+      per-page (each page chunked independently via the existing `chunkText()`, then
+      globally reindexed and tagged with `page`), so a chunk can never span a page
+      boundary and page attribution needed no offset-to-page lookup. Added `embed-query`
+      request / `query-embedding` response for embedding a single string with no chunking
+- [x] Verified `idb` + `fake-indexeddb` API empirically (probe script, deleted after use)
+      before writing `db.ts` — confirmed `getAllFromIndex`, transaction `put`/`done`,
+      index-scoped queries all behave as expected
+- [x] `src/lib/db.ts` — `documents` + `chunks` IndexedDB object stores via `idb`,
+      `documentId` index on chunks, `saveDocument()` / `getChunksForDocument()`. 4 tests
+      using `fake-indexeddb/auto` in Node (save+retrieve, cross-document scoping,
+      embedding/page fidelity, empty-result case)
+- [x] `src/lib/retrieval.ts` — `rankChunks()`, pure cosine-ranking generic over any
+      `{embedding}` shape. 5 tests (known-similar vs. known-different ranking, exact
+      identical/opposite-vector scores, topK default and override, empty input, object
+      identity preserved)
+- [x] `src/components/DropZone.tsx` — after the Worker's `result` message, generates a
+      `documentId` (`crypto.randomUUID()`), maps `EmbeddedChunk[]` to `ChunkRecord[]`,
+      calls `saveDocument()` before marking the document ready
+- [x] `src/components/QueryPanel.tsx` (new) + `embedQuery()` in `embeddingClient.ts` —
+      text input, disabled until a document is ready, embeds the query through the same
+      Worker/model, pulls that document's chunks back out of IndexedDB, ranks, shows
+      top 3 with page number and real score
+- [x] `ChunkPreview.tsx` now shows each chunk's page number too
+- [x] Verified end-to-end in real headless Chromium (Playwright, installed then removed
+      again): dropped the topic-diverse test PDF, asked "How does a cell produce
+      energy?" — top result was the mitochondrion/ATP chunk, page 1, score 0.578. Asked
+      "What technique gives bread its chewy texture?" — top result was the exact
+      kneading/gluten sentence, page 2, score 0.490. Zero console errors, both screenshots
+      inspected visually.
+- [x] 31/31 tests, `tsc -b --noEmit`, `oxlint`, `npm run build` all pass clean
+- [x] Playwright uninstalled again after verification; confirmed no leftover in
+      `package.json`/lockfile
+
+**Decisions made:**
+- **No restore-on-reload UI this milestone** — asked the user directly rather than
+  guessing (grill-me question from the milestone spec). Re-dropping the file is
+  required after a page reload; IndexedDB still persists everything correctly
+  underneath, but there's no "recent documents" view yet. Reasoning: auto-restore
+  requires deciding multi-document UX (which document loads? a picker?) that Milestone
+  3 didn't otherwise need to decide. Schema (`documentId` foreign key) already supports
+  it without migration.
+- **Chunking moved to per-page** rather than chunking the whole concatenated document
+  and computing which page(s) a char range falls into. Simpler, unambiguous, and a
+  legitimate real-world RAG strategy — not a shortcut taken under time pressure.
+- **Retrieval reads chunks back from IndexedDB**, not from the in-memory Zustand array
+  that's already sitting there right after upload. Slightly more work this milestone,
+  but proves the actual persistence round-trip and is what a future reload-restore
+  UI would need anyway.
+- **IndexedDB reads/writes happen on the main thread**, not in the embedding Worker —
+  persistence isn't "model logic" under CLAUDE.md's Worker-isolation rule, and `idb`
+  doesn't need any Worker-side capability.
+
+**Problems encountered:**
+- None blocking. `npm run dev`'s dependency re-optimization (new deps: `idb`) caused
+  the same one-time reload-mid-request behavior seen in Session 2 — a plain `curl`
+  warm-up before driving with Playwright wasn't enough to trigger it (the crawler only
+  discovers `idb` once the browser actually requests the module chain that imports it),
+  so the first driven run timed out waiting for a selector that never rendered. Re-ran
+  after the reload settled and it worked normally. Documenting this pattern now: after
+  adding a new dependency, expect one wasted `npm run dev` warm-up cycle before
+  Playwright-driving it for real.
+
+**Left incomplete:**
+- Nothing from this session's scope.
+
+**Next session should start with:**
+- Milestone 4: Cloudflare Worker (TS) answer-composition endpoint calling Gemini 2.5
+  Flash-Lite — send the top-K retrieved chunks + question, get back a real generated
+  answer with citations, wire it into the UI in place of (or alongside) the raw
+  ranked-chunks display. Per TODO.md's "Up Next" section.
 
 ---
 

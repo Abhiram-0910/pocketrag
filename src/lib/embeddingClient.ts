@@ -1,4 +1,4 @@
-import type { WorkerRequest, WorkerResponse } from '../workers/embedding.types'
+import type { PageInput, WorkerRequest, WorkerResponse } from '../workers/embedding.types'
 
 let worker: Worker | null = null
 
@@ -18,7 +18,7 @@ export interface EmbedDocumentHandlers {
 }
 
 /** Reuses a single worker across documents so the model only loads once per session. */
-export function embedDocument(text: string, handlers: EmbedDocumentHandlers): void {
+export function embedDocument(pages: PageInput[], handlers: EmbedDocumentHandlers): void {
   const w = getWorker()
   w.onmessage = (event: MessageEvent<WorkerResponse>) => {
     const msg = event.data
@@ -44,8 +44,49 @@ export function embedDocument(text: string, handlers: EmbedDocumentHandlers): vo
       case 'error':
         handlers.onError(msg)
         break
+      case 'query-embedding':
+        break
     }
   }
-  const request: WorkerRequest = { type: 'embed-document', text }
+  const request: WorkerRequest = { type: 'embed-document', pages }
+  w.postMessage(request)
+}
+
+export interface EmbedQueryHandlers {
+  onBackend: (payload: Extract<WorkerResponse, { type: 'backend' }>) => void
+  onModelProgress: (payload: Extract<WorkerResponse, { type: 'model-progress' }>) => void
+  onModelReady: () => void
+  onQueryEmbedding: (payload: Extract<WorkerResponse, { type: 'query-embedding' }>) => void
+  onError: (payload: Extract<WorkerResponse, { type: 'error' }>) => void
+}
+
+/** Embeds a single query string through the same worker/model — no chunking. */
+export function embedQuery(text: string, handlers: EmbedQueryHandlers): void {
+  const w = getWorker()
+  w.onmessage = (event: MessageEvent<WorkerResponse>) => {
+    const msg = event.data
+    switch (msg.type) {
+      case 'backend':
+        handlers.onBackend(msg)
+        break
+      case 'model-progress':
+        handlers.onModelProgress(msg)
+        break
+      case 'model-ready':
+        handlers.onModelReady()
+        break
+      case 'query-embedding':
+        handlers.onQueryEmbedding(msg)
+        break
+      case 'error':
+        handlers.onError(msg)
+        break
+      case 'chunked':
+      case 'embed-progress':
+      case 'result':
+        break
+    }
+  }
+  const request: WorkerRequest = { type: 'embed-query', text }
   w.postMessage(request)
 }

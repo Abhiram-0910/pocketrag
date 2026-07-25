@@ -1,6 +1,7 @@
 import { useCallback, useState, type ChangeEvent, type DragEvent } from 'react'
 import { extractPdfText } from '../lib/pdf'
 import { embedDocument } from '../lib/embeddingClient'
+import { saveDocument, type ChunkRecord } from '../lib/db'
 import { useDocumentStore } from '../store/documentStore'
 
 export function DropZone() {
@@ -24,15 +25,32 @@ export function DropZone() {
       }
       setExtracting()
       try {
-        const text = await extractPdfText(file)
+        const pages = await extractPdfText(file)
         setLoadingModel()
-        embedDocument(text, {
+        embedDocument(pages, {
           onModelProgress: (msg) => setModelProgress(msg.percent),
           onBackend: (msg) => setBackend(msg.backend, msg.detail),
           onModelReady: () => {},
           onChunked: () => {},
           onEmbedProgress: (msg) => setEmbedProgress(msg.done, msg.total),
-          onResult: (msg) => setResult(file.name, msg.chunks),
+          onResult: (msg) => {
+            const documentId = crypto.randomUUID()
+            const chunkRecords: ChunkRecord[] = msg.chunks.map((chunk) => ({
+              id: `${documentId}:${chunk.index}`,
+              documentId,
+              index: chunk.index,
+              text: chunk.text,
+              tokenCount: chunk.tokenCount,
+              page: chunk.page,
+              embedding: chunk.embedding,
+            }))
+            saveDocument(
+              { id: documentId, fileName: file.name, uploadedAt: Date.now(), chunkCount: msg.chunks.length },
+              chunkRecords,
+            )
+              .then(() => setResult(documentId, file.name, msg.chunks))
+              .catch((err) => setError(err instanceof Error ? err.message : 'Failed to save document.'))
+          },
           onError: (msg) => setError(msg.message),
         })
       } catch (err) {

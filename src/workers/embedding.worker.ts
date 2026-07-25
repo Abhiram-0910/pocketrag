@@ -36,36 +36,63 @@ function createExtractor(device: 'webgpu' | 'wasm'): Promise<FeatureExtractionPi
 let extractorPromise: ReturnType<typeof resolveBackend<FeatureExtractionPipeline>> | null = null
 let tokenizerPromise: ReturnType<typeof AutoTokenizer.from_pretrained> | null = null
 
+async function getTokenizer(): Promise<Tokenizer> {
+  tokenizerPromise ??= AutoTokenizer.from_pretrained(MODEL_ID)
+  const hfTokenizer = await tokenizerPromise
+  return { countTokens: (text) => hfTokenizer(text, { add_special_tokens: false }).input_ids.data.length }
+}
+
+async function getExtractor(): Promise<FeatureExtractionPipeline> {
+  extractorPromise ??= resolveBackend(ctx.navigator?.gpu, createExtractor)
+  const { extractor, backend, detail } = await extractorPromise
+  post({ type: 'backend', backend, detail })
+  post({ type: 'model-ready' })
+  return extractor
+}
+
+async function embedText(extractor: FeatureExtractionPipeline, text: string): Promise<number[]> {
+  const output = await extractor([text], { pooling: 'mean', normalize: true })
+  return output.tolist()[0] as number[]
+}
+
 ctx.onmessage = async (event) => {
   const msg = event.data
-  if (msg.type !== 'embed-document') return
 
   try {
-    if (!tokenizerPromise) tokenizerPromise = AutoTokenizer.from_pretrained(MODEL_ID)
-    const hfTokenizer = await tokenizerPromise
-    const tokenizer: Tokenizer = {
-      countTokens: (text) => hfTokenizer(text, { add_special_tokens: false }).input_ids.data.length,
+    if (msg.type === 'embed-document') {
+      const tokenizer = await getTokenizer()
+
+      // Chunk each page independently: a chunk's page is then unambiguous —
+      // no chunk ever spans a page boundary.
+      const chunks: Omit<EmbeddedChunk, 'embedding'>[] = []
+      for (const { page, text } of msg.pages) {
+        for (const chunk of chunkText(text, tokenizer)) {
+          chunks.push({ ...chunk, index: chunks.length, page })
+        }
+      }
+      post({ type: 'chunked', chunkCount: chunks.length })
+
+      const extractor = await getExtractor()
+
+      const embeddedChunks: EmbeddedChunk[] = []
+      let dims = 0
+      for (const chunk of chunks) {
+        const embedding = await embedText(extractor, chunk.text)
+        dims = embedding.length
+        embeddedChunks.push({ ...chunk, embedding })
+        post({ type: 'embed-progress', done: embeddedChunks.length, total: chunks.length })
+      }
+
+      post({ type: 'result', chunks: embeddedChunks, dims })
+      return
     }
 
-    const chunks = chunkText(msg.text, tokenizer)
-    post({ type: 'chunked', chunkCount: chunks.length })
-
-    if (!extractorPromise) extractorPromise = resolveBackend(ctx.navigator?.gpu, createExtractor)
-    const { extractor, backend, detail } = await extractorPromise
-    post({ type: 'backend', backend, detail })
-    post({ type: 'model-ready' })
-
-    const embeddedChunks: EmbeddedChunk[] = []
-    let dims = 0
-    for (const chunk of chunks) {
-      const output = await extractor([chunk.text], { pooling: 'mean', normalize: true })
-      const vector = output.tolist()[0] as number[]
-      dims = vector.length
-      embeddedChunks.push({ ...chunk, embedding: vector })
-      post({ type: 'embed-progress', done: embeddedChunks.length, total: chunks.length })
+    if (msg.type === 'embed-query') {
+      const extractor = await getExtractor()
+      const embedding = await embedText(extractor, msg.text)
+      post({ type: 'query-embedding', embedding })
+      return
     }
-
-    post({ type: 'result', chunks: embeddedChunks, dims })
   } catch (err) {
     post({ type: 'error', message: err instanceof Error ? err.message : String(err) })
   }

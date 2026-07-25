@@ -13,6 +13,7 @@
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
     "@tailwindcss/vite": "^4.3.3",
+    "idb": "^8.0.3",
     "pdfjs-dist": "^6.1.200",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
@@ -24,6 +25,7 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
+    "fake-indexeddb": "^6.2.5",
     "oxlint": "^1.71.0",
     "typescript": "~6.0.2",
     "vite": "^8.1.1",
