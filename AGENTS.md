@@ -8,15 +8,15 @@ Claude reads this at the START of every new session to understand what happened 
 ## Project State
 **Last updated:** 2026-07-25
 **Current branch:** master (commits: `e8b1344` Milestone 1+2, Milestone 3 commit,
-`b224cde` Milestone 4; Session 5's changes committed separately — see below)
-**Overall status:** Milestone 4 fully live and hardened — Worker deployed at
-`https://pocketrag-answer.abhiram-dev.workers.dev`, `.env.production` points at it.
-Drag/drop a PDF, ask a real question, get a real Gemini-composed answer with correct
-page citations, raw ranked chunks visible underneath as sources. Session 5
-investigated a latency concern (didn't reproduce under controlled testing — see
-below), added an honest wait-time UI note, and added a 60s timeout with manual retry
-as a demo-day safety net regardless of root cause. No restore-on-reload UI
-(deliberate, Session 3) and no frontend deploy yet — that's Milestone 5.
+`b224cde` Milestone 4, `ebdd4d0` Milestone 4 wrap-up, `7ed0317` timeout+retry;
+Session 5's Pages-deploy changes not yet committed — see below)
+**Overall status:** MVP is feature-complete and **fully deployed in production**.
+Frontend: `https://pocketrag.pages.dev` (Cloudflare Pages). API: 
+`https://pocketrag-answer.abhiram-dev.workers.dev` (Cloudflare Worker). Verified
+live, end-to-end, against the real deployed site: drop a PDF, ask a real question,
+get a real Gemini-composed answer with correct page citations, raw ranked chunks
+visible underneath as sources, 60s timeout + manual retry as a demo-day safety net.
+No restore-on-reload UI or multi-document UI (both deliberately deferred, Session 3).
 
 ---
 
@@ -431,11 +431,89 @@ doesn't touch the Worker.
   made while debugging the model-ID issue in Session 4, which is when the slow calls
   were observed) rather than the endpoint being inherently slow. The new timeout+retry
   means this no longer blocks a demo even if unexplained — worst case, one retry click.
-- Cloudflare Pages deploy (Milestone 5) — not started, see below.
 
-**Next session should start with:**
-- Milestone 5: Cloudflare Pages deploy for the frontend, then set `PAGES_ORIGIN` in
-  `worker/wrangler.jsonc` to the real Pages URL and redeploy the Worker.
+**Continued same session — Milestone 5: Cloudflare Pages deploy.**
+
+**Goal:** Deploy the frontend to Cloudflare Pages. Before that: user flagged that
+the ~22.5MB onnxruntime-web WASM asset noted earlier as "under the limit" needed a
+real resolution, not a deferral — verify Cloudflare's actual per-file limit against
+docs, report the real headroom number, and either fix it now or justify deferring
+with real numbers. Then deploy, fix CORS (`PAGES_ORIGIN`), and verify end-to-end.
+
+**Completed:**
+- [x] Confirmed Cloudflare Pages' file size limit from actual docs (WebFetch against
+      `developers.cloudflare.com/pages/platform/limits/`, not assumed): 25 MiB per
+      asset, uniform across all plan tiers.
+- [x] Measured the real WASM file: 23,567,050 bytes = **22.47 MiB against the 25 MiB
+      limit — 2.52 MiB / 10.1% headroom.** Not "safely under" as previously stated.
+- [x] Investigated shrinking it: onnxruntime-web ships four WASM variants
+      (13/14/23/25 MiB). Traced why we get the 23MB one — `@huggingface/transformers`'s
+      browser entry imports `onnxruntime-web/webgpu`, whose published bundle
+      hardcodes the asyncify variant (needed for async interop between the WebGPU
+      backend and WASM ops in a shared bundle), not a runtime-selectable choice.
+      Decided **against** forcing a smaller variant: real risk of silently breaking
+      WebGPU support on some browsers, can't verify safely without cross-browser
+      testing this sandbox can't do. Documented as deliberately deferred, not
+      neglected — see TODO.md Backlog.
+- [x] Verified (bonus finding) that onnxruntime-web gracefully degrades to
+      single-threaded execution when `crossOriginIsolated` is false — Cloudflare
+      Pages doesn't set COOP/COEP headers by default, so the threaded WASM variant
+      still works post-deploy, just without threading. Not a blocker.
+- [x] Built `scripts/check-bundle-size.mjs`: fails `npm run build` (exit 1, clear
+      message) if any `dist/` asset exceeds 24 MiB — 1 MiB safety margin before the
+      real 25 MiB cap. Verified both directions: passes today, and correctly fails
+      when tested with a dummy 25 MiB file (removed after testing). Wired into the
+      `build` npm script.
+- [x] `npx wrangler pages deploy dist --project-name=pocketrag` — hit a delegation
+      attempt to a newer unified "Workers with static assets" model (no
+      `wrangler.jsonc` for that model existed, so it failed cleanly); wrangler itself
+      suggested `--force` to use the classic direct Pages path, which worked. Then
+      discovered the Pages project didn't exist yet (`wrangler pages project create
+      pocketrag --production-branch=main` — non-interactive, no blocker) and that a
+      branch mismatch (git branch `master` vs. configured production branch `main`)
+      caused the first deploy to land only as a Preview; fixed by redeploying with
+      `--branch=main` explicitly, confirmed via `wrangler pages deployment list` that
+      the second deploy correctly landed as Production.
+- [x] Live at `https://pocketrag.pages.dev`.
+- [x] Updated `worker/wrangler.jsonc`'s `PAGES_ORIGIN` to the real Pages URL, ran
+      `wrangler types`, `tsc --noEmit`, `vitest run` (40/40 pass), then
+      `wrangler deploy` — clean, no interactive prompt this time (subdomain already
+      registered).
+- [x] **Correction to an earlier finding:** re-tested `pocketrag-answer.abhiram-dev.workers.dev`
+      directly via curl and it now connects fine (HTTP 404 on root, as expected —
+      real connectivity, not a block). The "sandbox can't reach `*.workers.dev`"
+      conclusion from earlier this session was **DNS propagation delay for a
+      brand-new subdomain**, not a persistent egress restriction. Caught this by
+      re-checking rather than assuming the earlier finding still held — same
+      diligence habit as checking `wrangler deployments list` earlier in Session 4.
+- [x] Given real connectivity, did genuine **live production verification** instead
+      of local `wrangler dev` substitution: curled the live Worker directly first
+      (real Gemini answer, correct CORS header for `https://pocketrag.pages.dev`,
+      honest "not enough information" response to a deliberately sparse single-chunk
+      test — good sign the grounded-QA prompt isn't overreaching), then a full
+      Playwright run against `https://pocketrag.pages.dev` itself: real PDF upload,
+      real question, real Gemini-composed answer with correct page citation, zero
+      console errors. Screenshot inspected. Playwright installed then removed again.
+- [x] Full frontend suite (37 tests), typecheck, lint, build (with the new guard)
+      all pass clean.
+
+**Problems encountered (all resolved same session, listed for future reference):**
+- `wrangler pages deploy`'s auto-delegation to the newer Workers-assets model failed
+  on first run — expected/documented behavior per wrangler's own error message, not
+  a real blocker; `--force` was the tool-suggested fix, not a guess.
+- Pages project didn't pre-exist; needed explicit `wrangler pages project create`.
+- Setting `--production-branch=main` at project creation didn't match this repo's
+  actual `master` branch, causing the first deploy to silently land as a Preview
+  rather than Production — caught by checking `wrangler pages deployment list`
+  rather than assuming the deploy succeeded as intended just because the command
+  exited 0. Fixed with `--branch=main` on redeploy.
+
+**Left incomplete:** nothing from this session's scope. MVP is feature-complete and
+fully deployed end-to-end, verified live.
+
+**Next session should start with:** no queued task — ask the user what's next
+(styling pass, multi-document UI, restore-on-reload UI, or the deferred WASM-variant
+work are the candidates currently sitting in TODO.md's Backlog).
 
 ---
 

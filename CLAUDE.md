@@ -7,9 +7,10 @@ answer composition.
 **Stack:** React + Vite + TypeScript + Tailwind + Zustand, pdf.js, transformers.js,
 IndexedDB, Cloudflare Worker + Gemini 3.5 Flash-Lite (`gemini-2.5-flash-lite` is no
 longer available to new API keys — pinned to 3.5 instead, see ARCHITECTURE.md)
-**Current phase:** MVP — Milestone 4 (answer composition) done; one manual step left
-(registering a `workers.dev` subdomain) before the Worker has a public URL
-**Primary goal this sprint:** Milestone 5 TBD — likely frontend deploy (Cloudflare Pages)
+**Current phase:** MVP feature-complete and deployed. Frontend:
+https://pocketrag.pages.dev — API: https://pocketrag-answer.abhiram-dev.workers.dev
+**Primary goal this sprint:** none queued — ask the user for direction (candidates in
+TODO.md Backlog: styling pass, multi-document UI, restore-on-reload UI)
 
 ---
 

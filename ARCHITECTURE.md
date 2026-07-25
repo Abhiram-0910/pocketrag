@@ -30,6 +30,7 @@ pocketrag/
 ├── worker/                  # Cloudflare Worker — separate npm project, separate deploy
 │   └── src/                 # index.ts, validate.ts, prompt.ts, grounding.ts,
 │                             # rateLimit.ts, cors.ts, gemini.ts
+├── scripts/                 # check-bundle-size.mjs (build-time Pages size guard)
 ├── CLAUDE.md
 ├── AGENTS.md
 ├── ARCHITECTURE.md
@@ -188,6 +189,17 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
   IndexedDB. A second timeout on retry falls back to the same visible hard-failure
   note as any other failure, not another retry loop (deliberately: one friendly
   retry, then treat it like any other failure).
+- **Frontend deployed via direct `wrangler pages deploy`, not Git integration:**
+  the app is a pure static SPA (one page, no client-side router, no Pages Functions —
+  the API is entirely the separate `pocketrag-answer` Worker), so there's no server
+  logic on the Pages side needing a build pipeline beyond `npm run build`. Direct
+  upload matches how the Worker was already deployed — one tool, one pattern, no
+  GitHub integration to set up for a project this size.
+- **`scripts/check-bundle-size.mjs` build-time guard, not a WASM-shrinking fix:**
+  see Known Technical Debt below — checked exact numbers against actual Cloudflare
+  docs rather than assuming "under the limit" was good enough, then chose the
+  lower-risk mitigation (loud build failure before the real cap) over a
+  higher-risk, unverified binary swap.
 
 ---
 
@@ -204,16 +216,31 @@ GEMINI_API_KEY=
 #   cd worker && wrangler secret put GEMINI_API_KEY
 ```
 
-**Live Worker:** `https://pocketrag-answer.abhiram-dev.workers.dev` (deployed
-Session 4, subdomain registered by user Session 5). Not directly reachable from this
-dev sandbox for testing (see Known Technical Debt) — test via `wrangler dev` locally
-instead, which makes the same real Gemini calls.
+**Live production:**
+- Frontend: `https://pocketrag.pages.dev` (Cloudflare Pages, project `pocketrag`,
+  production branch `main`)
+- API: `https://pocketrag-answer.abhiram-dev.workers.dev` (Cloudflare Worker)
+
+Both deployed and verified end-to-end against the real production URLs in Session 5
+(real browser, real PDF, real question, real Gemini answer, correct CORS). An earlier
+note claiming this dev sandbox couldn't reach `*.workers.dev` was DNS propagation
+delay for a brand-new subdomain, not a persistent restriction — both domains are
+directly reachable from here now.
 
 ---
 
 ## Known Technical Debt
-- [ ] `embedding.worker.ts` bundles onnxruntime-web's WASM runtime (~23MB) eagerly —
-      fine for local dev, worth code-splitting / lazy-loading before any real deploy.
+- [ ] `embedding.worker.ts` bundles onnxruntime-web's WASM runtime (22.47 MiB) —
+      already loaded lazily (separate chunk, fetched only when the Worker is first
+      used, not at page load), but the file itself is large: 10.1% headroom under
+      Cloudflare Pages' 25 MiB per-file hard limit. Investigated forcing a smaller
+      onnxruntime-web variant (13/14 MiB alternatives exist) — deferred deliberately,
+      not a shortcut: the smaller variants may lack async interop our dual
+      WebGPU/WASM pipeline needs, and onnxruntime-web's published bundle hardcodes
+      the variant choice rather than exposing a safe switch. `scripts/check-bundle-size.mjs`
+      (build-time guard, fails at 24 MiB) is the interim mitigation — it makes a
+      future onnxruntime-web version bump fail loudly at build time instead of
+      silently breaking a deploy, but doesn't reduce the size itself.
 - [ ] `resolveBackend()`'s `webgpu` and `wasm-failed` states are unit-tested with a
       mocked GPU but have not been exercised against real WebGPU hardware (this dev
       sandbox has no GPU) — re-verify when real hardware is available.

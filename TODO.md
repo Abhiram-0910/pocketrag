@@ -6,22 +6,29 @@ Read this at the start of every session to know what to work on next.
 ---
 
 ## 🔴 Current Sprint
-Milestone 4 complete: Worker deployed and live at
-`https://pocketrag-answer.abhiram-dev.workers.dev`, `.env.production` points at it,
-UI has an honest wait-time expectation-setter. See 🟡 Up Next for Milestone 5.
+Milestone 5 complete: full app live in production.
+- Frontend: https://pocketrag.pages.dev (Cloudflare Pages)
+- API: https://pocketrag-answer.abhiram-dev.workers.dev (Cloudflare Worker)
+Verified end-to-end against the real deployed site (not local dev): drop a PDF, ask a
+real question, get a real Gemini-composed answer with correct page citation, zero
+console errors.
 
 ---
 
 ## 🟡 Up Next
-- [ ] Deploy the frontend (Cloudflare Pages) — then set `PAGES_ORIGIN` in
-      `worker/wrangler.jsonc` to the real Pages URL and redeploy the Worker
+(nothing queued — MVP is feature-complete and deployed; next scope needs your direction)
 
 ---
 
 ## 🟢 Backlog
 - [ ] Citations UI polish, landing page, styling pass
-- [ ] Code-split `embedding.worker.ts` / onnxruntime-web WASM (currently a 23MB
-      asset bundled eagerly) — only matters once this ships past local dev
+- [ ] Force a smaller onnxruntime-web WASM variant (13MB/14MB vs current 22.5MB) —
+      investigated in Session 5, deliberately deferred: the smaller variants may lack
+      the async interop our dual WebGPU/WASM pipeline needs, and onnxruntime-web's
+      published `ort.webgpu.mjs` hardcodes the asyncify variant rather than exposing
+      a safe runtime/build switch. Real fix, not a shortcut — needs cross-browser
+      testing before touching it. The build-time size guard (see Completed) is the
+      interim mitigation, not a substitute for this.
 - [ ] Restore-most-recent-document-on-load UI (explicitly deferred in Milestone 3 —
       re-dropping the file is required for now; schema already supports it via
       `documentId`, no migration needed when this gets built)
@@ -31,6 +38,8 @@ UI has an honest wait-time expectation-setter. See 🟡 Up Next for Milestone 5.
       nothing without admitting the gap). Doesn't catch a real page being cited with
       misattributed content — would need a second verification LLM call or human
       review. Not built; flagged as a known limitation, not silently absent.
+- [ ] Custom domain for Pages (optional) — dashboard-only step, entirely on the user
+      if ever wanted. Not needed; `pages.dev` subdomain works fine for a demo.
 
 ---
 
@@ -73,13 +82,26 @@ UI has an honest wait-time expectation-setter. See 🟡 Up Next for Milestone 5.
       prompts all tested) — the earlier 277s/30-280s observation did not reproduce.
       See AGENTS.md Session 5 for full numbers and caveats — Session 5, 2026-07-25
 - [x] Honest "this can take up to a few minutes" expectation-setter added to
-      QueryPanel, scoped to just the Gemini-wait phase (not the fast
-      embed/retrieve phase) — Session 5, 2026-07-25
+      QueryPanel, scoped to just the Gemini-wait phase — Session 5, 2026-07-25
 - [x] Client-side ~60s timeout + manual "Try again" retry on the answer-composition
       request. Retry reuses the in-memory ranked chunks (no re-embed). A second
       timeout on retry falls back to the standard hard-failure note. Pure timeout
       logic (`attemptAnswer()`) unit-tested with a mocked hanging fetch + fake
       timers — Session 5, 2026-07-25
+- [x] Verified Cloudflare Pages' 25 MiB per-file limit against actual docs (not
+      assumed), measured the real onnxruntime-web WASM asset at 22.47 MiB (10.1%
+      headroom, not "safely under"), investigated forcing a smaller variant (deferred,
+      see Backlog — real risk, not a shortcut), and added `scripts/check-bundle-size.mjs`
+      as a build-time guard (fails loudly at 24 MiB, before Cloudflare's hard 25 MiB
+      cap) — Session 5, 2026-07-25
+- [x] Deployed frontend to Cloudflare Pages: `pocketrag.pages.dev` (production,
+      branch `main`) — Session 5, 2026-07-25
+- [x] Updated `PAGES_ORIGIN` in `worker/wrangler.jsonc` to the real Pages URL,
+      redeployed the Worker — Session 5, 2026-07-25
+- [x] Verified full end-to-end against the **live production deployment** (not local
+      dev): real browser hitting `pocketrag.pages.dev`, real PDF upload, real
+      question, real Gemini answer with correct citation, correct CORS header for the
+      real origin, zero console errors — Session 5, 2026-07-25
 
 ---
 
@@ -103,9 +125,19 @@ UI has an honest wait-time expectation-setter. See 🟡 Up Next for Milestone 5.
   404 "no longer available to new users" for this project's API key. Pinned to
   `gemini-3.5-flash-lite` instead — deliberately, not via the floating
   `gemini-flash-lite-latest` alias. CLAUDE.md/ARCHITECTURE.md updated to match.
-- This dev sandbox cannot reach the live `*.workers.dev` subdomain directly (DNS
-  resolves, both IPv4/IPv6 connections fail immediately) even though the base
-  `workers.dev` domain and `generativelanguage.googleapis.com` are reachable —
-  looks like an egress allowlist gap for this specific subdomain, not a real-world
-  issue. Future sessions: test the deployed Worker through `wrangler dev` locally
-  (real Gemini calls, same code) instead of curling the live URL directly.
+- CORRECTION to a Session 4/5 note: the earlier "this sandbox cannot reach
+  `*.workers.dev`" finding was **DNS propagation delay for a brand-new subdomain**,
+  not a persistent egress restriction — confirmed in Session 5 by re-testing after
+  time had passed (both `pocketrag-answer.abhiram-dev.workers.dev` and
+  `pocketrag.pages.dev` are directly reachable from this sandbox now). Future
+  sessions: a freshly-registered subdomain may take a few minutes to resolve/route;
+  don't conclude "sandbox network restriction" from one early failed attempt — retry
+  after a delay before assuming it's unreachable.
+- `wrangler pages deploy` tried to delegate to a newer unified "Workers with static
+  assets" deployment model on first run, failed (no `wrangler.jsonc` for that model),
+  and explicitly suggested `--force` to use the classic direct Pages path instead —
+  used it, worked. Also: the Pages project didn't exist yet and needed
+  `wrangler pages project create` first; and the first deploy landed as a Preview
+  (branch `master`, not the configured production branch `main`) — fixed by
+  redeploying with `--branch=main` explicitly. Both are one-time project-setup
+  quirks, not expected on future deploys to the same project.
