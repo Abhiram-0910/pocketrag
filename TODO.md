@@ -13,15 +13,74 @@ Verified end-to-end against the real deployed site (not local dev): drop a PDF, 
 real question, get a real Gemini-composed answer with correct page citation, zero
 console errors.
 
+Full roadmap (Milestones 6-16) written up in 🟡/🟢 below per user request, so it
+survives a context reset. Currently awaiting confirmation to start Milestone 6.
+
 ---
 
 ## 🟡 Up Next
-(nothing queued — MVP is feature-complete and deployed; next scope needs your direction)
+### Milestone 6 — Multi-document + bulk upload (current target)
+- [ ] Document list/picker UI — the multi-doc UX explicitly deferred back in
+      Milestone 3, now in scope
+- [ ] Bulk drag-and-drop: multiple PDFs at once, per-file progress, one failing file
+      does not block the others
+- [ ] Retrieval scope toggle: "this document" vs "all documents" for a query
+- [ ] Restore-on-reload — natural now that a real document list exists; schema
+      already supports it via `documentId` (Milestone 3 decision), no migration needed
+- [ ] Call `navigator.storage.persist()` when the first document is saved — protects
+      against browser storage eviction (Safari's 7-day-inactivity proactive eviction
+      is the real risk at personal scale, not raw storage size — see AGENTS.md
+      Session 6 grill-me answer for the numbers)
+- [ ] Tests for multi-document ranking: retrieval scoped to one document must not
+      leak chunks from another
 
 ---
 
-## 🟢 Backlog
-- [ ] Citations UI polish, landing page, styling pass
+## 🟢 Backlog — Milestones 7-16, in order
+
+### 7. BYOK (bring your own key)
+- Providers: Gemini, OpenAI, Anthropic, Grok, OpenRouter
+- Never persist keys anywhere — no KV, no DB, no logs. In-memory for one request only.
+- Model lists fetched live from each provider's own list-models endpoint, not hardcoded
+
+### 8. Error UX overhaul
+- Plain-language error taxonomy: rate limit (with exact reset time in the user's
+  local timezone), invalid key, model unavailable, network error, unreadable PDF,
+  WebGPU unsupported, etc.
+
+### 9. Handwritten/Scanned Notes
+- Separate tab from Documents
+- Explicit "this file will be uploaded for cloud OCR" consent before anything happens
+- Documents tab stays 100% local, unchanged — see ARCHITECTURE.md's two-tab privacy
+  model note
+
+### 10. Diagram-aware Q&A
+- Extract embedded page images at ingestion
+- Send the one relevant page image to the multimodal answer call when a matched
+  chunk likely has a diagram
+- Fits the existing trust model: only relevant content leaves the browser
+
+### 11. Better retrieval
+- Hybrid keyword+embedding search
+- Reranking
+- Multi-turn conversation context
+
+### 12. Hybrid web search toggle
+- Modes: notes-only / web-only / hybrid
+- Brave Search API
+
+### 13. Export answer/chat as PDF
+
+### 14. Landing page + full UI/UX pass
+
+### 15. Security review
+- `/claude-security` → scan codebase, fix findings
+
+### 16. Final E2E retest, GitHub remote + push, delivery
+
+---
+
+## 🟢 Backlog — carried over, unscheduled
 - [ ] Force a smaller onnxruntime-web WASM variant (13MB/14MB vs current 22.5MB) —
       investigated in Session 5, deliberately deferred: the smaller variants may lack
       the async interop our dual WebGPU/WASM pipeline needs, and onnxruntime-web's
@@ -29,10 +88,6 @@ console errors.
       a safe runtime/build switch. Real fix, not a shortcut — needs cross-browser
       testing before touching it. The build-time size guard (see Completed) is the
       interim mitigation, not a substitute for this.
-- [ ] Restore-most-recent-document-on-load UI (explicitly deferred in Milestone 3 —
-      re-dropping the file is required for now; schema already supports it via
-      `documentId`, no migration needed when this gets built)
-- [ ] Multi-document UI (list/switch between stored documents) — same reasoning as above
 - [ ] Stronger groundedness check (Milestone 4 grill-me answer): current check only
       catches citation-level inconsistency (citing a page not in the input, or citing
       nothing without admitting the gap). Doesn't catch a real page being cited with
@@ -111,6 +166,18 @@ console errors.
 ---
 
 ## 💡 Ideas / Notes
+- **IndexedDB storage ceiling (Milestone 6 grill-me, researched against current MDN
+  docs):** not a size problem at personal scale. ~5KB/chunk (384-float embedding +
+  text), ~500KB for a dense 20-page document, ~100MB for 200 documents. Chrome/Edge:
+  60% of disk per origin. Firefox best-effort: `min(10% disk, 10 GiB)` per site group.
+  Safari (current Storage Standard): ~60% of disk, matching Chrome — the old
+  "1GB then prompt" behavior is superseded. All three orders of magnitude larger than
+  realistic personal use. **The real risk is Safari's proactive eviction**: origins
+  with no user click/tap in 7 days get their script-created data deleted outright,
+  regardless of disk space — a real way to silently lose a whole document library for
+  a tool people might not open daily. Mitigation: call `navigator.storage.persist()`
+  on first save (exempts the origin from eviction on all three browsers). Source:
+  https://developer.mozilla.org/en-US/docs/Web/API/Storage_API/Storage_quotas_and_eviction_criteria
 - `resolveBackend()` (src/workers/backend.ts) is the one piece of Milestone 2 logic
   that couldn't be verified against real hardware in this sandbox (no GPU) — the
   `webgpu` and `wasm-failed` states are covered by exhaustive unit tests with a

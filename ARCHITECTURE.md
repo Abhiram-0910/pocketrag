@@ -101,6 +101,16 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
 - **Browser-only ingestion:** PDF parsing and embedding happen entirely client-side
   so the source document never leaves the browser — only the network call at answer
   time sends retrieved snippets + question to the Cloudflare Worker.
+- **Two-tab privacy model (planned, Milestone 9 — Handwritten/Scanned Notes):** the
+  app will have two structurally separate tabs, not a single upload flow with a
+  format-detection branch. The "Documents" tab is the existing PDF pipeline and stays
+  100% local — nothing about its code path changes. The "Handwritten/Scanned Notes"
+  tab is a distinct feature that explicitly uploads the file to a cloud OCR service,
+  gated behind a per-file consent prompt ("this file will be uploaded for cloud OCR")
+  before anything is sent. Keeping them as separate tabs/code paths — rather than one
+  tab that sometimes uploads and sometimes doesn't depending on file type — is what
+  keeps "Documents stays 100% local" a claim that's true by construction, not just by
+  current behavior that a future change could quietly violate.
 - **Chunker takes an injected `Tokenizer` interface** (`{ countTokens(text): number }`)
   rather than importing `@huggingface/transformers` directly. Keeps `chunker.ts`
   pure and testable (unit tests use the real tokenizer directly in Node — no browser
