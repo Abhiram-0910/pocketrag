@@ -1,6 +1,7 @@
 import { validateAnswerRequest } from './validate'
 import { buildPrompt } from './prompt'
 import { checkGrounding } from './grounding'
+import { assignDocLabels } from './labels'
 import { checkRateLimit } from './rateLimit'
 import { callGemini } from './gemini'
 import { corsHeaders, resolveCorsOrigin } from './cors'
@@ -43,15 +44,22 @@ export default {
       return json({ error: validation.error }, 400, origin)
     }
 
-    const prompt = buildPrompt(validation.question, validation.chunks)
+    // The Worker owns the Doc N labelling — it builds the prompt and grounds against
+    // it — and returns the label→documentId map so the client can show real titles.
+    const docLabels = assignDocLabels(validation.chunks)
+    const labelOf = new Map(docLabels.map((doc) => [doc.documentId, doc.label]))
+    const prompt = buildPrompt(validation.question, validation.chunks, labelOf)
 
     try {
       const answer = await callGemini(fetch, env.GEMINI_API_KEY, prompt)
-      const grounding = checkGrounding(
-        answer,
-        validation.chunks.map((chunk) => chunk.page),
-      )
-      return json({ answer, groundingWarning: grounding.groundingWarning }, 200, origin)
+      const providedPairs = validation.chunks.map((chunk) => ({
+        // Non-null assertion is safe by invariant: assignDocLabels labels every distinct
+        // documentId in these chunks, so every chunk's documentId is guaranteed in labelOf.
+        label: labelOf.get(chunk.documentId)!,
+        page: chunk.page,
+      }))
+      const grounding = checkGrounding(answer, providedPairs)
+      return json({ answer, groundingWarning: grounding.groundingWarning, docLabels }, 200, origin)
     } catch (err) {
       return json({ error: err instanceof Error ? err.message : 'Failed to generate an answer.' }, 502, origin)
     }

@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { attemptAnswer, type FetchAnswerFn } from './answerRequest'
 
-const CHUNKS = [{ text: 'The mitochondrion is the powerhouse of the cell.', page: 1, score: 0.9 }]
+const CHUNKS = [{ text: 'The mitochondrion is the powerhouse of the cell.', page: 1, score: 0.9, documentId: 'doc-1' }]
+const DOC_LABELS = [{ label: 1, documentId: 'doc-1' }]
 
 /** Mimics real fetch()'s abort behavior: never resolves on its own, rejects with AbortError when the signal fires. */
 function hangingFetchAnswer(): FetchAnswerFn {
@@ -23,11 +24,18 @@ afterEach(() => {
 
 describe('attemptAnswer', () => {
   it('resolves with the answer when fetchAnswer succeeds', async () => {
-    const fetchAnswer: FetchAnswerFn = vi.fn().mockResolvedValue({ answer: 'The cell (page 1).', groundingWarning: false })
+    const fetchAnswer: FetchAnswerFn = vi
+      .fn()
+      .mockResolvedValue({ answer: 'The cell (Doc 1, page 1).', groundingWarning: false, docLabels: DOC_LABELS })
 
     const result = await attemptAnswer(fetchAnswer, 'q', CHUNKS, 60_000)
 
-    expect(result).toEqual({ outcome: 'success', answer: 'The cell (page 1).', groundingWarning: false })
+    expect(result).toEqual({
+      outcome: 'success',
+      answer: 'The cell (Doc 1, page 1).',
+      groundingWarning: false,
+      docLabels: DOC_LABELS,
+    })
   })
 
   it('times out and aborts the signal when fetchAnswer hangs past the timeout', async () => {
@@ -44,7 +52,7 @@ describe('attemptAnswer', () => {
     const fetchAnswer: FetchAnswerFn = vi.fn().mockImplementation(
       () =>
         new Promise((resolve) => {
-          setTimeout(() => resolve({ answer: 'answer', groundingWarning: false }), 59_000)
+          setTimeout(() => resolve({ answer: 'answer', groundingWarning: false, docLabels: DOC_LABELS }), 59_000)
         }),
     )
 
@@ -82,9 +90,11 @@ describe('attemptAnswer', () => {
     await vi.advanceTimersByTimeAsync(60_000)
     expect(await first).toEqual({ outcome: 'timeout' })
 
-    const retryFetchAnswer: FetchAnswerFn = vi.fn().mockResolvedValue({ answer: 'Recovered.', groundingWarning: false })
+    const retryFetchAnswer: FetchAnswerFn = vi
+      .fn()
+      .mockResolvedValue({ answer: 'Recovered.', groundingWarning: false, docLabels: DOC_LABELS })
     const retry = await attemptAnswer(retryFetchAnswer, 'q', CHUNKS, 60_000)
 
-    expect(retry).toEqual({ outcome: 'success', answer: 'Recovered.', groundingWarning: false })
+    expect(retry).toEqual({ outcome: 'success', answer: 'Recovered.', groundingWarning: false, docLabels: DOC_LABELS })
   })
 })

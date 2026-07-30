@@ -2,7 +2,7 @@ import { useCallback, useState, type FormEvent } from 'react'
 import { embedQuery } from '../lib/embeddingClient'
 import { getChunksForDocument, type ChunkRecord } from '../lib/db'
 import { rankChunks, type ScoredChunk } from '../lib/retrieval'
-import { attemptAnswer, fetchAnswerFromWorker } from '../lib/answerRequest'
+import { attemptAnswer, fetchAnswerFromWorker, type DocLabel } from '../lib/answerRequest'
 import { useDocumentStore } from '../store/documentStore'
 
 const TOP_K = 3
@@ -19,6 +19,7 @@ export function QueryPanel() {
   const [answer, setAnswer] = useState<string | null>(null)
   const [groundingWarning, setGroundingWarning] = useState(false)
   const [answerError, setAnswerError] = useState<string | null>(null)
+  const [docLabels, setDocLabels] = useState<DocLabel[]>([])
 
   // Query the selected document ("this document" scope). The all-documents scope
   // toggle lands in a later commit.
@@ -27,18 +28,26 @@ export function QueryPanel() {
   const documentId = documents.find((d) => d.id === selectedId && d.status === 'ready')?.id ?? null
   const canQuery = documentId != null
 
+  const titleFor = (id: string) => documents.find((d) => d.id === id)?.fileName ?? id
+
   const runAnswerAttempt = useCallback(
     async (question: string, chunks: ScoredChunk<ChunkRecord>[], isRetry: boolean) => {
       setAwaitingAnswer(true)
       setTimedOut(false)
       if (!isRetry) setAnswerError(null)
 
-      const requestChunks = chunks.map(({ chunk, score }) => ({ text: chunk.text, page: chunk.page, score }))
+      const requestChunks = chunks.map(({ chunk, score }) => ({
+        text: chunk.text,
+        page: chunk.page,
+        score,
+        documentId: chunk.documentId,
+      }))
       const result = await attemptAnswer(fetchAnswerFromWorker, question, requestChunks, ANSWER_TIMEOUT_MS)
 
       if (result.outcome === 'success') {
         setAnswer(result.answer)
         setGroundingWarning(result.groundingWarning)
+        setDocLabels(result.docLabels)
       } else if (result.outcome === 'timeout') {
         if (isRetry) {
           setAnswerError('Answer generation timed out again — showing raw matched passages below.')
@@ -67,6 +76,7 @@ export function QueryPanel() {
       setAnswerError(null)
       setTimedOut(false)
       setGroundingWarning(false)
+      setDocLabels([])
 
       embedQuery(question, {
         onBackend: () => {},
@@ -147,6 +157,11 @@ export function QueryPanel() {
             </p>
           )}
           <p className="text-sm text-gray-900">{answer}</p>
+          {docLabels.length > 0 && (
+            <p className="mt-2 text-xs text-gray-500">
+              {docLabels.map((d) => `Doc ${d.label} = ${titleFor(d.documentId)}`).join(' · ')}
+            </p>
+          )}
         </div>
       )}
 
@@ -158,8 +173,9 @@ export function QueryPanel() {
           <ul className="mt-3 space-y-3">
             {results.map(({ chunk, score }) => (
               <li key={chunk.id} className="rounded border border-gray-200 p-3 text-sm text-gray-700">
-                <p className="mb-1 text-xs tracking-wide text-gray-400 uppercase">
-                  page {chunk.page} · score {score.toFixed(3)}
+                <p className="mb-1 text-xs text-gray-500">
+                  <span className="font-medium text-gray-700">{titleFor(chunk.documentId)}</span> · page {chunk.page} ·
+                  score {score.toFixed(3)}
                 </p>
                 {chunk.text}
               </li>

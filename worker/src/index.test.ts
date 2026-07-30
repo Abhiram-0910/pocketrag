@@ -39,7 +39,7 @@ function mockGeminiSuccess(text: string) {
 
 const validBody = {
   question: 'What powers the cell?',
-  chunks: [{ text: 'The mitochondrion is the powerhouse of the cell.', page: 1, score: 0.9 }],
+  chunks: [{ text: 'The mitochondrion is the powerhouse of the cell.', page: 1, score: 0.9, documentId: 'doc-1' }],
 }
 
 type IncomingRequest = Parameters<typeof worker.fetch>[0]
@@ -67,15 +67,20 @@ afterEach(() => {
 })
 
 describe('worker fetch handler', () => {
-  it('returns a composed answer with CORS headers for a valid request', async () => {
-    mockGeminiSuccess('The mitochondrion powers the cell (page 1).')
+  it('returns a composed answer, doc labels, and CORS headers for a valid request', async () => {
+    mockGeminiSuccess('The mitochondrion powers the cell (Doc 1, page 1).')
     const res = await worker.fetch(request(validBody), makeEnv())
 
     expect(res.status).toBe(200)
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('http://localhost:5173')
-    const data = (await res.json()) as { answer: string; groundingWarning: boolean }
-    expect(data.answer).toBe('The mitochondrion powers the cell (page 1).')
+    const data = (await res.json()) as {
+      answer: string
+      groundingWarning: boolean
+      docLabels: { label: number; documentId: string }[]
+    }
+    expect(data.answer).toBe('The mitochondrion powers the cell (Doc 1, page 1).')
     expect(data.groundingWarning).toBe(false)
+    expect(data.docLabels).toEqual([{ label: 1, documentId: 'doc-1' }])
   })
 
   it('rejects a non-POST /answer request with 404', async () => {

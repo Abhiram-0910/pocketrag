@@ -1,12 +1,21 @@
+// The Worker owns Doc N labelling and returns this label→documentId map so the client
+// can resolve real titles for the legend/Sources (documentId → fileName lives locally).
+export interface DocLabel {
+  label: number
+  documentId: string
+}
+
 export interface AnswerResponse {
   answer: string
   groundingWarning: boolean
+  docLabels: DocLabel[]
 }
 
 export interface RequestAnswerChunk {
   text: string
   page: number
   score: number
+  documentId: string
 }
 
 export type FetchAnswerFn = (
@@ -16,7 +25,7 @@ export type FetchAnswerFn = (
 ) => Promise<AnswerResponse>
 
 export type AnswerAttemptResult =
-  | { outcome: 'success'; answer: string; groundingWarning: boolean }
+  | { outcome: 'success'; answer: string; groundingWarning: boolean; docLabels: DocLabel[] }
   | { outcome: 'timeout' }
   | { outcome: 'error'; message: string }
 
@@ -34,8 +43,8 @@ export async function attemptAnswer(
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    const { answer, groundingWarning } = await fetchAnswer(question, chunks, controller.signal)
-    return { outcome: 'success', answer, groundingWarning }
+    const { answer, groundingWarning, docLabels } = await fetchAnswer(question, chunks, controller.signal)
+    return { outcome: 'success', answer, groundingWarning, docLabels }
   } catch (err) {
     if (isAbortError(err)) return { outcome: 'timeout' }
     return { outcome: 'error', message: err instanceof Error ? err.message : 'unknown error' }

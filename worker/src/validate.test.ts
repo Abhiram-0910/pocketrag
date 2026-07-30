@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { MAX_CHUNKS, MAX_CHUNK_TEXT_LENGTH, MAX_QUESTION_LENGTH, validateAnswerRequest } from './validate'
 
-const validChunk = { text: 'The mitochondrion is the powerhouse of the cell.', page: 1, score: 0.9 }
+const validChunk = { text: 'The mitochondrion is the powerhouse of the cell.', page: 1, score: 0.9, documentId: 'doc-1' }
 
 describe('validateAnswerRequest', () => {
   it('accepts a well-formed request', () => {
@@ -38,6 +38,13 @@ describe('validateAnswerRequest', () => {
   it('rejects malformed chunk objects', () => {
     expect(validateAnswerRequest({ question: 'q', chunks: [{ text: 'x' }] }).ok).toBe(false)
     expect(validateAnswerRequest({ question: 'q', chunks: [{ text: 'x', page: 'one', score: 1 }] }).ok).toBe(false)
+  })
+
+  it('rejects a chunk with a missing or empty documentId', () => {
+    const { documentId, ...noId } = validChunk
+    void documentId
+    expect(validateAnswerRequest({ question: 'q', chunks: [noId] }).ok).toBe(false)
+    expect(validateAnswerRequest({ question: 'q', chunks: [{ ...validChunk, documentId: '' }] }).ok).toBe(false)
   })
 
   it('caps chunk count server-side even if the client sends more', () => {

@@ -54,8 +54,9 @@ pocketrag/
 | `src/components/QueryPanel.tsx` | Query input → embed → rank from IndexedDB → POST to the Worker → composed answer as primary result, raw ranked chunks as collapsible "Sources," visible failure note (not silent fallback) if the Worker call fails |
 | `worker/src/index.ts` | `POST /answer` handler: CORS → rate limit → validate → build prompt → call Gemini → groundedness check → JSON response |
 | `worker/src/validate.ts` | Caps chunk count (5) and per-chunk text length (2000 chars) server-side — never trusts the client |
-| `worker/src/prompt.ts` | Grounded-QA prompt: answer only from passages, cite pages, admit gaps |
-| `worker/src/grounding.ts` | `checkGrounding()` — citation-level groundedness heuristic (see Key Architectural Decisions) |
+| `worker/src/prompt.ts` | Grounded-QA prompt: answer only from passages, cite `(Doc N, page M)`, admit gaps |
+| `worker/src/labels.ts` | `assignDocLabels()` — per-request `Doc N` ↔ documentId map (see Key Architectural Decisions) |
+| `worker/src/grounding.ts` | `checkGrounding()` — citation-level groundedness heuristic over `(Doc N, page)` pairs |
 | `worker/src/rateLimit.ts` | KV counter-per-IP-per-day, 50/day default |
 | `worker/src/gemini.ts` | Thin, injectable-`fetch` wrapper around Gemini's `generateContent` endpoint |
 
@@ -167,14 +168,29 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
   (`validate.ts`, `prompt.ts`, `grounding.ts`, `rateLimit.ts`, `gemini.ts`) is written
   as pure functions taking injected dependencies (a `KVLike` interface, an injectable
   `fetchImpl`) specifically to make this possible.
+- **Multi-document citations via per-request `Doc N` labels (Worker-owned):** with
+  retrieval able to span multiple documents, a page number alone is ambiguous, so
+  passages are labelled `[Doc N, Page M]` and the model cites `(Doc N, page M)`. The
+  **Worker** is the single source of truth for the label mapping — `assignDocLabels()`
+  (`worker/src/labels.ts`) assigns `Doc N` per distinct `documentId` in first-appearance
+  order over that query's ranked chunks, and the Worker both builds the prompt and grounds
+  against that same mapping. It returns the `label → documentId` map to the client, which
+  joins `documentId → fileName` (known only in the browser) to render a legend under the
+  answer (`Doc 1 = report.pdf · Doc 2 = notes.pdf`) and the Sources list. Filenames never
+  leave the browser; only opaque `documentId` UUIDs are sent. **These labels are generated
+  fresh per answer and are NOT stable across queries** — the same document can be `Doc 1`
+  for one question and `Doc 2` for another, depending on which chunks rank where. Nothing
+  should assume a persistent document-number.
 - **Citation-level groundedness check (`checkGrounding`), not semantic verification:**
-  from the Milestone 4 grill-me discussion — flags an answer if it cites a page number
-  that wasn't in the input passages, or cites nothing at all without an explicit
-  "not in the passages" disclaimer. Does not catch a real page being cited with
-  content that isn't actually there — that needs a second verification LLM call or
-  human review, deliberately not built (would double Gemini usage against the free
-  quota this rate limiter exists to protect). Documented as a known limitation, not
-  silently absent.
+  from the Milestone 4 grill-me discussion — flags an answer if it cites a `(Doc N, page M)`
+  pair that wasn't in the input passages (which now also catches citing a valid document but
+  the wrong page, or a document that wasn't provided), or cites nothing at all without an
+  explicit "not in the passages" disclaimer. A bare "page M" with no `Doc N` isn't treated
+  as a citation for the unknown-citation check, but still counts as "some citation exists"
+  so a well-cited answer isn't falsely flagged. Does not catch a real `(doc, page)` being
+  cited with content that isn't actually there — that needs a second verification LLM call
+  or human review, deliberately not built (would double Gemini usage against the free quota
+  this rate limiter exists to protect). Documented as a known limitation, not silently absent.
 - **Chunk count/text length capped server-side, not just validated:** the Worker
   truncates to 5 chunks / 2000 chars each rather than rejecting an oversized request —
   the honest client only ever sends 3 short chunks, so this is purely an abuse/bug

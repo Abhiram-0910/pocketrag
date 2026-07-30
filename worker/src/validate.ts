@@ -2,6 +2,9 @@ export interface InputChunk {
   text: string
   page: number
   score: number
+  // Opaque per-document id (a client-generated UUID). Used only to group chunks by
+  // document for "Doc N" labelling and grounding — never placed in the prompt.
+  documentId: string
 }
 
 export interface AnswerRequestBody {
@@ -18,11 +21,21 @@ export type ValidationResult =
 export const MAX_CHUNKS = 5
 export const MAX_CHUNK_TEXT_LENGTH = 2000
 export const MAX_QUESTION_LENGTH = 500
+// documentId must round-trip back to the client to resolve titles, so reject an
+// oversized one rather than truncating it (a legit client sends a 36-char UUID).
+export const MAX_DOCUMENT_ID_LENGTH = 128
 
 function isValidChunk(value: unknown): value is InputChunk {
   if (typeof value !== 'object' || value === null) return false
   const chunk = value as Record<string, unknown>
-  return typeof chunk.text === 'string' && typeof chunk.page === 'number' && typeof chunk.score === 'number'
+  return (
+    typeof chunk.text === 'string' &&
+    typeof chunk.page === 'number' &&
+    typeof chunk.score === 'number' &&
+    typeof chunk.documentId === 'string' &&
+    chunk.documentId.length > 0 &&
+    chunk.documentId.length <= MAX_DOCUMENT_ID_LENGTH
+  )
 }
 
 export function validateAnswerRequest(body: unknown): ValidationResult {
@@ -45,7 +58,10 @@ export function validateAnswerRequest(body: unknown): ValidationResult {
   const validated: InputChunk[] = []
   for (const chunk of capped) {
     if (!isValidChunk(chunk)) {
-      return { ok: false, error: 'Each chunk must have text (string), page (number), and score (number).' }
+      return {
+        ok: false,
+        error: 'Each chunk must have text (string), page (number), score (number), and documentId (string).',
+      }
     }
     validated.push({ ...chunk, text: chunk.text.slice(0, MAX_CHUNK_TEXT_LENGTH) })
   }
