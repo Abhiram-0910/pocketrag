@@ -6,38 +6,42 @@ import { useDocumentStore } from '../store/documentStore'
 
 export function DropZone() {
   const [isDragging, setIsDragging] = useState(false)
-  const status = useDocumentStore((s) => s.status)
-  const setExtracting = useDocumentStore((s) => s.setExtracting)
-  const setLoadingModel = useDocumentStore((s) => s.setLoadingModel)
+  const [rejectMsg, setRejectMsg] = useState<string | null>(null)
+  const documents = useDocumentStore((s) => s.documents)
+  const addDocument = useDocumentStore((s) => s.addDocument)
+  const updateDocument = useDocumentStore((s) => s.updateDocument)
   const setModelProgress = useDocumentStore((s) => s.setModelProgress)
   const setBackend = useDocumentStore((s) => s.setBackend)
-  const setEmbedProgress = useDocumentStore((s) => s.setEmbedProgress)
-  const setResult = useDocumentStore((s) => s.setResult)
-  const setError = useDocumentStore((s) => s.setError)
 
-  const busy = status === 'extracting-text' || status === 'loading-model' || status === 'embedding'
+  // ponytail: interim single-file guard — the sequential bulk queue lands in a later commit.
+  const busy = documents.some(
+    (d) => d.status === 'extracting-text' || d.status === 'loading-model' || d.status === 'embedding',
+  )
 
   const processFile = useCallback(
     async (file: File) => {
       if (file.type !== 'application/pdf') {
-        setError('Only PDF files are supported.')
+        setRejectMsg('Only PDF files are supported.')
         return
       }
-      setExtracting()
+      setRejectMsg(null)
+      const id = crypto.randomUUID()
+      addDocument(id, file.name)
+      updateDocument(id, { status: 'extracting-text' })
       try {
         const pages = await extractPdfText(file)
-        setLoadingModel()
+        updateDocument(id, { status: 'loading-model' })
         embedDocument(pages, {
           onModelProgress: (msg) => setModelProgress(msg.percent),
           onBackend: (msg) => setBackend(msg.backend, msg.detail),
           onModelReady: () => {},
           onChunked: () => {},
-          onEmbedProgress: (msg) => setEmbedProgress(msg.done, msg.total),
+          onEmbedProgress: (msg) =>
+            updateDocument(id, { status: 'embedding', embedProgress: { done: msg.done, total: msg.total } }),
           onResult: (msg) => {
-            const documentId = crypto.randomUUID()
             const chunkRecords: ChunkRecord[] = msg.chunks.map((chunk) => ({
-              id: `${documentId}:${chunk.index}`,
-              documentId,
+              id: `${id}:${chunk.index}`,
+              documentId: id,
               index: chunk.index,
               text: chunk.text,
               tokenCount: chunk.tokenCount,
@@ -45,19 +49,26 @@ export function DropZone() {
               embedding: chunk.embedding,
             }))
             saveDocument(
-              { id: documentId, fileName: file.name, uploadedAt: Date.now(), chunkCount: msg.chunks.length },
+              { id, fileName: file.name, uploadedAt: Date.now(), chunkCount: msg.chunks.length },
               chunkRecords,
             )
-              .then(() => setResult(documentId, file.name, msg.chunks))
-              .catch((err) => setError(err instanceof Error ? err.message : 'Failed to save document.'))
+              .then(() =>
+                updateDocument(id, { status: 'ready', chunkCount: msg.chunks.length, embedProgress: null }),
+              )
+              .catch((err) =>
+                updateDocument(id, {
+                  status: 'error',
+                  error: err instanceof Error ? err.message : 'Failed to save document.',
+                }),
+              )
           },
-          onError: (msg) => setError(msg.message),
+          onError: (msg) => updateDocument(id, { status: 'error', error: msg.message }),
         })
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to process PDF.')
+        updateDocument(id, { status: 'error', error: err instanceof Error ? err.message : 'Failed to process PDF.' })
       }
     },
-    [setExtracting, setLoadingModel, setModelProgress, setBackend, setEmbedProgress, setResult, setError],
+    [addDocument, updateDocument, setModelProgress, setBackend],
   )
 
   const handleDrop = useCallback(
@@ -94,15 +105,9 @@ export function DropZone() {
       <p className="text-gray-600">Drag a PDF here, or</p>
       <label className="cursor-pointer text-blue-600 underline">
         browse
-        <input
-          type="file"
-          accept="application/pdf"
-          className="hidden"
-          onChange={handleFileInput}
-          disabled={busy}
-        />
+        <input type="file" accept="application/pdf" className="hidden" onChange={handleFileInput} disabled={busy} />
       </label>
-      {status === 'extracting-text' && <p className="text-sm text-gray-500">Extracting text…</p>}
+      {rejectMsg && <p className="text-sm text-red-600">{rejectMsg}</p>}
     </div>
   )
 }
