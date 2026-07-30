@@ -10,6 +10,7 @@ export function DropZone() {
   const documents = useDocumentStore((s) => s.documents)
   const addDocument = useDocumentStore((s) => s.addDocument)
   const updateDocument = useDocumentStore((s) => s.updateDocument)
+  const selectDocument = useDocumentStore((s) => s.selectDocument)
   const setModelProgress = useDocumentStore((s) => s.setModelProgress)
   const setBackend = useDocumentStore((s) => s.setBackend)
 
@@ -52,9 +53,13 @@ export function DropZone() {
               { id, fileName: file.name, uploadedAt: Date.now(), chunkCount: msg.chunks.length },
               chunkRecords,
             )
-              .then(() =>
-                updateDocument(id, { status: 'ready', chunkCount: msg.chunks.length, embedProgress: null }),
-              )
+              .then(() => {
+                updateDocument(id, { status: 'ready', chunkCount: msg.chunks.length, embedProgress: null })
+                // Auto-select the first ready document so a single upload is immediately
+                // queryable; multi-document switching stays explicit. Reads live state so
+                // restore-on-reload (which sets docs directly, never this path) can't trip it.
+                if (useDocumentStore.getState().selectedId == null) selectDocument(id)
+              })
               .catch((err) =>
                 updateDocument(id, {
                   status: 'error',
@@ -68,7 +73,7 @@ export function DropZone() {
         updateDocument(id, { status: 'error', error: err instanceof Error ? err.message : 'Failed to process PDF.' })
       }
     },
-    [addDocument, updateDocument, setModelProgress, setBackend],
+    [addDocument, updateDocument, selectDocument, setModelProgress, setBackend],
   )
 
   const handleDrop = useCallback(

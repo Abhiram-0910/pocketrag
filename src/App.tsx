@@ -1,4 +1,5 @@
 import { DropZone } from './components/DropZone'
+import { DocumentList } from './components/DocumentList'
 import { QueryPanel } from './components/QueryPanel'
 
 function App() {
@@ -8,6 +9,7 @@ function App() {
       <p className="mt-1 text-gray-500">Drop a PDF, then ask a question about it.</p>
       <div className="mt-6">
         <DropZone />
+        <DocumentList />
         <QueryPanel />
       </div>
     </main>

@@ -20,10 +20,11 @@ export function QueryPanel() {
   const [groundingWarning, setGroundingWarning] = useState(false)
   const [answerError, setAnswerError] = useState<string | null>(null)
 
-  // ponytail: interim query target — the newest ready document. Document selection
-  // and the this-document/all-documents scope toggle land in later commits.
+  // Query the selected document ("this document" scope). The all-documents scope
+  // toggle lands in a later commit.
   const documents = useDocumentStore((s) => s.documents)
-  const documentId = documents.filter((d) => d.status === 'ready').at(-1)?.id ?? null
+  const selectedId = useDocumentStore((s) => s.selectedId)
+  const documentId = documents.find((d) => d.id === selectedId && d.status === 'ready')?.id ?? null
   const canQuery = documentId != null
 
   const runAnswerAttempt = useCallback(

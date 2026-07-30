@@ -24,6 +24,10 @@ survives a context reset. Currently awaiting confirmation to start Milestone 6.
       Milestone 3, now in scope
 - [ ] Bulk drag-and-drop: multiple PDFs at once, per-file progress, one failing file
       does not block the others
+- [ ] Error-row action in the document list: retry and/or remove for a failed file.
+      Deferred from Commit 2 (list UI) — acceptable while single-file, but bulk upload
+      makes partial failure the normal case, so this needs a real decision by Commit 4,
+      not a silent gap.
 - [ ] Retrieval scope toggle: "this document" vs "all documents" for a query
 - [ ] Restore-on-reload — natural now that a real document list exists; schema
       already supports it via `documentId` (Milestone 3 decision), no migration needed
