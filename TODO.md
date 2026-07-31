@@ -170,6 +170,14 @@ survives a context reset. Currently awaiting confirmation to start Milestone 6.
 ---
 
 ## 💡 Ideas / Notes
+- **Evaluated PixelRAG (StarTrail-org, Apache-2.0) — declined on architecture fit, not
+  quality.** Screenshot-based RAG: embeds rendered page *images* with a Qwen3-VL-Embedding-2B
+  model instead of parsed text, preserving tables/charts/layout. Real and well-built, but
+  requires a Python serving backend + CUDA/MPS-class compute for embedding — incompatible
+  with PocketRAG's browser-only, in-Worker embedding architecture and the "documents never
+  leave the browser" guarantee. The underlying problem it solves (visual structure lost in
+  text parsing) is already addressed compatibly by Milestone 10's page-image extraction,
+  which sends only the relevant page image per matched chunk through the existing trust model.
 - **IndexedDB storage ceiling (Milestone 6 grill-me, researched against current MDN
   docs):** not a size problem at personal scale. ~5KB/chunk (384-float embedding +
   text), ~500KB for a dense 20-page document, ~100MB for 200 documents. Chrome/Edge:
