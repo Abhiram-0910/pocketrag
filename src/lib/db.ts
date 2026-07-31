@@ -37,6 +37,22 @@ function getDB(): Promise<IDBPDatabase<PocketRagDB>> {
   return dbPromise
 }
 
+let persistRequested = false
+
+/**
+ * Ask the browser to exempt this origin from storage eviction — once per session, on the
+ * first successful save. Best-effort: guarded and fire-and-forget so it never throws or
+ * blocks a save (and stays inert in the Node test env, where navigator.storage is absent).
+ * See ARCHITECTURE.md for why (Safari's 7-day proactive eviction, not raw quota).
+ */
+function requestPersistOnce(): void {
+  if (persistRequested) return
+  persistRequested = true
+  if (typeof navigator !== 'undefined' && navigator.storage?.persist) {
+    void navigator.storage.persist().catch(() => {})
+  }
+}
+
 export async function saveDocument(document: DocumentRecord, chunks: ChunkRecord[]): Promise<void> {
   const db = await getDB()
   const tx = db.transaction(['documents', 'chunks'], 'readwrite')
@@ -45,8 +61,19 @@ export async function saveDocument(document: DocumentRecord, chunks: ChunkRecord
     ...chunks.map((chunk) => tx.objectStore('chunks').put(chunk)),
   ])
   await tx.done
+  requestPersistOnce()
 }
 
 export function getChunksForDocument(documentId: string): Promise<ChunkRecord[]> {
   return getDB().then((db) => db.getAllFromIndex('chunks', 'documentId', documentId))
+}
+
+/** All chunks across every stored document — the pool for "all documents" retrieval scope. */
+export function getAllChunks(): Promise<ChunkRecord[]> {
+  return getDB().then((db) => db.getAll('chunks'))
+}
+
+/** All stored document records — used to restore the document list on reload. */
+export function getAllDocuments(): Promise<DocumentRecord[]> {
+  return getDB().then((db) => db.getAll('documents'))
 }

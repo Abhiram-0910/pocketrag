@@ -24,10 +24,12 @@ survives a context reset. Currently awaiting confirmation to start Milestone 6.
       Milestone 3, now in scope
 - [ ] Bulk drag-and-drop: multiple PDFs at once, per-file progress, one failing file
       does not block the others
-- [ ] Error-row action in the document list: retry and/or remove for a failed file.
-      Deferred from Commit 2 (list UI) — acceptable while single-file, but bulk upload
-      makes partial failure the normal case, so this needs a real decision by Commit 4,
-      not a silent gap.
+- [x] Error-row action in the document list — Commit 4. Decision: **Remove (✕) only**.
+      A failed file was never persisted (saveDocument runs only on full success), so an
+      error row is a pure in-memory notice; removing it just clears that notice. Retry =
+      re-drop the file (still on disk, runs the normal path) — simpler than retaining
+      File objects for a retry pipeline. Deleting a *persisted* document is separate scope
+      (see Backlog below).
 - [ ] Retrieval scope toggle: "this document" vs "all documents" for a query
 - [ ] Restore-on-reload — natural now that a real document list exists; schema
       already supports it via `documentId` (Milestone 3 decision), no migration needed
@@ -85,6 +87,10 @@ survives a context reset. Currently awaiting confirmation to start Milestone 6.
 ---
 
 ## 🟢 Backlog — carried over, unscheduled
+- [ ] Delete a *persisted* document from the library (distinct from the Commit-4 error-row
+      Remove, which only clears an unsaved in-memory notice). Needs IndexedDB cleanup —
+      remove the DocumentRecord and its ChunkRecords — plus clearing selection/scope state
+      if it was the active doc. Not built in Milestone 6; surfaced as its own scope.
 - [ ] Force a smaller onnxruntime-web WASM variant (13MB/14MB vs current 22.5MB) —
       investigated in Session 5, deliberately deferred: the smaller variants may lack
       the async interop our dual WebGPU/WASM pipeline needs, and onnxruntime-web's

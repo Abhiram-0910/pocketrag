@@ -31,6 +31,8 @@ interface DocumentState {
   modelProgress: number | null
   addDocument: (id: string, fileName: string) => void
   updateDocument: (id: string, patch: Partial<Omit<DocEntry, 'id'>>) => void
+  removeDocument: (id: string) => void
+  restoreDocuments: (entries: DocEntry[]) => void
   selectDocument: (id: string | null) => void
   setBackend: (backend: BackendState, detail: string) => void
   setModelProgress: (percent: number) => void
@@ -51,6 +53,19 @@ export const useDocumentStore = create<DocumentState>((set) => ({
     })),
   updateDocument: (id, patch) =>
     set((s) => ({ documents: s.documents.map((doc) => (doc.id === id ? { ...doc, ...patch } : doc)) })),
+  removeDocument: (id) =>
+    set((s) => ({
+      documents: s.documents.filter((doc) => doc.id !== id),
+      selectedId: s.selectedId === id ? null : s.selectedId,
+    })),
+  // Merge by id (append only ids not already present) rather than replace, so a restore on
+  // mount can't clobber a document a user dropped in the same instant, and it's idempotent
+  // under StrictMode's double-invoke. Restored/dropped ids are disjoint UUID spaces anyway.
+  restoreDocuments: (entries) =>
+    set((s) => {
+      const have = new Set(s.documents.map((doc) => doc.id))
+      return { documents: [...s.documents, ...entries.filter((entry) => !have.has(entry.id))] }
+    }),
   selectDocument: (id) => set({ selectedId: id }),
   setBackend: (backend, backendDetail) => set({ backend, backendDetail }),
   setModelProgress: (percent) => set({ modelProgress: percent }),

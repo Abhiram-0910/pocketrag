@@ -1,6 +1,6 @@
 import { useCallback, useState, type FormEvent } from 'react'
 import { embedQuery } from '../lib/embeddingClient'
-import { getChunksForDocument, type ChunkRecord } from '../lib/db'
+import { getAllChunks, getChunksForDocument, type ChunkRecord } from '../lib/db'
 import { rankChunks, type ScoredChunk } from '../lib/retrieval'
 import { attemptAnswer, fetchAnswerFromWorker, type DocLabel } from '../lib/answerRequest'
 import { useDocumentStore } from '../store/documentStore'
@@ -20,13 +20,16 @@ export function QueryPanel() {
   const [groundingWarning, setGroundingWarning] = useState(false)
   const [answerError, setAnswerError] = useState<string | null>(null)
   const [docLabels, setDocLabels] = useState<DocLabel[]>([])
+  const [scope, setScope] = useState<'document' | 'all'>('document')
 
-  // Query the selected document ("this document" scope). The all-documents scope
-  // toggle lands in a later commit.
   const documents = useDocumentStore((s) => s.documents)
   const selectedId = useDocumentStore((s) => s.selectedId)
-  const documentId = documents.find((d) => d.id === selectedId && d.status === 'ready')?.id ?? null
-  const canQuery = documentId != null
+  // "this document" queries the selected ready doc; "all documents" pools every stored
+  // doc. rankChunks is scope-agnostic (all embeddings are unit-normalized by the same
+  // model, so cosine scores are directly comparable across documents — see ARCHITECTURE.md).
+  const selectedReadyId = documents.find((d) => d.id === selectedId && d.status === 'ready')?.id ?? null
+  const hasReadyDoc = documents.some((d) => d.status === 'ready')
+  const canQuery = scope === 'all' ? hasReadyDoc : selectedReadyId != null
 
   const titleFor = (id: string) => documents.find((d) => d.id === id)?.fileName ?? id
 
@@ -65,7 +68,8 @@ export function QueryPanel() {
   const handleSubmit = useCallback(
     (e: FormEvent) => {
       e.preventDefault()
-      if (!canQuery || !documentId || !query.trim() || busy) return
+      const useAll = scope === 'all'
+      if (!canQuery || (!useAll && !selectedReadyId) || !query.trim() || busy) return
 
       const question = query.trim()
       setBusy(true)
@@ -83,7 +87,8 @@ export function QueryPanel() {
         onModelProgress: () => {},
         onModelReady: () => {},
         onQueryEmbedding: (msg) => {
-          getChunksForDocument(documentId)
+          const chunkSource = useAll ? getAllChunks() : getChunksForDocument(selectedReadyId as string)
+          chunkSource
             .then(async (chunks) => {
               const ranked = rankChunks(msg.embedding, chunks, TOP_K)
               setResults(ranked)
@@ -98,7 +103,7 @@ export function QueryPanel() {
         },
       })
     },
-    [canQuery, documentId, query, busy, runAnswerAttempt],
+    [canQuery, scope, selectedReadyId, query, busy, runAnswerAttempt],
   )
 
   const handleRetry = useCallback(() => {
@@ -107,15 +112,41 @@ export function QueryPanel() {
     runAnswerAttempt(submittedQuestion, results, true).finally(() => setBusy(false))
   }, [submittedQuestion, results, runAnswerAttempt])
 
+  const placeholder = canQuery
+    ? scope === 'all'
+      ? 'Ask a question across all documents…'
+      : 'Ask a question about the selected document…'
+    : !hasReadyDoc
+      ? 'Upload a document first'
+      : scope === 'all'
+        ? 'Upload a document first'
+        : 'Select a document first'
+
   return (
     <div className="mt-8 text-left">
+      {hasReadyDoc && (
+        <div className="mb-2 inline-flex overflow-hidden rounded border border-gray-200 text-xs">
+          {(['document', 'all'] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              onClick={() => setScope(option)}
+              className={`px-3 py-1.5 ${
+                scope === option ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              {option === 'document' ? 'This document' : 'All documents'}
+            </button>
+          ))}
+        </div>
+      )}
       <form onSubmit={handleSubmit} className="flex gap-2">
         <input
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           disabled={!canQuery || busy}
-          placeholder={canQuery ? 'Ask a question about the document…' : 'Upload a document first'}
+          placeholder={placeholder}
           className="flex-1 rounded border border-gray-300 px-3 py-2 text-sm disabled:bg-gray-50 disabled:text-gray-400"
         />
         <button

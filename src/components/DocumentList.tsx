@@ -28,6 +28,7 @@ export function DocumentList() {
   const documents = useDocumentStore((s) => s.documents)
   const selectedId = useDocumentStore((s) => s.selectedId)
   const selectDocument = useDocumentStore((s) => s.selectDocument)
+  const removeDocument = useDocumentStore((s) => s.removeDocument)
   const backend = useDocumentStore((s) => s.backend)
   const backendDetail = useDocumentStore((s) => s.backendDetail)
   const modelProgress = useDocumentStore((s) => s.modelProgress)
@@ -52,12 +53,12 @@ export function DocumentList() {
           const selectable = doc.status === 'ready'
           const isSelected = doc.id === selectedId
           return (
-            <li key={doc.id}>
+            <li key={doc.id} className="flex items-stretch gap-2">
               <button
                 type="button"
                 disabled={!selectable}
                 onClick={() => selectDocument(doc.id)}
-                className={`w-full rounded border p-3 text-left transition-colors ${
+                className={`flex-1 rounded border p-3 text-left transition-colors ${
                   isSelected ? 'border-blue-500 bg-blue-50' : 'border-gray-200'
                 } ${selectable ? 'cursor-pointer hover:border-blue-300' : 'cursor-default'}`}
               >
@@ -66,6 +67,18 @@ export function DocumentList() {
                   {statusText(doc)}
                 </p>
               </button>
+              {/* A failed file was never persisted, so removing it just clears the in-memory
+                  notice — retry is re-dropping the file (see ARCHITECTURE.md / TODO.md). */}
+              {doc.status === 'error' && (
+                <button
+                  type="button"
+                  onClick={() => removeDocument(doc.id)}
+                  aria-label={`Remove ${doc.fileName}`}
+                  className="rounded border border-gray-200 px-3 text-gray-400 hover:border-red-300 hover:text-red-600"
+                >
+                  ✕
+                </button>
+              )}
             </li>
           )
         })}
