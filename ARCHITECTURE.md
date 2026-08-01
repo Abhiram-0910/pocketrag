@@ -22,13 +22,13 @@ Keep this updated as the project evolves.
 ```
 pocketrag/
 ├── src/
-│   ├── components/         # DropZone, ChunkPreview, EmbeddingProof, QueryPanel
+│   ├── components/         # DropZone, DocumentList, QueryPanel
 │   ├── lib/                 # Pure logic: pdf.ts, chunker.ts, similarity.ts, retrieval.ts,
 │   │                         # db.ts, embeddingClient.ts
 │   ├── store/               # documentStore.ts (Zustand)
 │   └── workers/             # embedding.worker.ts, backend.ts, embedding.types.ts
 ├── worker/                  # Cloudflare Worker — separate npm project, separate deploy
-│   └── src/                 # index.ts, validate.ts, prompt.ts, grounding.ts,
+│   └── src/                 # index.ts, validate.ts, prompt.ts, labels.ts, grounding.ts,
 │                             # rateLimit.ts, cors.ts, gemini.ts
 ├── scripts/                 # check-bundle-size.mjs (build-time Pages size guard)
 ├── CLAUDE.md
@@ -46,12 +46,14 @@ pocketrag/
 | `src/lib/chunker.ts` | Token-aware overlapping chunking — pure function, takes an injected `Tokenizer` (real subword counts, exact original text preserved via char offsets). Called once per page by the Worker, so a chunk never spans a page boundary |
 | `src/lib/similarity.ts` | Cosine similarity for already-normalized vectors |
 | `src/lib/retrieval.ts` | `rankChunks()` — pure cosine-ranking over an array of `{embedding}` objects, generic over the chunk shape |
-| `src/lib/db.ts` | IndexedDB via `idb`: `documents` + `chunks` object stores, `documentId` index on chunks, `saveDocument()` / `getChunksForDocument()` |
+| `src/lib/db.ts` | IndexedDB via `idb`: `documents` + `chunks` object stores, `documentId` index on chunks. `saveDocument()`, `getChunksForDocument()` (this-document scope), `getAllChunks()` (all-documents scope), `getAllDocuments()` (restore-on-reload). Requests `navigator.storage.persist()` once on first save |
 | `src/lib/embeddingClient.ts` | Main-thread singleton wrapper around the embedding Worker (typed postMessage protocol): `embedDocument()` and `embedQuery()` |
 | `src/workers/embedding.worker.ts` | Loads tokenizer + model, chunks each page, embeds, and separately embeds single query strings — all model logic lives here, never on the main thread |
 | `src/workers/backend.ts` | `resolveBackend()` — pure, worker-independent WebGPU/WASM detection and fallback logic, unit-tested without a browser |
-| `src/store/documentStore.ts` | Zustand store: documentId, fileName, chunks (with embeddings), status, backend state, progress |
-| `src/components/QueryPanel.tsx` | Query input → embed → rank from IndexedDB → POST to the Worker → composed answer as primary result, raw ranked chunks as collapsible "Sources," visible failure note (not silent fallback) if the Worker call fails |
+| `src/store/documentStore.ts` | Zustand store: `documents: DocEntry[]` (per-document id/fileName/status/progress/chunkCount), `selectedId`, plus session-global backend + model-progress. Actions: add/update/remove/restore/select |
+| `src/components/DropZone.tsx` | Drag-and-drop + browse; queues a whole batch up front, then embeds one document at a time. `processFile` resolves (never rejects) on ready or error so one bad file can't block the rest. Auto-selects the first ready doc |
+| `src/components/DocumentList.tsx` | The multi-document library: one row per doc with live status, click-to-select (ready docs only), ✕ to dismiss an error row |
+| `src/components/QueryPanel.tsx` | Scope toggle (this doc / all docs) → embed query → rank the scoped chunk pool from IndexedDB → POST to the Worker → composed answer as primary result, `Doc N = fileName` legend, raw ranked chunks as collapsible "Sources," visible failure note (not silent fallback) if the Worker call fails |
 | `worker/src/index.ts` | `POST /answer` handler: CORS → rate limit → validate → build prompt → call Gemini → groundedness check → JSON response |
 | `worker/src/validate.ts` | Caps chunk count (5) and per-chunk text length (2000 chars) server-side — never trusts the client |
 | `worker/src/prompt.ts` | Grounded-QA prompt: answer only from passages, cite `(Doc N, page M)`, admit gaps |
@@ -146,11 +148,23 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
   any other embedded-item shape later without change.
 - **Retrieval reads from IndexedDB, not the in-memory Zustand chunks**, even though
   the just-embedded chunks are already in memory after upload. This proves the
-  persistence round-trip actually works (write → read back → rank) and is what
-  survives once a restore-on-reload UI exists later — the in-memory array wouldn't.
-- **No restore-on-reload:** confirmed with the user rather than guessed. Dropping a
-  file again after a reload is required for now; the `documentId` foreign key already
-  supports multi-document / restore UI later without a schema migration.
+  persistence round-trip actually works (write → read back → rank) and is what the
+  restore-on-reload path (below) depends on — the in-memory array wouldn't survive.
+- **Restore-on-reload (Milestone 6):** on load, `App` reads `getAllDocuments()` and
+  merges them into the store as `ready` (persisted docs are fully embedded). Nothing is
+  auto-selected — multi-document is the model now, so landing on the list is correct.
+  `restoreDocuments` merges by id (appends only ids not already present) so it's
+  idempotent under StrictMode's double-invoke and can't clobber a doc dropped in the
+  same instant. Deliberately deferred back in Milestone 3 (asked the user rather than
+  guessing multi-doc UX); the `documentId` foreign key meant no schema migration.
+- **Retrieval scope toggle ("this document" vs "all documents"):** "this document"
+  ranks `getChunksForDocument(selectedId)`; "all documents" ranks `getAllChunks()`
+  (every stored chunk). `rankChunks` is scope-agnostic — it just ranks whatever pool it
+  is handed, so scoping is enforced purely by *which* chunks are fetched, and a
+  document-scoped query can never surface another document's chunk. Cosine scores are
+  **directly comparable across documents** because every embedding is unit-normalized by
+  the same model, so a single global ranking over the pooled chunks is meaningful (no
+  per-document score normalization needed).
 - **Gemini model pinned to `gemini-3.5-flash-lite`, not the floating
   `gemini-flash-lite-latest` alias:** the spec named `gemini-2.5-flash-lite`, which
   404s ("no longer available to new users") for this project's API key. Confirmed via
@@ -270,8 +284,6 @@ directly reachable from here now.
 - [ ] `resolveBackend()`'s `webgpu` and `wasm-failed` states are unit-tested with a
       mocked GPU but have not been exercised against real WebGPU hardware (this dev
       sandbox has no GPU) — re-verify when real hardware is available.
-- [ ] No restore-on-reload UI (deliberate, confirmed with user) — see Key Architectural
-      Decisions above. Schema supports it; UI doesn't exist yet.
 - [ ] `checkGrounding()` only catches citation-level inconsistency, not content-level
       hallucination against a correctly-cited page — see Key Architectural Decisions.
 - [ ] Root cause of Session 4's one-time 30s-280s latency outlier remains unconfirmed
@@ -279,15 +291,7 @@ directly reachable from here now.
       A 60s client-side timeout + manual retry now bounds the worst case regardless
       (`src/lib/answerRequest.ts`), so this is no longer a demo-day risk, just an
       open question if it recurs.
-- [ ] This dev sandbox cannot reach `*.workers.dev` subdomains directly (DNS resolves,
-      connections fail on both IPv4/IPv6) even though the base `workers.dev` domain
-      and `generativelanguage.googleapis.com` are reachable — an egress allowlist gap,
-      not a real-world issue. Test the deployed Worker via local `wrangler dev`
-      instead of curling the live URL from this environment.
-- [ ] Deployed Worker has no public URL yet — the Cloudflare account has never
-      registered a `workers.dev` subdomain. Code is deployed and correct (verified via
-      `wrangler dev` + real browser); publishing needs one interactive confirmation
-      only the user can give (`cd worker && wrangler deploy`, say yes to the subdomain
-      prompt). See AGENTS.md Session 4.
-- [ ] `PAGES_ORIGIN` in `worker/wrangler.jsonc` is still an empty placeholder — set it
-      once the frontend is deployed to Cloudflare Pages.
+(Resolved in Session 5: the Worker is deployed and publicly reachable at
+`pocketrag-answer.abhiram-dev.workers.dev`, `PAGES_ORIGIN` is set to the live Pages
+origin, and the earlier "sandbox can't reach `*.workers.dev`" finding was just DNS
+propagation delay for a brand-new subdomain, not an egress restriction.)

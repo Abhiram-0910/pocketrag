@@ -6,17 +6,16 @@ Claude reads this at the START of every new session to understand what happened 
 ---
 
 ## Project State
-**Last updated:** 2026-07-25
-**Current branch:** master (commits: `e8b1344` Milestone 1+2, Milestone 3 commit,
-`b224cde` Milestone 4, `ebdd4d0` Milestone 4 wrap-up, `7ed0317` timeout+retry;
-Session 5's Pages-deploy changes not yet committed — see below)
-**Overall status:** MVP is feature-complete and **fully deployed in production**.
-Frontend: `https://pocketrag.pages.dev` (Cloudflare Pages). API: 
-`https://pocketrag-answer.abhiram-dev.workers.dev` (Cloudflare Worker). Verified
-live, end-to-end, against the real deployed site: drop a PDF, ask a real question,
-get a real Gemini-composed answer with correct page citations, raw ranked chunks
-visible underneath as sources, 60s timeout + manual retry as a demo-day safety net.
-No restore-on-reload UI or multi-document UI (both deliberately deferred, Session 3).
+**Last updated:** 2026-08-01
+**Current branch:** master (through `79f918f` Milestone 6 4/5; Session 6's Commit 5 —
+multi-document tests + doc wrap-up — staged this session, see below)
+**Overall status:** MVP **+ Milestone 6 (multi-document)** feature-complete and
+**fully deployed in production**. Frontend: `https://pocketrag.pages.dev` (Cloudflare
+Pages). API: `https://pocketrag-answer.abhiram-dev.workers.dev` (Cloudflare Worker).
+Now supports a multi-document library, bulk drag-and-drop, a this-document/all-documents
+retrieval scope toggle with cross-document ranking, Worker-owned per-request `Doc N`
+citation labels, restore-on-reload from IndexedDB, and `navigator.storage.persist()`.
+60s timeout + manual retry still there as a demo-day safety net.
 
 ---
 
@@ -514,6 +513,93 @@ fully deployed end-to-end, verified live.
 **Next session should start with:** no queued task — ask the user what's next
 (styling pass, multi-document UI, restore-on-reload UI, or the deferred WASM-variant
 work are the candidates currently sitting in TODO.md's Backlog).
+
+---
+
+### Session 6 — 2026-08-01
+**Goal:** Milestone 6 — multi-document + bulk upload. Shipped across five commits;
+this session's work was **Commit 5**: the multi-document ranking/scoping tests, a real
+real-browser end-to-end verification of the whole milestone, and this doc wrap-up.
+
+**Milestone 6 commits 1-4 (landed before this session's Commit 5):**
+- `6168505` (1/5) — refactored `documentStore` from a single-document shape to a
+  per-document `DocEntry[]` + `selectedId`.
+- `9944005` (2/5) — `DocumentList.tsx` (row-per-document list/picker with selection).
+- `7bd506a` (3/5) — document-scoped citations via **Worker-owned `Doc N` labels**
+  (`worker/src/labels.ts`, `assignDocLabels()`); prompt + grounding moved to
+  `(Doc N, page M)` pairs; client renders a `Doc N = fileName` legend.
+- `79f918f` (4/5) — bulk drag-and-drop (sequential embed queue, one bad file can't
+  block the rest), retrieval scope toggle (this document / all documents via
+  `getAllChunks()`), restore-on-reload (`getAllDocuments()` → merge-by-id into the
+  store on load), and `navigator.storage.persist()` on first save.
+
+**Completed this session (Commit 5):**
+- [x] `worker/src/labels.test.ts` — `assignDocLabels()`: 1-based first-appearance
+      ordering, one shared label for repeated chunks of the same doc (interleaved),
+      single-doc, empty input.
+- [x] `src/lib/db.test.ts` — two new tests: `getAllChunks()` pools chunks across every
+      document (asserting exact per-document counts, so a duplicate/leaked chunk fails);
+      and **the explicit multi-document no-leak test** — a document-scoped query never
+      surfaces another document's chunk *even when that other document holds the
+      globally-closest match*, while "all documents" scope correctly returns that closest
+      chunk. (Ties `getChunksForDocument`/`getAllChunks` + `rankChunks` together.)
+- [x] `src/lib/db.getall.test.ts` (new, isolated file) — `getAllDocuments()` /
+      `getAllChunks()` with **exact** counts: two saved docs round-trip to exactly those
+      two records and all their chunks (embeddings/pages intact), and an empty DB returns
+      `[]` for both. Isolated from `db.test.ts` because that file's shared fake-indexeddb
+      accumulates docs across tests, which would break exact-count assertions.
+- [x] `src/store/documentStore.test.ts` (new) — `restoreDocuments` merge: adds to an
+      empty list, appends only not-already-present ids (idempotent under StrictMode
+      double-invoke), and keeps a live in-memory doc over a restored one with the same id.
+- [x] Frontend: 44 tests (was 37, +7), `tsc -b --noEmit` clean, `oxlint` clean,
+      `npm run build` clean (bundle-size guard passes). Worker: 46 tests, `tsc --noEmit`
+      clean.
+- [x] **Real-browser E2E** (Playwright installed then removed again; two hand-generated
+      test PDFs — `biology.pdf`, `cooking.pdf`, 2 pages each, distinct topics — verified
+      text-extractable via pdf.js first). Drove `wrangler dev` + Vite dev + real Gemini:
+      - Batch-dropped both PDFs at once → both reached `ready` (2 chunks each).
+      - **Reloaded** → both documents restored from IndexedDB with no re-drop.
+      - Selected **biology.pdf**, set scope to **All documents**, asked a **cooking**
+        question ("What gives bread its chewy texture?").
+      - Real Gemini answer: **"Gluten gives bread its chewy texture (Doc 1, page 1)."**
+        Legend: **"Doc 1 = cooking.pdf · Doc 2 = biology.pdf"**. Top sources:
+        cooking.pdf p1 (0.485), cooking.pdf p2 (0.267), biology.pdf p2 (0.105). Zero
+        console errors. Screenshot inspected. This is the milestone's headline proof:
+        cross-document retrieval answers from cooking.pdf while biology.pdf is selected,
+        with correct Worker-owned Doc-N→filename attribution.
+- [x] Doc wrap-up: this AGENTS entry; TODO.md (Milestone 6 checked off + Current Sprint
+      advanced); ARCHITECTURE.md (restore-on-reload + scope-toggle decisions, Key Files
+      for the new/refactored files, and cleaned up three Session-5 debt items that were
+      resolved then but never updated: Worker public URL, `PAGES_ORIGIN`, `*.workers.dev`
+      reachability).
+
+**Decisions made:**
+- **Direct-curl sanity check before the browser run.** Verified the live Gemini path
+  through `wrangler dev` with a single cooking chunk (real answer + correct `(Doc 1,
+  page 1)` citation + `groundingWarning:false`) before spending time driving a browser —
+  same "cheap check first" habit as prior sessions.
+- **Hand-wrote a minimal PDF generator** (`scratchpad/makepdf.mjs`) rather than adding a
+  PDF library — no `pdfkit`/`pdf-lib` was installed, and a ~40-line generator emitting
+  valid text streams + a correct xref table was enough for pdf.js extraction. Temporary,
+  scratchpad-only, not a dependency.
+
+**Problems encountered (all resolved this session):**
+- First E2E run "failed" at 30s — a bug **in my test script, not the app**:
+  Playwright's `waitForFunction(fn, arg, options)` takes the polling arg second and
+  options third, so my `{ timeout: 240_000 }` was silently swallowed as the arg and the
+  wait used the 30s default. Passed `null` as arg and moved options to the third slot.
+- Second run passed the flow but screenshotted mid-generation and read the wrong element:
+  the **selected document row shares `.bg-blue-50`** with the answer box. Retargeted the
+  answer assertions to `.border-blue-200` (unique to the answer box) — then the real
+  composed answer + legend were captured. The app was correct throughout; both were
+  harness-selector mistakes.
+
+**Left incomplete:** nothing from Milestone 6's scope. Commit 5 is staged and awaiting
+the user's go-ahead to commit (per this project's standing git rule).
+
+**Next session should start with:** no queued task — ask the user. Milestone 7 (BYOK)
+is next in the TODO roadmap; a styling/UX pass and the deferred WASM-variant work are
+the other standing candidates.
 
 ---
 

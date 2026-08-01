@@ -6,39 +6,45 @@ Read this at the start of every session to know what to work on next.
 ---
 
 ## 🔴 Current Sprint
-Milestone 5 complete: full app live in production.
+Milestone 6 complete: multi-document, bulk upload, cross-document retrieval, and
+restore-on-reload — all live in production on top of the Milestone 5 deploy.
 - Frontend: https://pocketrag.pages.dev (Cloudflare Pages)
 - API: https://pocketrag-answer.abhiram-dev.workers.dev (Cloudflare Worker)
-Verified end-to-end against the real deployed site (not local dev): drop a PDF, ask a
-real question, get a real Gemini-composed answer with correct page citation, zero
-console errors.
+Verified end-to-end in a real browser (Session 6, Commit 5): batch-drop biology.pdf +
+cooking.pdf, reload (both restored from IndexedDB with no re-drop), select biology.pdf
+but set scope to "All documents", ask a cooking question → answer "Gluten gives bread
+its chewy texture (Doc 1, page 1)" with legend "Doc 1 = cooking.pdf · Doc 2 =
+biology.pdf", zero console errors.
 
-Full roadmap (Milestones 6-16) written up in 🟡/🟢 below per user request, so it
-survives a context reset. Currently awaiting confirmation to start Milestone 6.
+Full roadmap (Milestones 7-16) in 🟢 below. **No task queued — ask the user for
+direction.** Milestone 7 (BYOK) is next in the roadmap.
 
 ---
 
 ## 🟡 Up Next
-### Milestone 6 — Multi-document + bulk upload (current target)
-- [ ] Document list/picker UI — the multi-doc UX explicitly deferred back in
-      Milestone 3, now in scope
-- [ ] Bulk drag-and-drop: multiple PDFs at once, per-file progress, one failing file
-      does not block the others
+### Milestone 6 — Multi-document + bulk upload ✅ COMPLETE
+- [x] Document list/picker UI — the multi-doc UX explicitly deferred back in
+      Milestone 3 — Commit 2 (`DocumentList.tsx`, selection state in the store)
+- [x] Bulk drag-and-drop: multiple PDFs at once, per-file rows, one failing file
+      does not block the others (sequential embed queue; `processFile` resolves —
+      never rejects — on ready or error) — Commit 4
 - [x] Error-row action in the document list — Commit 4. Decision: **Remove (✕) only**.
       A failed file was never persisted (saveDocument runs only on full success), so an
       error row is a pure in-memory notice; removing it just clears that notice. Retry =
       re-drop the file (still on disk, runs the normal path) — simpler than retaining
       File objects for a retry pipeline. Deleting a *persisted* document is separate scope
       (see Backlog below).
-- [ ] Retrieval scope toggle: "this document" vs "all documents" for a query
-- [ ] Restore-on-reload — natural now that a real document list exists; schema
-      already supports it via `documentId` (Milestone 3 decision), no migration needed
-- [ ] Call `navigator.storage.persist()` when the first document is saved — protects
-      against browser storage eviction (Safari's 7-day-inactivity proactive eviction
-      is the real risk at personal scale, not raw storage size — see AGENTS.md
-      Session 6 grill-me answer for the numbers)
-- [ ] Tests for multi-document ranking: retrieval scoped to one document must not
-      leak chunks from another
+- [x] Retrieval scope toggle: "this document" vs "all documents" for a query — Commit 4
+      (`getAllChunks()` pools across docs; cosine scores compare across documents because
+      every embedding is unit-normalized by the same model — see ARCHITECTURE.md)
+- [x] Restore-on-reload — persisted docs come back as `ready` on load; `restoreDocuments`
+      merges by id (StrictMode-safe, can't clobber a doc dropped the same instant) —
+      Commit 4
+- [x] Call `navigator.storage.persist()` on first save — best-effort, guarded,
+      fire-and-forget (`requestPersistOnce` in `db.ts`) — Commit 4
+- [x] Tests for multi-document ranking: document-scoped retrieval must not leak another
+      doc's chunk, `getAllChunks` pooling, `assignDocLabels` mapping, `restoreDocuments`
+      merge — Commit 5 (`db.test.ts`, `db.getall.test.ts`, `labels.test.ts`, `documentStore.test.ts`)
 
 ---
 
@@ -167,6 +173,13 @@ survives a context reset. Currently awaiting confirmation to start Milestone 6.
       dev): real browser hitting `pocketrag.pages.dev`, real PDF upload, real
       question, real Gemini answer with correct citation, correct CORS header for the
       real origin, zero console errors — Session 5, 2026-07-25
+- [x] Milestone 6 — multi-document library (list/picker + selection), bulk
+      drag-and-drop with per-file rows and independent failure, retrieval scope toggle
+      (this document / all documents) with cross-document ranking, Worker-owned per-request
+      `Doc N` citation labels, restore-on-reload from IndexedDB, and
+      `navigator.storage.persist()` on first save. Multi-document tests added
+      (`db.test.ts`, `db.getall.test.ts`, `labels.test.ts`, `documentStore.test.ts`); verified live in a real
+      browser (batch drop → reload → cross-document query) — Session 6, 2026-08-01
 
 ---
 
