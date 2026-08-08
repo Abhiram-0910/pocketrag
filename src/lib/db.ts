@@ -77,3 +77,15 @@ export function getAllChunks(): Promise<ChunkRecord[]> {
 export function getAllDocuments(): Promise<DocumentRecord[]> {
   return getDB().then((db) => db.getAll('documents'))
 }
+
+/** Deletes a document and every one of its chunks in a single atomic transaction. */
+export async function deleteDocument(documentId: string): Promise<void> {
+  const db = await getDB()
+  const tx = db.transaction(['documents', 'chunks'], 'readwrite')
+  const chunkKeys = await tx.objectStore('chunks').index('documentId').getAllKeys(documentId)
+  await Promise.all([
+    tx.objectStore('documents').delete(documentId),
+    ...chunkKeys.map((key) => tx.objectStore('chunks').delete(key)),
+  ])
+  await tx.done
+}

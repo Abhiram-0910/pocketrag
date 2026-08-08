@@ -3,6 +3,7 @@ import { embedQuery } from '../lib/embeddingClient'
 import { getAllChunks, getChunksForDocument, type ChunkRecord } from '../lib/db'
 import { rankChunks, type ScoredChunk } from '../lib/retrieval'
 import { attemptAnswer, fetchAnswerFromWorker, type DocLabel } from '../lib/answerRequest'
+import { canRunQuery } from '../lib/queryScope'
 import { useDocumentStore } from '../store/documentStore'
 
 const TOP_K = 3
@@ -29,7 +30,7 @@ export function QueryPanel() {
   // model, so cosine scores are directly comparable across documents — see ARCHITECTURE.md).
   const selectedReadyId = documents.find((d) => d.id === selectedId && d.status === 'ready')?.id ?? null
   const hasReadyDoc = documents.some((d) => d.status === 'ready')
-  const canQuery = scope === 'all' ? hasReadyDoc : selectedReadyId != null
+  const canQuery = canRunQuery(documents, selectedId, scope)
 
   const titleFor = (id: string) => documents.find((d) => d.id === id)?.fileName ?? id
 

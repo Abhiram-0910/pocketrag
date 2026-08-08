@@ -1,6 +1,14 @@
 import 'fake-indexeddb/auto'
 import { describe, expect, it } from 'vitest'
-import { getAllChunks, getChunksForDocument, saveDocument, type ChunkRecord, type DocumentRecord } from './db'
+import {
+  deleteDocument,
+  getAllChunks,
+  getAllDocuments,
+  getChunksForDocument,
+  saveDocument,
+  type ChunkRecord,
+  type DocumentRecord,
+} from './db'
 import { rankChunks } from './retrieval'
 
 function makeChunk(documentId: string, index: number, overrides: Partial<ChunkRecord> = {}): ChunkRecord {
@@ -97,5 +105,28 @@ describe('db', () => {
     // "this document" scope on bio: cook's closer chunk must not appear at all.
     const bioRanked = rankChunks(query, await getChunksForDocument(bio))
     expect(bioRanked.every((r) => r.chunk.documentId === bio)).toBe(true)
+  })
+
+  it('deleteDocument removes the document record and only its own chunks', async () => {
+    const keep = 'delete-keep'
+    const gone = 'delete-gone'
+    await saveDocument({ id: keep, fileName: 'keep.pdf', uploadedAt: Date.now(), chunkCount: 1 }, [
+      makeChunk(keep, 0),
+    ])
+    await saveDocument({ id: gone, fileName: 'gone.pdf', uploadedAt: Date.now(), chunkCount: 2 }, [
+      makeChunk(gone, 0),
+      makeChunk(gone, 1),
+    ])
+
+    await deleteDocument(gone)
+
+    const allDocs = await getAllDocuments()
+    expect(allDocs.some((d) => d.id === gone)).toBe(false)
+    expect(allDocs.some((d) => d.id === keep)).toBe(true)
+
+    expect(await getChunksForDocument(gone)).toEqual([])
+    const keptChunks = await getChunksForDocument(keep)
+    expect(keptChunks).toHaveLength(1)
+    expect(keptChunks[0].documentId).toBe(keep)
   })
 })

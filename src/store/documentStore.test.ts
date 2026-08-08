@@ -28,3 +28,29 @@ describe('restoreDocuments', () => {
     expect(useDocumentStore.getState().documents.find((d) => d.id === 'a')?.status).toBe('queued')
   })
 })
+
+describe('removeDocument', () => {
+  beforeEach(() => {
+    useDocumentStore.setState({ documents: [], selectedId: null })
+  })
+
+  it('clears selectedId when the removed document was selected', () => {
+    useDocumentStore.getState().restoreDocuments([entry('a'), entry('b')])
+    useDocumentStore.getState().selectDocument('a')
+
+    useDocumentStore.getState().removeDocument('a')
+
+    expect(useDocumentStore.getState().documents.map((d) => d.id)).toEqual(['b'])
+    expect(useDocumentStore.getState().selectedId).toBeNull()
+  })
+
+  it('leaves selectedId untouched when a different document is removed', () => {
+    useDocumentStore.getState().restoreDocuments([entry('a'), entry('b')])
+    useDocumentStore.getState().selectDocument('a')
+
+    useDocumentStore.getState().removeDocument('b')
+
+    expect(useDocumentStore.getState().documents.map((d) => d.id)).toEqual(['a'])
+    expect(useDocumentStore.getState().selectedId).toBe('a')
+  })
+})

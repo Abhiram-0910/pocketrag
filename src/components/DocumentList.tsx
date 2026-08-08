@@ -1,3 +1,5 @@
+import { useState } from 'react'
+import { deleteDocument } from '../lib/db'
 import { useDocumentStore, type DocEntry } from '../store/documentStore'
 
 const BACKEND_LABEL: Record<string, string> = {
@@ -33,7 +35,24 @@ export function DocumentList() {
   const backendDetail = useDocumentStore((s) => s.backendDetail)
   const modelProgress = useDocumentStore((s) => s.modelProgress)
 
+  // Only one row confirms at a time; a failed delete leaves the row in place with a
+  // brief inline error rather than crashing (deletion is destructive, so no silent retry).
+  const [confirmingId, setConfirmingId] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState<{ id: string; message: string } | null>(null)
+
   if (documents.length === 0) return null
+
+  const handleDelete = async (id: string) => {
+    try {
+      await deleteDocument(id)
+      setConfirmingId(null)
+      setDeleteError(null)
+      removeDocument(id)
+    } catch (err) {
+      setConfirmingId(null)
+      setDeleteError({ id, message: err instanceof Error ? err.message : 'Failed to delete.' })
+    }
+  }
 
   const loadingModel = documents.some((d) => d.status === 'loading-model')
 
@@ -53,32 +72,69 @@ export function DocumentList() {
           const selectable = doc.status === 'ready'
           const isSelected = doc.id === selectedId
           return (
-            <li key={doc.id} className="flex items-stretch gap-2">
-              <button
-                type="button"
-                disabled={!selectable}
-                onClick={() => selectDocument(doc.id)}
-                className={`flex-1 rounded border p-3 text-left transition-colors ${
-                  isSelected ? 'border-blue-500 bg-blue-50' : 'border-gray-200'
-                } ${selectable ? 'cursor-pointer hover:border-blue-300' : 'cursor-default'}`}
-              >
-                <p className="truncate text-sm font-medium text-gray-900">{doc.fileName}</p>
-                <p className={`mt-0.5 text-xs ${doc.status === 'error' ? 'text-red-600' : 'text-gray-500'}`}>
-                  {statusText(doc)}
-                </p>
-              </button>
-              {/* A failed file was never persisted, so removing it just clears the in-memory
-                  notice — retry is re-dropping the file (see ARCHITECTURE.md / TODO.md). */}
-              {doc.status === 'error' && (
+            <li key={doc.id}>
+              <div className="flex items-stretch gap-2">
                 <button
                   type="button"
-                  onClick={() => removeDocument(doc.id)}
-                  aria-label={`Remove ${doc.fileName}`}
-                  className="rounded border border-gray-200 px-3 text-gray-400 hover:border-red-300 hover:text-red-600"
+                  disabled={!selectable}
+                  onClick={() => selectDocument(doc.id)}
+                  className={`flex-1 rounded border p-3 text-left transition-colors ${
+                    isSelected ? 'border-blue-500 bg-blue-50' : 'border-gray-200'
+                  } ${selectable ? 'cursor-pointer hover:border-blue-300' : 'cursor-default'}`}
                 >
-                  ✕
+                  <p className="truncate text-sm font-medium text-gray-900">{doc.fileName}</p>
+                  <p className={`mt-0.5 text-xs ${doc.status === 'error' ? 'text-red-600' : 'text-gray-500'}`}>
+                    {statusText(doc)}
+                  </p>
                 </button>
-              )}
+                {/* A failed file was never persisted, so removing it just clears the in-memory
+                    notice — retry is re-dropping the file (see ARCHITECTURE.md / TODO.md). */}
+                {doc.status === 'error' && (
+                  <button
+                    type="button"
+                    onClick={() => removeDocument(doc.id)}
+                    aria-label={`Remove ${doc.fileName}`}
+                    className="rounded border border-gray-200 px-3 text-gray-400 hover:border-red-300 hover:text-red-600"
+                  >
+                    ✕
+                  </button>
+                )}
+                {/* A ready doc is persisted, so deletion is destructive — an inline two-step
+                    confirm (not window.confirm(), which blocks the tab and can't be styled). */}
+                {doc.status === 'ready' && confirmingId !== doc.id && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setConfirmingId(doc.id)
+                      setDeleteError(null)
+                    }}
+                    aria-label={`Delete ${doc.fileName}`}
+                    className="rounded border border-gray-200 px-3 text-xs text-gray-400 hover:border-red-300 hover:text-red-600"
+                  >
+                    Delete
+                  </button>
+                )}
+                {doc.status === 'ready' && confirmingId === doc.id && (
+                  <div className="flex items-center gap-2 rounded border border-red-200 bg-red-50 px-3 text-xs text-red-700">
+                    <span>Delete permanently?</span>
+                    <button
+                      type="button"
+                      onClick={() => void handleDelete(doc.id)}
+                      className="rounded bg-red-600 px-2 py-1 font-medium text-white hover:bg-red-700"
+                    >
+                      Delete
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmingId(null)}
+                      className="rounded border border-red-300 px-2 py-1 text-red-700 hover:bg-red-100"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+              </div>
+              {deleteError?.id === doc.id && <p className="mt-1 text-xs text-red-600">{deleteError.message}</p>}
             </li>
           )
         })}

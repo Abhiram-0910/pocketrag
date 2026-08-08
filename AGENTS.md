@@ -6,16 +6,18 @@ Claude reads this at the START of every new session to understand what happened 
 ---
 
 ## Project State
-**Last updated:** 2026-08-01
-**Current branch:** master (through `79f918f` Milestone 6 4/5; Session 6's Commit 5 —
-multi-document tests + doc wrap-up — staged this session, see below)
+**Last updated:** 2026-08-08
+**Current branch:** master (through `162bccd` Milestone 6 wrap-up; Session 7's delete-
+document work staged this session, see below)
 **Overall status:** MVP **+ Milestone 6 (multi-document)** feature-complete and
 **fully deployed in production**. Frontend: `https://pocketrag.pages.dev` (Cloudflare
 Pages). API: `https://pocketrag-answer.abhiram-dev.workers.dev` (Cloudflare Worker).
-Now supports a multi-document library, bulk drag-and-drop, a this-document/all-documents
+Supports a multi-document library, bulk drag-and-drop, a this-document/all-documents
 retrieval scope toggle with cross-document ranking, Worker-owned per-request `Doc N`
 citation labels, restore-on-reload from IndexedDB, and `navigator.storage.persist()`.
-60s timeout + manual retry still there as a demo-day safety net.
+60s timeout + manual retry still there as a demo-day safety net. Session 7 added
+deleting a persisted document (`deleteDocument()` + inline confirm UI) — **built and
+verified locally, not yet deployed to production.**
 
 ---
 
@@ -600,6 +602,79 @@ the user's go-ahead to commit (per this project's standing git rule).
 **Next session should start with:** no queued task — ask the user. Milestone 7 (BYOK)
 is next in the TODO roadmap; a styling/UX pass and the deferred WASM-variant work are
 the other standing candidates.
+
+---
+
+### Session 7 — 2026-08-08
+**Goal:** Ship the "delete a persisted document" scope deferred out of Milestone 6
+(TODO.md Backlog) — the Commit-4 error-row ✕ only ever cleared an unsaved in-memory
+notice; nothing could remove a document actually saved to IndexedDB.
+
+**Completed:**
+- [x] `src/lib/db.ts` — `deleteDocument(documentId)`: single atomic readwrite
+      transaction over `documents` + `chunks`, using the existing `documentId` index
+      to find every chunk key to delete alongside the document record.
+- [x] `src/lib/queryScope.ts` (new) — `canRunQuery(documents, selectedId, scope)`:
+      pure readiness check extracted from `QueryPanel`'s inline `canQuery` computation,
+      so scope/selection logic is unit-testable without adding a DOM-testing library.
+- [x] `src/components/DocumentList.tsx` — delete action on `ready` (persisted) rows
+      only: click "Delete" swaps that row's action area to an inline two-step confirm
+      ("Delete permanently?" + Delete/Cancel, styled destructive) rather than
+      `window.confirm()`. Confirm calls `deleteDocument()` first, then `removeDocument()`
+      only on success; on failure the row stays with a brief inline error, no crash.
+      In-flight (`queued`/`embedding`/etc.) rows get no action; error rows keep the
+      existing single-click ✕ dismiss unchanged.
+- [x] `src/components/QueryPanel.tsx` — inline `canQuery` computation replaced with
+      `canRunQuery()`; no other logic changed.
+- [x] Tests: `db.test.ts` `deleteDocument` round-trip (deletes one of two saved docs,
+      confirms `getAllDocuments()` excludes it, `getChunksForDocument` on the deleted
+      id returns `[]`, sibling doc's record + chunks intact); `documentStore.test.ts`
+      two new `removeDocument` cases (clears `selectedId` when it matches the removed
+      id, leaves it untouched otherwise — this behavior already existed, now directly
+      covered); `queryScope.test.ts` (new) — 5 cases covering empty-docs, "all" scope
+      with any ready doc, "document" scope with no/non-ready/ready selection.
+- [x] Frontend: 52 tests (was 44, +8), `tsc -b --noEmit` clean, `oxlint` clean,
+      `npm run build` clean (bundle-size guard passes). Worker untouched — no files
+      under `worker/` changed, so its own test suite wasn't re-run.
+- [x] **Real-browser E2E** (Playwright installed then removed again, same pattern as
+      Session 6; two hand-generated 2-page test PDFs regenerated with a minimal PDF
+      writer since Session 6's `scratchpad/` was already cleaned up — verified
+      text-extractable via pdf.js before driving a browser). Drove `wrangler dev` +
+      Vite dev:
+      - Batch-dropped two PDFs → both reached `ready` (2 chunks each).
+      - Clicked Delete on one → confirm prompt appeared → confirmed → its row
+        disappeared, the other document's row was unaffected.
+      - **Reloaded** → only the surviving document restored from IndexedDB; the
+        deleted one did not reappear.
+      - Zero console errors throughout. Screenshots inspected at each step.
+- [x] Doc wrap-up: this AGENTS entry; TODO.md (Backlog item resolved, Current Sprint
+      advanced, Completed entry added); ARCHITECTURE.md (Key Files rows for
+      `deleteDocument`, `queryScope.ts`, and the updated `DocumentList.tsx` behavior).
+
+**Decisions made:**
+- Deletion confirm is inline in the row, not `window.confirm()` — matches the
+  project's existing UI style (Tailwind-only, no native dialogs) and can be styled
+  destructive (red) the way a native confirm can't.
+- `canRunQuery()` takes `documents`/`selectedId`/`scope` as plain arguments rather than
+  reading the Zustand store directly, so it stays a pure function testable with plain
+  fixtures — no store mocking, no DOM.
+
+**Problems encountered (all resolved this session):**
+- First E2E attempt timed out at 240s with both documents stuck showing progress
+  states that, per a diagnostic run, actually did reach `ready` within ~10s. Root
+  cause: Vite's dependency pre-bundling triggered a mid-test "optimized dependencies
+  changed, reloading" full page reload right after the file drop (first cold run only,
+  from a fresh `npm install`), which wiped the in-progress client-side upload state
+  before it could reach `ready`. Not an app bug — a warm-vs-cold dev-server artifact.
+  Running the same test again once Vite's deps were already warm passed cleanly.
+
+**Left incomplete:** nothing from this scope. This work is committed to `master` but
+**not deployed** — Cloudflare Pages/Worker still serve the pre-delete-document build
+until the user asks for a deploy.
+
+**Next session should start with:** no queued task — ask the user. Deploying this
+session's work, Milestone 7 (BYOK), a styling/UX pass, and the deferred WASM-variant
+work are the standing candidates.
 
 ---
 

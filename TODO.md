@@ -6,15 +6,17 @@ Read this at the start of every session to know what to work on next.
 ---
 
 ## 🔴 Current Sprint
-Milestone 6 complete: multi-document, bulk upload, cross-document retrieval, and
-restore-on-reload — all live in production on top of the Milestone 5 deploy.
+Milestone 6 (multi-document, bulk upload, cross-document retrieval, restore-on-reload)
+plus the deferred "delete a persisted document" scope are both complete, built on top
+of the Milestone 5 deploy.
 - Frontend: https://pocketrag.pages.dev (Cloudflare Pages)
 - API: https://pocketrag-answer.abhiram-dev.workers.dev (Cloudflare Worker)
-Verified end-to-end in a real browser (Session 6, Commit 5): batch-drop biology.pdf +
-cooking.pdf, reload (both restored from IndexedDB with no re-drop), select biology.pdf
-but set scope to "All documents", ask a cooking question → answer "Gluten gives bread
-its chewy texture (Doc 1, page 1)" with legend "Doc 1 = cooking.pdf · Doc 2 =
-biology.pdf", zero console errors.
+Delete-document verified end-to-end in a real browser (Session 7): batch-drop two
+PDFs, delete one via the inline two-step confirm, reload — only the surviving document
+restores from IndexedDB, zero console errors. (Milestone 6's own E2E result — Session
+6, Commit 5 — is unchanged: cross-document query answers correctly with `Doc N`
+labels.) **This work is local only — not yet deployed to production**; deploy when
+ready.
 
 Full roadmap (Milestones 7-16) in 🟢 below. **No task queued — ask the user for
 direction.** Milestone 7 (BYOK) is next in the roadmap.
@@ -93,10 +95,6 @@ direction.** Milestone 7 (BYOK) is next in the roadmap.
 ---
 
 ## 🟢 Backlog — carried over, unscheduled
-- [ ] Delete a *persisted* document from the library (distinct from the Commit-4 error-row
-      Remove, which only clears an unsaved in-memory notice). Needs IndexedDB cleanup —
-      remove the DocumentRecord and its ChunkRecords — plus clearing selection/scope state
-      if it was the active doc. Not built in Milestone 6; surfaced as its own scope.
 - [ ] Force a smaller onnxruntime-web WASM variant (13MB/14MB vs current 22.5MB) —
       investigated in Session 5, deliberately deferred: the smaller variants may lack
       the async interop our dual WebGPU/WASM pipeline needs, and onnxruntime-web's
@@ -180,6 +178,14 @@ direction.** Milestone 7 (BYOK) is next in the roadmap.
       `navigator.storage.persist()` on first save. Multi-document tests added
       (`db.test.ts`, `db.getall.test.ts`, `labels.test.ts`, `documentStore.test.ts`); verified live in a real
       browser (batch drop → reload → cross-document query) — Session 6, 2026-08-01
+- [x] Delete a persisted document: `deleteDocument()` (`db.ts`, atomic readwrite over
+      `documents` + `chunks` via the `documentId` index), inline two-step "Delete
+      permanently?" confirm on ready `DocumentList` rows (not `window.confirm()`),
+      selection cleared if the deleted doc was active (existing `removeDocument`
+      behavior, now covered by a direct test). `canRunQuery()` extracted to
+      `queryScope.ts` as a pure, unit-tested helper. Verified live in a real browser:
+      drop 2 docs, delete one via the confirm step, reload — only the survivor comes
+      back — Session 7, 2026-08-08
 
 ---
 
