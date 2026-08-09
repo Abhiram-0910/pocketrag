@@ -6,21 +6,20 @@ Read this at the start of every session to know what to work on next.
 ---
 
 ## 🔴 Current Sprint
-Milestone 6 (multi-document, bulk upload, cross-document retrieval, restore-on-reload)
-plus the deferred "delete a persisted document" scope are both complete, built on top
-of the Milestone 5 deploy.
+Milestone 6 (multi-document, bulk upload, cross-document retrieval, restore-on-reload),
+the deferred "delete a persisted document" scope, and now **Milestone 7a (BYOK,
+Gemini-only)** are all complete and deployed.
 - Frontend: https://pocketrag.pages.dev (Cloudflare Pages)
 - API: https://pocketrag-answer.abhiram-dev.workers.dev (Cloudflare Worker)
-Delete-document verified end-to-end in a real browser (Session 7): batch-drop two
-PDFs, delete one via the inline two-step confirm, reload — only the surviving document
-restores from IndexedDB, zero console errors. (Milestone 6's own E2E result — Session
-6, Commit 5 — is unchanged: cross-document query answers correctly with `Doc N`
-labels.) **Deployed to production and re-verified live** (Pages `19fe2e91`, Worker
-`d132f12d`, source `e31794e`) — the delete flow was re-tested against
-`pocketrag.pages.dev` itself, not just locally.
+BYOK verified end-to-end against the **live production site** (Session 8, source
+`f4e2806`): a real visitor can toggle "Use your own Gemini API key," enter a real key,
+fetch the live model list, pick a model, and get a real grounded answer — all on
+`pocketrag.pages.dev` itself, not local dev. Worker deployed first (backward compatible
+via `keySource` defaulting to `'shared'`, so the not-yet-updated frontend kept working
+in the gap), then Pages. Bundle-hash-verified against the live site.
 
 Full roadmap (Milestones 7-16) in 🟢 below. **No task queued — ask the user for
-direction.** Milestone 7 (BYOK) is next in the roadmap.
+direction.** Milestone 7b (remaining 4 providers) is next in the BYOK roadmap.
 
 ---
 
@@ -54,7 +53,15 @@ direction.** Milestone 7 (BYOK) is next in the roadmap.
 ## 🟢 Backlog — Milestones 7-16, in order
 
 ### 7. BYOK (bring your own key)
-- Providers: Gemini, OpenAI, Anthropic, Grok, OpenRouter
+- [x] **7a — Gemini only, full trust model end-to-end** — Session 8. Key never
+      persisted (request-scoped variable server-side, local component state
+      client-side); live model-list fetch (`POST /models`); real answer calls with a
+      user-supplied key; `x-goog-api-key` header auth (not a URL query param) for both
+      shared and BYOK paths; independent rate-limit buckets so BYOK never touches the
+      shared-tier quota. Deployed and verified live on `pocketrag.pages.dev`.
+- [ ] 7b — remaining providers: OpenAI, Anthropic, Grok, OpenRouter, reusing 7a's
+      `worker/src/providers/` pattern
+- [ ] 7c — UI polish/error states (may fold into 7b as each provider lands)
 - Never persist keys anywhere — no KV, no DB, no logs. In-memory for one request only.
 - Model lists fetched live from each provider's own list-models endpoint, not hardcoded
 
@@ -187,6 +194,11 @@ direction.** Milestone 7 (BYOK) is next in the roadmap.
       `queryScope.ts` as a pure, unit-tested helper. Verified live in a real browser:
       drop 2 docs, delete one via the confirm step, reload — only the survivor comes
       back — Session 7, 2026-08-08
+- [x] Milestone 7a — BYOK, Gemini-only: key entry, live model-list fetch, real answer
+      calls with a user-supplied key, key never persisted anywhere (request-scoped
+      server-side, local component state client-side), header-based provider auth,
+      independent shared/BYOK rate-limit buckets. Verified end-to-end on the live
+      production site (not local dev) — Session 8, 2026-08-09
 
 ---
 

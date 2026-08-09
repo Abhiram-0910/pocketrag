@@ -7,19 +7,20 @@ Claude reads this at the START of every new session to understand what happened 
 
 ## Project State
 **Last updated:** 2026-08-09
-**Current branch:** master (through `e31794e` delete-a-persisted-document, deployed
-and pushed — see below)
+**Current branch:** master (through `f4e2806` BYOK Milestone 7a, deployed and
+pushed — see below)
 **Remote:** `github.com/Abhiram-0910/pocketrag` (private) — pushed and up to date.
-**Overall status:** MVP **+ Milestone 6 (multi-document)** feature-complete and
-**fully deployed in production**. Frontend: `https://pocketrag.pages.dev` (Cloudflare
-Pages). API: `https://pocketrag-answer.abhiram-dev.workers.dev` (Cloudflare Worker).
-Supports a multi-document library, bulk drag-and-drop, a this-document/all-documents
-retrieval scope toggle with cross-document ranking, Worker-owned per-request `Doc N`
-citation labels, restore-on-reload from IndexedDB, and `navigator.storage.persist()`.
-60s timeout + manual retry still there as a demo-day safety net. Session 7 added
-deleting a persisted document (`deleteDocument()` + inline confirm UI) — **deployed to
-production and re-verified live** (Pages `19fe2e91`, Worker `d132f12d`, source
-`e31794e`).
+**Overall status:** MVP **+ Milestone 6 (multi-document)** + **Milestone 7a (BYOK,
+Gemini-only)** feature-complete and **fully deployed in production**. Frontend:
+`https://pocketrag.pages.dev` (Cloudflare Pages). API:
+`https://pocketrag-answer.abhiram-dev.workers.dev` (Cloudflare Worker). Supports a
+multi-document library, bulk drag-and-drop, a this-document/all-documents retrieval
+scope toggle with cross-document ranking, Worker-owned per-request `Doc N` citation
+labels, restore-on-reload from IndexedDB, `navigator.storage.persist()`, deleting a
+persisted document, and now bring-your-own-Gemini-API-key as an alternative to the
+shared/free-tier key — live model-list fetch, model picker, real answer calls, key
+never persisted anywhere server- or client-side. 60s timeout + manual retry still
+there as a demo-day safety net.
 
 ---
 
@@ -677,6 +678,116 @@ until the user asks for a deploy.
 **Next session should start with:** no queued task — ask the user. Deploying this
 session's work, Milestone 7 (BYOK), a styling/UX pass, and the deferred WASM-variant
 work are the standing candidates.
+
+---
+
+### Session 8 — 2026-08-09
+**Goal:** Milestone 7a — BYOK, Gemini-only: prove the full trust model (key entry,
+strictly in-memory/one-request-only handling, live model-list fetch, real answer call
+with a user-supplied key) before extending to the other 4 providers in 7b. Staged
+deliberately as its own reviewable unit given the trust surface involved — plan was
+written and approved before any code.
+
+**Completed:**
+- [x] `worker/src/validate.ts` — `validateAnswerRequest` extended with optional
+      `keySource: 'shared' | 'own'` (defaults to `'shared'` when absent — see Decisions
+      below), `apiKey`/`provider`/`model` required and validated only when `keySource`
+      is `'own'`. New `MAX_API_KEY_LENGTH` (200) and `MAX_MODEL_LENGTH` (128) caps,
+      reject-not-truncate, same pattern as the existing `MAX_DOCUMENT_ID_LENGTH`. New
+      `validateModelsRequest` + `SUPPORTED_PROVIDERS` allowlist (`['gemini']` for now).
+- [x] `worker/src/rateLimit.ts` — `checkRateLimit` gained a `bucket` parameter (KV key
+      is now `ratelimit:{bucket}:{ip}:{day}`); new `BYOK_DAILY_LIMIT` (500, an abuse
+      guard on our own Worker, not quota protection — BYOK never touches our Gemini
+      quota). Shared and BYOK requests from the same IP now track independent counters.
+- [x] `worker/src/gemini.ts` moved to `worker/src/providers/gemini.ts` (directory
+      convention for 7b's remaining providers). `callGemini` switched from a `?key=`
+      URL query param to the `x-goog-api-key` header for both the shared and BYOK
+      paths — URLs are far more likely to end up in some logging layer than headers
+      are. Added `listGeminiModels()` (filters to `generateContent`-capable models,
+      strips the `models/` name prefix).
+- [x] `worker/src/index.ts` — split into `handleAnswer`/`handleModels`; new `POST
+      /models` endpoint; BYOK vs shared bucket selection on both endpoints.
+- [x] Frontend: `src/lib/answerRequest.ts` gained a `KeyConfig` discriminated union
+      (`{keySource:'shared'}` | `{keySource:'own', apiKey, provider, model}`) threaded
+      through `attemptAnswer`/`fetchAnswerFromWorker`. New `src/lib/models.ts`
+      (`fetchModelsFromWorker`). New `src/components/ByokPanel.tsx` — toggle, key
+      input, "Fetch models" button, model `<select>`; all state local to the component
+      (not Zustand, not IndexedDB) so the key can't be picked up by a devtools/logging
+      integration attached to shared state later, and disappears on reload by
+      construction. Emits `KeyConfig | null` (`null` = BYOK selected but incomplete —
+      never silently falls back to the shared key mid-setup). `QueryPanel` takes
+      `keyConfig` as a prop and gates submission on it. `.env.development`/
+      `.env.production` renamed `VITE_ANSWER_API_URL` → `VITE_API_BASE_URL` (derives
+      both `/answer` and `/models` from one base).
+- [x] Tests: worker 79 (was 46, +33) — new BYOK validation cases, the rate-limit
+      bucket split, `providers/gemini.test.ts` (moved + `listGeminiModels` cases), and
+      **two separate key-leak tests** per the user's explicit ask: `validateAnswerRequest`'s
+      own rejection error strings never contain a raw oversized/malformed key, and
+      `callGemini`/`listGeminiModels`'s thrown errors never contain the key either —
+      deliberately treated as two different code paths since each constructs its own
+      error text. Frontend 53 (was 52, +1: `attemptAnswer` passes `KeyConfig` through
+      to `fetchAnswer` unchanged). No `models.test.ts` — matches the existing precedent
+      that `fetchAnswerFromWorker`'s thin fetch-wrapper has no dedicated unit test
+      either, verified live instead. `tsc`/`oxlint`/`build` clean both sides.
+- [x] **Local browser E2E** (Playwright installed then removed again, `wrangler dev` +
+      Vite dev, real Gemini): dropped a real PDF, toggled BYOK, entered a real key,
+      **live-fetched 42 real Gemini models**, selected one, asked a question, got a
+      real grounded answer. First run picked a model (`gemini-2.0-flash-lite`) that
+      returned a genuine 429 quota-exhausted error from Gemini for that specific
+      model/project — not a bug, confirmed by reading the real Gemini error body —
+      switched the test to prefer `gemini-3.5-flash-lite` (the model the shared path
+      already uses successfully) and it passed cleanly.
+- [x] **Deployed the Worker to production** (backward compatible via `keySource`
+      defaulting to `'shared'` — verified the *old* request shape, with no `keySource`
+      field at all, still returns 200 against the *new* Worker, so the not-yet-deployed
+      Pages frontend wasn't broken in the gap). Sent real BYOK `/models` and `/answer`
+      requests directly against the deployed Worker, both 200. Ran `wrangler tail`
+      during the live BYOK `/answer` call and grepped the captured request-lifecycle
+      JSON for the literal key value: **confirmed clean** — not in headers, not in
+      `logs`, not in `exceptions`. (Also incidentally confirmed Cloudflare's default
+      Workers Logs capture incoming request headers/metadata but not outbound
+      `fetch()` subrequest details — resolves the "Cloudflare's own logging is outside
+      code-level proof" flag from the plan, at least for the default observability
+      config this project uses.)
+- [x] Committed (`f4e2806`) after the user reviewed full file contents for
+      `providers/gemini.ts`, `ByokPanel.tsx`, and `models.ts` directly (not diffs —
+      these were new files).
+- [x] **Deployed Pages** (`npm run build` + `wrangler pages deploy dist
+      --project-name=pocketrag --branch=main`, same process as every prior deploy).
+      Confirmed via `wrangler pages deployment list` (Production, branch `main`,
+      source `f4e2806`) and bundle-hash match between the live site and the local
+      build (`index-D-aAcegy.js` both places — first hash-comparison attempt used a
+      grep pattern that didn't handle a hyphen inside the hash itself and produced a
+      false mismatch; re-checked with a corrected pattern before concluding anything).
+- [x] **Live production BYOK E2E** against `pocketrag.pages.dev` itself (not local dev,
+      not direct Worker calls): real visitor flow — drop PDF, toggle "Use your own
+      Gemini API key," enter a real key, fetch the live model list, select a model, get
+      a real grounded answer citing the dropped document. Zero console errors.
+      Screenshots inspected.
+
+**Decisions made (deviations from the approved plan, flagged as such):**
+- **`keySource` defaults to `'shared'` instead of being strictly required.** The
+  approved plan called it "new, required." Once at the deploy step it became clear
+  that "required" would mean the *already-live* Pages frontend (which never sends
+  `keySource`) gets 400-rejected the instant the new Worker deploys — breaking the
+  shared-key flow for real users in the gap between the Worker and Pages deploys.
+  Defaulting the missing field to `'shared'` makes the Worker deployable independently
+  of the frontend, which is exactly what happened this session (Worker went out first,
+  Pages followed later in the same session but could have been any time after).
+- Rate-limit message reworded from "today's question limit" to "today's request
+  limit" — one shared constant now serves both `/answer` and `/models`, and "question"
+  didn't fit a model-list request.
+- Worker-proxied (not direct-browser-to-Gemini) for both `/answer` and `/models`, per
+  the plan's own recommendation — sidesteps provider-by-provider CORS-support
+  uncertainty ahead of 7b's four remaining providers.
+
+**Left incomplete:** nothing from 7a's scope. 7b (remaining 4 providers) and 7c (UI
+polish/error states) are still ahead, per the original staged plan.
+
+**Next session should start with:** no queued task — ask the user. Milestone 7b
+(OpenAI/Anthropic/Grok/OpenRouter, reusing 7a's `providers/` pattern) is the natural
+next step in the BYOK roadmap; a styling/UX pass and the deferred WASM-variant work
+remain the other standing candidates.
 
 ---
 
