@@ -6,9 +6,10 @@ Claude reads this at the START of every new session to understand what happened 
 ---
 
 ## Project State
-**Last updated:** 2026-08-08
-**Current branch:** master (through `162bccd` Milestone 6 wrap-up; Session 7's delete-
-document work staged this session, see below)
+**Last updated:** 2026-08-09
+**Current branch:** master (through `e31794e` delete-a-persisted-document, deployed
+and pushed — see below)
+**Remote:** `github.com/Abhiram-0910/pocketrag` (private) — pushed and up to date.
 **Overall status:** MVP **+ Milestone 6 (multi-document)** feature-complete and
 **fully deployed in production**. Frontend: `https://pocketrag.pages.dev` (Cloudflare
 Pages). API: `https://pocketrag-answer.abhiram-dev.workers.dev` (Cloudflare Worker).
@@ -16,8 +17,9 @@ Supports a multi-document library, bulk drag-and-drop, a this-document/all-docum
 retrieval scope toggle with cross-document ranking, Worker-owned per-request `Doc N`
 citation labels, restore-on-reload from IndexedDB, and `navigator.storage.persist()`.
 60s timeout + manual retry still there as a demo-day safety net. Session 7 added
-deleting a persisted document (`deleteDocument()` + inline confirm UI) — **built and
-verified locally, not yet deployed to production.**
+deleting a persisted document (`deleteDocument()` + inline confirm UI) — **deployed to
+production and re-verified live** (Pages `19fe2e91`, Worker `d132f12d`, source
+`e31794e`).
 
 ---
 

@@ -15,8 +15,9 @@ Delete-document verified end-to-end in a real browser (Session 7): batch-drop tw
 PDFs, delete one via the inline two-step confirm, reload — only the surviving document
 restores from IndexedDB, zero console errors. (Milestone 6's own E2E result — Session
 6, Commit 5 — is unchanged: cross-document query answers correctly with `Doc N`
-labels.) **This work is local only — not yet deployed to production**; deploy when
-ready.
+labels.) **Deployed to production and re-verified live** (Pages `19fe2e91`, Worker
+`d132f12d`, source `e31794e`) — the delete flow was re-tested against
+`pocketrag.pages.dev` itself, not just locally.
 
 Full roadmap (Milestones 7-16) in 🟢 below. **No task queued — ask the user for
 direction.** Milestone 7 (BYOK) is next in the roadmap.
