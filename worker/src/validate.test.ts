@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { MAX_CHUNKS, MAX_CHUNK_TEXT_LENGTH, MAX_QUESTION_LENGTH, validateAnswerRequest } from './validate'
+import {
+  MAX_API_KEY_LENGTH,
+  MAX_CHUNKS,
+  MAX_CHUNK_TEXT_LENGTH,
+  MAX_MODEL_LENGTH,
+  MAX_QUESTION_LENGTH,
+  validateAnswerRequest,
+  validateModelsRequest,
+} from './validate'
 
 const validChunk = { text: 'The mitochondrion is the powerhouse of the cell.', page: 1, score: 0.9, documentId: 'doc-1' }
 
@@ -10,6 +18,7 @@ describe('validateAnswerRequest', () => {
     if (result.ok) {
       expect(result.question).toBe('What is the mitochondrion?')
       expect(result.chunks).toEqual([validChunk])
+      expect(result.keySource).toBe('shared')
     }
   })
 
@@ -65,5 +74,173 @@ describe('validateAnswerRequest', () => {
     const result = validateAnswerRequest({ question: '  what is x?  ', chunks: [validChunk] })
     expect(result.ok).toBe(true)
     if (result.ok) expect(result.question).toBe('what is x?')
+  })
+
+  it('defaults keySource to "shared" when omitted (backward compatible with older clients)', () => {
+    const result = validateAnswerRequest({ question: 'q', chunks: [validChunk] })
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.keySource).toBe('shared')
+  })
+
+  it('rejects a keySource that is neither "shared" nor "own"', () => {
+    const result = validateAnswerRequest({ question: 'q', chunks: [validChunk], keySource: 'stolen' })
+    expect(result.ok).toBe(false)
+  })
+
+  it('accepts a well-formed BYOK request and returns the key/provider/model', () => {
+    const result = validateAnswerRequest({
+      question: 'q',
+      chunks: [validChunk],
+      keySource: 'own',
+      apiKey: 'my-real-key',
+      provider: 'gemini',
+      model: 'gemini-3.5-pro',
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok && result.keySource === 'own') {
+      expect(result.apiKey).toBe('my-real-key')
+      expect(result.provider).toBe('gemini')
+      expect(result.model).toBe('gemini-3.5-pro')
+    }
+  })
+
+  it('rejects keySource "own" with a missing apiKey', () => {
+    const result = validateAnswerRequest({
+      question: 'q',
+      chunks: [validChunk],
+      keySource: 'own',
+      provider: 'gemini',
+      model: 'gemini-3.5-pro',
+    })
+    expect(result.ok).toBe(false)
+  })
+
+  it('rejects keySource "own" with an empty apiKey', () => {
+    const result = validateAnswerRequest({
+      question: 'q',
+      chunks: [validChunk],
+      keySource: 'own',
+      apiKey: '',
+      provider: 'gemini',
+      model: 'gemini-3.5-pro',
+    })
+    expect(result.ok).toBe(false)
+  })
+
+  it('rejects keySource "own" with an apiKey over the max length', () => {
+    const result = validateAnswerRequest({
+      question: 'q',
+      chunks: [validChunk],
+      keySource: 'own',
+      apiKey: 'x'.repeat(MAX_API_KEY_LENGTH + 1),
+      provider: 'gemini',
+      model: 'gemini-3.5-pro',
+    })
+    expect(result.ok).toBe(false)
+  })
+
+  it('rejects keySource "own" with an unsupported provider', () => {
+    const result = validateAnswerRequest({
+      question: 'q',
+      chunks: [validChunk],
+      keySource: 'own',
+      apiKey: 'my-real-key',
+      provider: 'openai',
+      model: 'gpt-x',
+    })
+    expect(result.ok).toBe(false)
+  })
+
+  it('rejects keySource "own" with a missing or empty model', () => {
+    expect(
+      validateAnswerRequest({
+        question: 'q',
+        chunks: [validChunk],
+        keySource: 'own',
+        apiKey: 'my-real-key',
+        provider: 'gemini',
+      }).ok,
+    ).toBe(false)
+    expect(
+      validateAnswerRequest({
+        question: 'q',
+        chunks: [validChunk],
+        keySource: 'own',
+        apiKey: 'my-real-key',
+        provider: 'gemini',
+        model: '',
+      }).ok,
+    ).toBe(false)
+  })
+
+  it('rejects keySource "own" with a model over the max length', () => {
+    const result = validateAnswerRequest({
+      question: 'q',
+      chunks: [validChunk],
+      keySource: 'own',
+      apiKey: 'my-real-key',
+      provider: 'gemini',
+      model: 'x'.repeat(MAX_MODEL_LENGTH + 1),
+    })
+    expect(result.ok).toBe(false)
+  })
+
+  it('never echoes the raw apiKey value back in a rejection error message', () => {
+    const secretKey = 'sk-super-secret-value-should-never-appear-anywhere-in-any-error-string-12345'
+    const oversized = validateAnswerRequest({
+      question: 'q',
+      chunks: [validChunk],
+      keySource: 'own',
+      apiKey: secretKey.repeat(3), // over MAX_API_KEY_LENGTH
+      provider: 'gemini',
+      model: 'gemini-3.5-pro',
+    })
+    expect(oversized.ok).toBe(false)
+    if (!oversized.ok) expect(oversized.error).not.toContain(secretKey)
+
+    const emptyKeyWithGarbageProvider = validateAnswerRequest({
+      question: 'q',
+      chunks: [validChunk],
+      keySource: 'own',
+      apiKey: '',
+      provider: 'gemini',
+      model: 'gemini-3.5-pro',
+    })
+    expect(emptyKeyWithGarbageProvider.ok).toBe(false)
+    if (!emptyKeyWithGarbageProvider.ok) expect(emptyKeyWithGarbageProvider.error).not.toContain(secretKey)
+  })
+})
+
+describe('validateModelsRequest', () => {
+  it('accepts a well-formed request', () => {
+    const result = validateModelsRequest({ provider: 'gemini', apiKey: 'my-real-key' })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.provider).toBe('gemini')
+      expect(result.apiKey).toBe('my-real-key')
+    }
+  })
+
+  it('rejects a non-object body', () => {
+    expect(validateModelsRequest(null).ok).toBe(false)
+    expect(validateModelsRequest('a string').ok).toBe(false)
+  })
+
+  it('rejects an unsupported provider', () => {
+    expect(validateModelsRequest({ provider: 'openai', apiKey: 'my-real-key' }).ok).toBe(false)
+    expect(validateModelsRequest({ apiKey: 'my-real-key' }).ok).toBe(false)
+  })
+
+  it('rejects a missing, empty, or oversized apiKey', () => {
+    expect(validateModelsRequest({ provider: 'gemini' }).ok).toBe(false)
+    expect(validateModelsRequest({ provider: 'gemini', apiKey: '' }).ok).toBe(false)
+    expect(validateModelsRequest({ provider: 'gemini', apiKey: 'x'.repeat(MAX_API_KEY_LENGTH + 1) }).ok).toBe(false)
+  })
+
+  it('never echoes the raw apiKey value back in a rejection error message', () => {
+    const secretKey = 'sk-another-secret-value-should-never-appear-anywhere-in-any-error-string-67890'
+    const result = validateModelsRequest({ provider: 'gemini', apiKey: secretKey.repeat(3) })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error).not.toContain(secretKey)
   })
 })

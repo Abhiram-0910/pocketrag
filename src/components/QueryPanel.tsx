@@ -2,14 +2,18 @@ import { useCallback, useState, type FormEvent } from 'react'
 import { embedQuery } from '../lib/embeddingClient'
 import { getAllChunks, getChunksForDocument, type ChunkRecord } from '../lib/db'
 import { rankChunks, type ScoredChunk } from '../lib/retrieval'
-import { attemptAnswer, fetchAnswerFromWorker, type DocLabel } from '../lib/answerRequest'
+import { attemptAnswer, fetchAnswerFromWorker, type DocLabel, type KeyConfig } from '../lib/answerRequest'
 import { canRunQuery } from '../lib/queryScope'
 import { useDocumentStore } from '../store/documentStore'
 
 const TOP_K = 3
 const ANSWER_TIMEOUT_MS = 60_000
 
-export function QueryPanel() {
+interface QueryPanelProps {
+  keyConfig: KeyConfig | null
+}
+
+export function QueryPanel({ keyConfig }: QueryPanelProps) {
   const [query, setQuery] = useState('')
   const [busy, setBusy] = useState(false)
   const [awaitingAnswer, setAwaitingAnswer] = useState(false)
@@ -30,12 +34,13 @@ export function QueryPanel() {
   // model, so cosine scores are directly comparable across documents — see ARCHITECTURE.md).
   const selectedReadyId = documents.find((d) => d.id === selectedId && d.status === 'ready')?.id ?? null
   const hasReadyDoc = documents.some((d) => d.status === 'ready')
-  const canQuery = canRunQuery(documents, selectedId, scope)
+  const docsReady = canRunQuery(documents, selectedId, scope)
+  const canQuery = docsReady && keyConfig !== null
 
   const titleFor = (id: string) => documents.find((d) => d.id === id)?.fileName ?? id
 
   const runAnswerAttempt = useCallback(
-    async (question: string, chunks: ScoredChunk<ChunkRecord>[], isRetry: boolean) => {
+    async (question: string, chunks: ScoredChunk<ChunkRecord>[], isRetry: boolean, activeKeyConfig: KeyConfig) => {
       setAwaitingAnswer(true)
       setTimedOut(false)
       if (!isRetry) setAnswerError(null)
@@ -46,7 +51,13 @@ export function QueryPanel() {
         score,
         documentId: chunk.documentId,
       }))
-      const result = await attemptAnswer(fetchAnswerFromWorker, question, requestChunks, ANSWER_TIMEOUT_MS)
+      const result = await attemptAnswer(
+        fetchAnswerFromWorker,
+        question,
+        requestChunks,
+        activeKeyConfig,
+        ANSWER_TIMEOUT_MS,
+      )
 
       if (result.outcome === 'success') {
         setAnswer(result.answer)
@@ -70,7 +81,8 @@ export function QueryPanel() {
     (e: FormEvent) => {
       e.preventDefault()
       const useAll = scope === 'all'
-      if (!canQuery || (!useAll && !selectedReadyId) || !query.trim() || busy) return
+      if (!canQuery || keyConfig === null || (!useAll && !selectedReadyId) || !query.trim() || busy) return
+      const activeKeyConfig = keyConfig
 
       const question = query.trim()
       setBusy(true)
@@ -93,7 +105,7 @@ export function QueryPanel() {
             .then(async (chunks) => {
               const ranked = rankChunks(msg.embedding, chunks, TOP_K)
               setResults(ranked)
-              await runAnswerAttempt(question, ranked, false)
+              await runAnswerAttempt(question, ranked, false, activeKeyConfig)
             })
             .catch((err) => setError(err instanceof Error ? err.message : 'Failed to retrieve chunks.'))
             .finally(() => setBusy(false))
@@ -104,24 +116,24 @@ export function QueryPanel() {
         },
       })
     },
-    [canQuery, scope, selectedReadyId, query, busy, runAnswerAttempt],
+    [canQuery, keyConfig, scope, selectedReadyId, query, busy, runAnswerAttempt],
   )
 
   const handleRetry = useCallback(() => {
-    if (!submittedQuestion || !results) return
+    if (!submittedQuestion || !results || keyConfig === null) return
     setBusy(true)
-    runAnswerAttempt(submittedQuestion, results, true).finally(() => setBusy(false))
-  }, [submittedQuestion, results, runAnswerAttempt])
+    runAnswerAttempt(submittedQuestion, results, true, keyConfig).finally(() => setBusy(false))
+  }, [submittedQuestion, results, runAnswerAttempt, keyConfig])
 
   const placeholder = canQuery
     ? scope === 'all'
       ? 'Ask a question across all documents…'
       : 'Ask a question about the selected document…'
-    : !hasReadyDoc
-      ? 'Upload a document first'
-      : scope === 'all'
+    : !docsReady
+      ? !hasReadyDoc
         ? 'Upload a document first'
         : 'Select a document first'
+      : 'Finish setting up your API key first'
 
   return (
     <div className="mt-8 text-left">

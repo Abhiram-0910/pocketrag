@@ -18,9 +18,17 @@ export interface RequestAnswerChunk {
   documentId: string
 }
 
+// Mirrors the Worker's validate.ts ValidationResult shape. The 'own' variant's apiKey
+// lives only in this object, passed straight through to fetch() — never stored,
+// never logged, discarded once the request settles.
+export type KeyConfig =
+  | { keySource: 'shared' }
+  | { keySource: 'own'; apiKey: string; provider: 'gemini'; model: string }
+
 export type FetchAnswerFn = (
   question: string,
   chunks: RequestAnswerChunk[],
+  keyConfig: KeyConfig,
   signal: AbortSignal,
 ) => Promise<AnswerResponse>
 
@@ -38,12 +46,13 @@ export async function attemptAnswer(
   fetchAnswer: FetchAnswerFn,
   question: string,
   chunks: RequestAnswerChunk[],
+  keyConfig: KeyConfig,
   timeoutMs: number,
 ): Promise<AnswerAttemptResult> {
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    const { answer, groundingWarning, docLabels } = await fetchAnswer(question, chunks, controller.signal)
+    const { answer, groundingWarning, docLabels } = await fetchAnswer(question, chunks, keyConfig, controller.signal)
     return { outcome: 'success', answer, groundingWarning, docLabels }
   } catch (err) {
     if (isAbortError(err)) return { outcome: 'timeout' }
@@ -53,17 +62,17 @@ export async function attemptAnswer(
   }
 }
 
-const ANSWER_API_URL = import.meta.env.VITE_ANSWER_API_URL
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL
 
 /** Real implementation of FetchAnswerFn — posts to the Cloudflare Worker. */
-export const fetchAnswerFromWorker: FetchAnswerFn = async (question, chunks, signal) => {
-  if (!ANSWER_API_URL) {
-    throw new Error('Answer generation is not configured yet (VITE_ANSWER_API_URL is unset).')
+export const fetchAnswerFromWorker: FetchAnswerFn = async (question, chunks, keyConfig, signal) => {
+  if (!API_BASE_URL) {
+    throw new Error('Answer generation is not configured yet (VITE_API_BASE_URL is unset).')
   }
-  const res = await fetch(ANSWER_API_URL, {
+  const res = await fetch(`${API_BASE_URL}/answer`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question, chunks }),
+    body: JSON.stringify({ question, chunks, ...keyConfig }),
     signal,
   })
   if (!res.ok) {

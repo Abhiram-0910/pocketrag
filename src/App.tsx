@@ -1,13 +1,18 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { DropZone } from './components/DropZone'
 import { DocumentList } from './components/DocumentList'
 import { QueryPanel } from './components/QueryPanel'
+import { ByokPanel } from './components/ByokPanel'
 import { getAllDocuments } from './lib/db'
+import type { KeyConfig } from './lib/answerRequest'
 import { useDocumentStore } from './store/documentStore'
 
 function App() {
   const restoreDocuments = useDocumentStore((s) => s.restoreDocuments)
   const restored = useRef(false)
+  // Matches ByokPanel's default (unchecked) state — the shared key until the user
+  // opts into BYOK and completes key entry.
+  const [keyConfig, setKeyConfig] = useState<KeyConfig | null>({ keySource: 'shared' })
 
   // Restore the document list from IndexedDB on load — persisted docs are fully embedded,
   // so they come back as `ready`. We land on the list and select nothing (multi-document
@@ -40,7 +45,8 @@ function App() {
       <div className="mt-6">
         <DropZone />
         <DocumentList />
-        <QueryPanel />
+        <ByokPanel onChange={setKeyConfig} />
+        <QueryPanel keyConfig={keyConfig} />
       </div>
     </main>
   )
