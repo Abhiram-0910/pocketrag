@@ -9,7 +9,8 @@ Claude reads this at the START of every new session to understand what happened 
 **Last updated:** 2026-08-09
 **Current branch:** master (through `f4e2806` BYOK Milestone 7a, deployed and
 pushed — see below)
-**Remote:** `github.com/Abhiram-0910/pocketrag` (private) — pushed and up to date.
+**Remote:** `github.com/Abhiram-0910/pocketrag` (private) — pushed and up to date
+(confirmed `origin/master` == `39b1c89` as of this push, 2026-08-09).
 **Overall status:** MVP **+ Milestone 6 (multi-document)** + **Milestone 7a (BYOK,
 Gemini-only)** feature-complete and **fully deployed in production**. Frontend:
 `https://pocketrag.pages.dev` (Cloudflare Pages). API:
