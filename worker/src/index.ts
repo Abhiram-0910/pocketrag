@@ -5,6 +5,7 @@ import { assignDocLabels } from './labels'
 import { checkRateLimit, BYOK_DAILY_LIMIT } from './rateLimit'
 import { callGemini, listGeminiModels, DEFAULT_SHARED_MODEL } from './providers/gemini'
 import { callOpenAI, listOpenAIModels } from './providers/openai'
+import { callAnthropic, listAnthropicModels } from './providers/anthropic'
 import { corsHeaders, resolveCorsOrigin } from './cors'
 
 const RATE_LIMIT_MESSAGE = "You've hit today's request limit. Please try again tomorrow."
@@ -53,10 +54,17 @@ async function handleAnswer(request: Request, env: Env, origin: string | null, i
   const provider = validation.keySource === 'own' ? validation.provider : 'gemini'
 
   try {
-    const answer =
-      provider === 'openai'
-        ? await callOpenAI(fetch, apiKey, model, prompt)
-        : await callGemini(fetch, apiKey, model, prompt)
+    let answer: string
+    switch (provider) {
+      case 'openai':
+        answer = await callOpenAI(fetch, apiKey, model, prompt)
+        break
+      case 'anthropic':
+        answer = await callAnthropic(fetch, apiKey, model, prompt)
+        break
+      default:
+        answer = await callGemini(fetch, apiKey, model, prompt)
+    }
     const providedPairs = validation.chunks.map((chunk) => ({
       // Non-null assertion is safe by invariant: assignDocLabels labels every distinct
       // documentId in these chunks, so every chunk's documentId is guaranteed in labelOf.
@@ -93,10 +101,17 @@ async function handleModels(request: Request, env: Env, origin: string | null, i
   try {
     // validation.apiKey lives only in this local, request-scoped variable — passed
     // straight into the provider's model-list call and never assigned anywhere else.
-    const models =
-      validation.provider === 'openai'
-        ? await listOpenAIModels(fetch, validation.apiKey)
-        : await listGeminiModels(fetch, validation.apiKey)
+    let models: { id: string; displayName: string }[]
+    switch (validation.provider) {
+      case 'openai':
+        models = await listOpenAIModels(fetch, validation.apiKey)
+        break
+      case 'anthropic':
+        models = await listAnthropicModels(fetch, validation.apiKey)
+        break
+      default:
+        models = await listGeminiModels(fetch, validation.apiKey)
+    }
     return json({ models }, 200, origin)
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : 'Failed to fetch the model list.' }, 502, origin)

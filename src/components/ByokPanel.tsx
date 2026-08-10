@@ -6,9 +6,15 @@ interface ByokPanelProps {
   onChange: (config: KeyConfig | null) => void
 }
 
-type Provider = 'gemini' | 'openai'
+type Provider = 'gemini' | 'openai' | 'anthropic'
 
-const PROVIDER_LABELS: Record<Provider, string> = { gemini: 'Gemini', openai: 'OpenAI' }
+const PROVIDER_LABELS: Record<Provider, string> = { gemini: 'Gemini', openai: 'OpenAI', anthropic: 'Claude' }
+
+// Providers live-verified end-to-end against their real API (see AGENTS.md session
+// logs). Anthropic's Worker code is complete and unit-tested against mocked responses
+// but has no real key to verify against yet — gated out of the picker below rather
+// than presented at the same trust level as a proven provider.
+const VERIFIED_PROVIDERS: Provider[] = ['gemini', 'openai']
 
 /**
  * Own-key entry: provider picker, key input, "fetch models" call, model picker. The key
@@ -101,11 +107,14 @@ export function ByokPanel({ onChange }: ByokPanelProps) {
             onChange={(e) => handleProviderChange(e.target.value as Provider)}
             className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
           >
-            {(Object.keys(PROVIDER_LABELS) as Provider[]).map((p) => (
-              <option key={p} value={p}>
-                {PROVIDER_LABELS[p]}
-              </option>
-            ))}
+            {(Object.keys(PROVIDER_LABELS) as Provider[]).map((p) => {
+              const verified = VERIFIED_PROVIDERS.includes(p)
+              return (
+                <option key={p} value={p} disabled={!verified}>
+                  {verified ? PROVIDER_LABELS[p] : `${PROVIDER_LABELS[p]} (coming soon)`}
+                </option>
+              )
+            })}
           </select>
 
           <div className="flex gap-2">

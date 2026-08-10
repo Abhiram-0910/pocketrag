@@ -155,14 +155,30 @@ describe('validateAnswerRequest', () => {
     }
   })
 
-  it('rejects keySource "own" with an unsupported provider', () => {
+  it('accepts a well-formed BYOK request for the anthropic provider', () => {
     const result = validateAnswerRequest({
       question: 'q',
       chunks: [validChunk],
       keySource: 'own',
       apiKey: 'my-real-key',
       provider: 'anthropic',
-      model: 'claude-x',
+      model: 'claude-sonnet-4-5',
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok && result.keySource === 'own') {
+      expect(result.provider).toBe('anthropic')
+      expect(result.model).toBe('claude-sonnet-4-5')
+    }
+  })
+
+  it('rejects keySource "own" with an unsupported provider', () => {
+    const result = validateAnswerRequest({
+      question: 'q',
+      chunks: [validChunk],
+      keySource: 'own',
+      apiKey: 'my-real-key',
+      provider: 'grok',
+      model: 'grok-x',
     })
     expect(result.ok).toBe(false)
   })
@@ -248,8 +264,14 @@ describe('validateModelsRequest', () => {
     if (result.ok) expect(result.provider).toBe('openai')
   })
 
+  it('accepts the anthropic provider', () => {
+    const result = validateModelsRequest({ provider: 'anthropic', apiKey: 'my-real-key' })
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.provider).toBe('anthropic')
+  })
+
   it('rejects an unsupported provider', () => {
-    expect(validateModelsRequest({ provider: 'anthropic', apiKey: 'my-real-key' }).ok).toBe(false)
+    expect(validateModelsRequest({ provider: 'grok', apiKey: 'my-real-key' }).ok).toBe(false)
     expect(validateModelsRequest({ apiKey: 'my-real-key' }).ok).toBe(false)
   })
 

@@ -939,4 +939,107 @@ WASM-variant work remain the other standing candidates.
 
 ---
 
+### Session 10 — 2026-08-10
+**Goal:** Milestone 7b (second provider) — extend BYOK to Anthropic (Claude), reusing
+the now-twice-proven `worker/src/providers/` pattern. Explicit constraint going in
+(user-flagged): PocketRAG holds no Anthropic key of its own — Anthropic is BYOK-only,
+no shared-tier path exists or will exist for it. Code/unit tests need no real key
+(mocked fetch, same as `gemini.test.ts`/`openai.test.ts`); live E2E verification does,
+and no key was available this session. Plan (real Anthropic docs research, not assumed
+from training data) written and approved before any code, staged explicitly as
+**Phase A (no key needed) → Phase B (needs a real key, blocked)**.
+
+**API contract verified against current docs before writing code:**
+- Messages API: `POST https://api.anthropic.com/v1/messages`, headers
+  `anthropic-version: 2023-06-01` + `x-api-key`, body requires `max_tokens` (genuinely
+  new — Gemini/OpenAI calls send no cap and rely on a provider-side default). Response
+  text sits in a `content` array of typed blocks (`content[].type === 'text'`), not a
+  flat path — read via `.find(block => block.type === 'text')` rather than blindly
+  indexing `content[0]`, since a thinking-enabled model could emit a non-text block first.
+- Models list: `GET /v1/models` confirmed to exist (not every provider has one — this
+  needed checking, not assuming), but is **paginated** (default page size 20, unlike
+  Gemini/OpenAI's single-shot lists) — sidestepped with `?limit=1000` on one GET rather
+  than building a pagination loop for a >1000-models scenario that isn't real. Anthropic
+  also returns a real `display_name` field per model (Gemini has one, OpenAI doesn't).
+- CORS: confirmed the `anthropic-dangerous-direct-browser-access` header flagged during
+  7a's planning is real and does what it sounds like — an opt-in that lets a *browser*
+  call Anthropic directly, named "dangerous" because a key embedded in client JS is
+  visible to anyone on that page. **Confirmed irrelevant to this project's architecture**:
+  the Worker calls Anthropic server-to-server, no browser involved in that hop, so the
+  header is simply not needed. Validates the existing Worker-proxy decision rather than
+  challenging it.
+
+**Completed (Phase A — no key needed, fully self-contained):**
+- [x] `worker/src/providers/anthropic.ts` (+ `anthropic.test.ts`, 10 tests) —
+      `callAnthropic`/`listAnthropicModels`, structured like `openai.ts`. New
+      `ANTHROPIC_API_VERSION`/`ANTHROPIC_MAX_OUTPUT_TOKENS` (2048, bumped up from an
+      initial 1024 proposal at the user's explicit call — a truncated answer/citation
+      is a new failure mode the other two providers don't have, but it's the BYOK
+      user's own cost to bear, not the shared tier's) named constants. Same
+      injectable-`fetchImpl`, throw-with-status-and-body, never-leak-the-key discipline
+      as `gemini.ts`/`openai.ts`, including the two separate key-leak tests.
+- [x] `worker/src/validate.ts` — `SUPPORTED_PROVIDERS` extended to `['gemini', 'openai',
+      'anthropic']` (one line; validation logic already provider-agnostic). No other
+      validate.ts change needed — the BYOK-only constraint (no shared/free path for
+      Anthropic) falls out for free from `index.ts`'s existing shared-branch hardcoding
+      `provider = 'gemini'`, not a new guard.
+- [x] `worker/src/index.ts` — dispatch in `handleAnswer`/`handleModels` switched from
+      the prior binary ternary to a `switch` (3 providers now, still no
+      factory/abstraction — readability call, approved).
+- [x] `worker/src/validate.test.ts` / `index.test.ts` — the old "anthropic is
+      unsupported" rejection fixtures (added in Session 9 to cover the not-yet-supported
+      case) flipped to acceptance cases, same maneuver Session 9 did for openai;
+      rejection-coverage role handed to a new `'grok'` placeholder fixture so it wasn't
+      lost; explicit anthropic-dispatch tests added for both `/answer` and `/models`.
+- [x] Worker: 105 tests (was 91, +14). Frontend: unchanged at first (53, `ByokPanel`
+      still test-free by precedent) — see below for the later gating change.
+- [x] `tsc --noEmit` clean both sides, `oxlint` clean, `npm run build` clean (bundle
+      guard passes). Full literal content of `anthropic.ts`/`anthropic.test.ts` shown
+      to and reviewed by the user directly in chat (not just via a file read), matching
+      the same full-content review standard as Gemini/OpenAI.
+
+**Decision — gate Anthropic out of the UI instead of shipping it live (user-directed,
+after Phase A):** Phase B (live E2E, Worker/Pages deploy, `wrangler tail` check) never
+ran this session — no real Anthropic key was available. Rather than leave the milestone
+blocked indefinitely or ship an unverified provider at the same trust level as
+Gemini/OpenAI, added a `VERIFIED_PROVIDERS: Provider[] = ['gemini', 'openai']` allowlist
+in `ByokPanel.tsx`. Any `PROVIDER_LABELS` entry not in `VERIFIED_PROVIDERS` renders as a
+`disabled` `<option>` with " (coming soon)" appended to its label — disabled options
+can't be reached via mouse or keyboard, so this fully blocks a real user from selecting
+Claude through the normal UI. The Worker-side code stays exactly as built and deployed
+(nothing hidden or half-built there) — flipping `VERIFIED_PROVIDERS` to include
+`'anthropic'` is the entire remaining step once a real key allows Phase B to run.
+**This is now the standard pattern** (recorded in TODO.md's Ideas/Notes) for any future
+BYOK provider whose Worker code ships before a test key is available — Grok/OpenRouter
+should use the same gate if they land key-less too.
+
+**Completed (the gating change itself):**
+- [x] `src/components/ByokPanel.tsx` — `VERIFIED_PROVIDERS` constant added; the
+      provider `<select>`'s `.map()` now renders `disabled={!verified}` and a
+      "(coming soon)" suffix for any ungated-but-unverified provider.
+- [x] Frontend: 53 tests (unchanged — no new test, `ByokPanel` stays test-free by
+      existing precedent), `tsc -b --noEmit` clean, `oxlint` clean, `npm run build`
+      clean. Worker unaffected (untouched by this specific change; re-ran its suite
+      anyway to confirm no regression — still 105/105).
+- [x] TODO.md updated: Current Sprint section, Milestone 7b checklist item changed
+      from a plain unchecked `[ ]` to an explicit `[~]` "code complete, pending live
+      verification" entry (not marked done the way OpenAI was), new Ideas/Notes entry
+      documenting `VERIFIED_PROVIDERS` as the standard pattern going forward.
+
+**Left incomplete:** Anthropic's live verification (Phase B) — blocked on a real
+Anthropic key, not on anything code-side. Grok/OpenRouter (Milestone 7b's remaining
+providers) and 7c (UI polish/error states) are still ahead. **This session's changes are
+not yet committed** — awaiting the user's go-ahead per this project's standing git rule;
+once committed this is expected to deploy normally (Worker + Pages) since the gating
+change itself is small and low-risk (a UI-only gate, touches no key-handling logic) and
+doesn't need the full live-E2E bar a working provider would.
+
+**Next session should start with:** no queued task unless the user supplies an
+Anthropic key (unblocks Phase B immediately) — otherwise ask the user. Grok/OpenRouter
+(same `VERIFIED_PROVIDERS`-gated approach if no key is available for those either), a
+styling/UX pass, and the deferred WASM-variant work remain the other standing
+candidates.
+
+---
+
 <!-- Copy the block above for each new session -->

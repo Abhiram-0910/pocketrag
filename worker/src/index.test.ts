@@ -212,6 +212,25 @@ describe('worker fetch handler — /answer, BYOK', () => {
     expect((init as RequestInit).headers).toMatchObject({ Authorization: 'Bearer user-supplied-key' })
   })
 
+  it('dispatches to Anthropic, not Gemini, when the BYOK request specifies provider "anthropic"', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ content: [{ type: 'text', text: 'answer' }] }),
+      text: async () => '',
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    const res = await worker.fetch(
+      answerRequest({ ...byokBody, provider: 'anthropic', model: 'claude-sonnet-4-5' }),
+      makeEnv({ GEMINI_API_KEY: 'env-secret-key' }),
+    )
+
+    expect(res.status).toBe(200)
+    const [url, init] = fetchSpy.mock.calls[0]
+    expect(url).toContain('api.anthropic.com')
+    expect((init as RequestInit).headers).toMatchObject({ 'x-api-key': 'user-supplied-key' })
+  })
+
   it('rejects a BYOK request missing apiKey/provider/model without calling Gemini', async () => {
     const fetchSpy = vi.fn()
     vi.stubGlobal('fetch', fetchSpy)
@@ -283,7 +302,7 @@ describe('worker fetch handler — /models', () => {
   it('rejects a request with a bad provider or missing apiKey without calling the provider', async () => {
     const fetchSpy = vi.fn()
     vi.stubGlobal('fetch', fetchSpy)
-    const res = await worker.fetch(modelsRequest({ provider: 'anthropic', apiKey: 'user-key' }), makeEnv())
+    const res = await worker.fetch(modelsRequest({ provider: 'grok', apiKey: 'user-key' }), makeEnv())
     expect(res.status).toBe(400)
     expect(fetchSpy).not.toHaveBeenCalled()
   })
@@ -307,6 +326,27 @@ describe('worker fetch handler — /models', () => {
     const [url, init] = fetchSpy.mock.calls[0]
     expect(url).toContain('api.openai.com')
     expect((init as RequestInit).headers).toMatchObject({ Authorization: 'Bearer user-key' })
+  })
+
+  it('dispatches to Anthropic, not Gemini, when provider is "anthropic"', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ data: [{ id: 'claude-sonnet-4-5', display_name: 'Claude Sonnet 4.5' }] }),
+        text: async () => '',
+      }),
+    )
+    const res = await worker.fetch(modelsRequest({ provider: 'anthropic', apiKey: 'user-key' }), makeEnv())
+
+    expect(res.status).toBe(200)
+    const data = (await res.json()) as { models: { id: string; displayName: string }[] }
+    expect(data.models).toEqual([{ id: 'claude-sonnet-4-5', displayName: 'Claude Sonnet 4.5' }])
+    const fetchSpy = fetch as ReturnType<typeof vi.fn>
+    const [url, init] = fetchSpy.mock.calls[0]
+    expect(url).toContain('api.anthropic.com')
+    expect((init as RequestInit).headers).toMatchObject({ 'x-api-key': 'user-key' })
   })
 
   it('rejects a non-POST /models request with 404', async () => {

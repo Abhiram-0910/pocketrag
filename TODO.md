@@ -23,9 +23,23 @@ directly, outside the session's Bash tool — see AGENTS.md Session 9's Known En
 Limitation note) after `wrangler tail` was confirmed unable to connect from this
 session's execution environment.
 
+**Milestone 7b — Anthropic (Claude) provider code is complete and unit-tested
+(Session 10), but NOT yet live-verified — no real Anthropic key has been available to
+test against.** Not deployed to the same trust level as Gemini/OpenAI: `ByokPanel.tsx`
+gates it behind a `VERIFIED_PROVIDERS` allowlist, rendering Claude as a disabled
+"(coming soon)" `<option>` in the provider picker so no real user can reach the
+unverified path through the normal UI. The Worker-side code
+(`worker/src/providers/anthropic.ts`, `SUPPORTED_PROVIDERS` including `'anthropic'`,
+dispatch in `index.ts`) is left fully in place and deployed — "ready to enable the
+moment it's verified," not half-built. Flip `VERIFIED_PROVIDERS` to include
+`'anthropic'` once a real key is available and Phase B (local E2E → Worker deploy →
+`wrangler tail` check → Pages deploy → live production E2E) completes per Session 9/10's
+established process.
+
 Full roadmap (Milestones 7-16) in 🟢 below. **No task queued — ask the user for
-direction.** Milestone 7b continuing with the next provider (Anthropic, Grok, or
-OpenRouter) is next in the BYOK roadmap.
+direction.** Milestone 7b continuing with Grok or OpenRouter (same `VERIFIED_PROVIDERS`
+gating pattern if no test key is available for those either) is next in the BYOK
+roadmap, alongside live-verifying Anthropic whenever a key becomes available.
 
 ---
 
@@ -73,8 +87,17 @@ OpenRouter) is next in the BYOK roadmap.
       tradeoff, a wrong pick just 502s on the next question). Provider dispatch in
       `index.ts`, `SUPPORTED_PROVIDERS` allowlist extended, provider selector added
       to `ByokPanel.tsx`. Deployed and verified live on `pocketrag.pages.dev`.
-- [ ] 7b — remaining providers: Anthropic, Grok, OpenRouter, reusing the same
-      `worker/src/providers/` pattern (now proven twice)
+- [~] 7b — Anthropic (Claude): **code complete, pending live verification** — Session 10.
+      `worker/src/providers/anthropic.ts` + `anthropic.test.ts` (10 tests, mocked
+      responses, same two-key-leak-test discipline as Gemini/OpenAI), `SUPPORTED_PROVIDERS`
+      and `index.ts` dispatch extended, deployed to the Worker. NOT live-verified — no
+      real Anthropic key available this session. Intentionally hidden from the UI via
+      `VERIFIED_PROVIDERS` in `ByokPanel.tsx` (disabled "(coming soon)" option) so it
+      isn't presented to real users at Gemini/OpenAI's proven trust level. Not equivalent
+      to a "done" provider until Phase B live verification completes.
+- [ ] 7b — remaining providers: Grok, OpenRouter, reusing the same `worker/src/providers/`
+      pattern (now proven twice, structurally built a third time for Anthropic) — apply
+      the same `VERIFIED_PROVIDERS` gating if no test key is available when built
 - [ ] 7c — UI polish/error states (may fold into 7b as each provider lands)
 - Never persist keys anywhere — no KV, no DB, no logs. In-memory for one request only.
 - Model lists fetched live from each provider's own list-models endpoint, not hardcoded
@@ -230,6 +253,17 @@ OpenRouter) is next in the BYOK roadmap.
 ---
 
 ## 💡 Ideas / Notes
+- **`VERIFIED_PROVIDERS` gating (Session 10) is now the standard pattern for shipping a
+  BYOK provider whose Worker code is done but has no real key to live-verify against.**
+  `worker/src/providers/<name>.ts` + full mocked-response unit tests (including the
+  two key-leak tests) can ship and deploy on the Worker side immediately — the code
+  is real, tested, and low-risk since it never touches a shared secret. What stays
+  gated is *user-facing exposure*: `ByokPanel.tsx`'s `VERIFIED_PROVIDERS` allowlist
+  renders any not-yet-live-verified provider as a disabled "(coming soon)" `<option>`,
+  which blocks selection via both mouse and keyboard. Flip the provider into
+  `VERIFIED_PROVIDERS` only after Phase B (local E2E → Worker deploy → `wrangler tail`
+  check → Pages deploy → live production E2E) actually completes with a real key.
+  Apply this to Grok/OpenRouter too if either is built before a test key exists for it.
 - **Evaluated PixelRAG (StarTrail-org, Apache-2.0) — declined on architecture fit, not
   quality.** Screenshot-based RAG: embeds rendered page *images* with a Qwen3-VL-Embedding-2B
   model instead of parsed text, preserving tables/charts/layout. Real and well-built, but
