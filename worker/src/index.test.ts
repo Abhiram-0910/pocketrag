@@ -193,6 +193,25 @@ describe('worker fetch handler — /answer, BYOK', () => {
     expect((init as RequestInit).headers).not.toMatchObject({ 'x-goog-api-key': 'env-secret-key' })
   })
 
+  it('dispatches to OpenAI, not Gemini, when the BYOK request specifies provider "openai"', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content: 'answer' } }] }),
+      text: async () => '',
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    const res = await worker.fetch(
+      answerRequest({ ...byokBody, provider: 'openai', model: 'gpt-4o-mini' }),
+      makeEnv({ GEMINI_API_KEY: 'env-secret-key' }),
+    )
+
+    expect(res.status).toBe(200)
+    const [url, init] = fetchSpy.mock.calls[0]
+    expect(url).toContain('api.openai.com')
+    expect((init as RequestInit).headers).toMatchObject({ Authorization: 'Bearer user-supplied-key' })
+  })
+
   it('rejects a BYOK request missing apiKey/provider/model without calling Gemini', async () => {
     const fetchSpy = vi.fn()
     vi.stubGlobal('fetch', fetchSpy)
@@ -264,9 +283,30 @@ describe('worker fetch handler — /models', () => {
   it('rejects a request with a bad provider or missing apiKey without calling the provider', async () => {
     const fetchSpy = vi.fn()
     vi.stubGlobal('fetch', fetchSpy)
-    const res = await worker.fetch(modelsRequest({ provider: 'openai', apiKey: 'user-key' }), makeEnv())
+    const res = await worker.fetch(modelsRequest({ provider: 'anthropic', apiKey: 'user-key' }), makeEnv())
     expect(res.status).toBe(400)
     expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('dispatches to OpenAI, not Gemini, when provider is "openai"', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ data: [{ id: 'gpt-4o-mini' }] }),
+        text: async () => '',
+      }),
+    )
+    const res = await worker.fetch(modelsRequest({ provider: 'openai', apiKey: 'user-key' }), makeEnv())
+
+    expect(res.status).toBe(200)
+    const data = (await res.json()) as { models: { id: string; displayName: string }[] }
+    expect(data.models).toEqual([{ id: 'gpt-4o-mini', displayName: 'gpt-4o-mini' }])
+    const fetchSpy = fetch as ReturnType<typeof vi.fn>
+    const [url, init] = fetchSpy.mock.calls[0]
+    expect(url).toContain('api.openai.com')
+    expect((init as RequestInit).headers).toMatchObject({ Authorization: 'Bearer user-key' })
   })
 
   it('rejects a non-POST /models request with 404', async () => {

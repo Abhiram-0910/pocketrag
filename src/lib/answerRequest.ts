@@ -23,7 +23,7 @@ export interface RequestAnswerChunk {
 // never logged, discarded once the request settles.
 export type KeyConfig =
   | { keySource: 'shared' }
-  | { keySource: 'own'; apiKey: string; provider: 'gemini'; model: string }
+  | { keySource: 'own'; apiKey: string; provider: 'gemini' | 'openai'; model: string }
 
 export type FetchAnswerFn = (
   question: string,

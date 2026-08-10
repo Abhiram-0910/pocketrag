@@ -4,6 +4,7 @@ import { checkGrounding } from './grounding'
 import { assignDocLabels } from './labels'
 import { checkRateLimit, BYOK_DAILY_LIMIT } from './rateLimit'
 import { callGemini, listGeminiModels, DEFAULT_SHARED_MODEL } from './providers/gemini'
+import { callOpenAI, listOpenAIModels } from './providers/openai'
 import { corsHeaders, resolveCorsOrigin } from './cors'
 
 const RATE_LIMIT_MESSAGE = "You've hit today's request limit. Please try again tomorrow."
@@ -46,12 +47,16 @@ async function handleAnswer(request: Request, env: Env, origin: string | null, i
   const prompt = buildPrompt(validation.question, validation.chunks, labelOf)
 
   // BYOK: the key lives only in this local, request-scoped variable — passed straight
-  // into callGemini and never assigned anywhere else (no env, no KV, no logging).
+  // into the provider call and never assigned anywhere else (no env, no KV, no logging).
   const apiKey = validation.keySource === 'own' ? validation.apiKey : env.GEMINI_API_KEY
   const model = validation.keySource === 'own' ? validation.model : DEFAULT_SHARED_MODEL
+  const provider = validation.keySource === 'own' ? validation.provider : 'gemini'
 
   try {
-    const answer = await callGemini(fetch, apiKey, model, prompt)
+    const answer =
+      provider === 'openai'
+        ? await callOpenAI(fetch, apiKey, model, prompt)
+        : await callGemini(fetch, apiKey, model, prompt)
     const providedPairs = validation.chunks.map((chunk) => ({
       // Non-null assertion is safe by invariant: assignDocLabels labels every distinct
       // documentId in these chunks, so every chunk's documentId is guaranteed in labelOf.
@@ -87,8 +92,11 @@ async function handleModels(request: Request, env: Env, origin: string | null, i
 
   try {
     // validation.apiKey lives only in this local, request-scoped variable — passed
-    // straight into listGeminiModels and never assigned anywhere else.
-    const models = await listGeminiModels(fetch, validation.apiKey)
+    // straight into the provider's model-list call and never assigned anywhere else.
+    const models =
+      validation.provider === 'openai'
+        ? await listOpenAIModels(fetch, validation.apiKey)
+        : await listGeminiModels(fetch, validation.apiKey)
     return json({ models }, 200, origin)
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : 'Failed to fetch the model list.' }, 502, origin)

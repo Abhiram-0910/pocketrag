@@ -139,14 +139,30 @@ describe('validateAnswerRequest', () => {
     expect(result.ok).toBe(false)
   })
 
-  it('rejects keySource "own" with an unsupported provider', () => {
+  it('accepts a well-formed BYOK request for the openai provider', () => {
     const result = validateAnswerRequest({
       question: 'q',
       chunks: [validChunk],
       keySource: 'own',
       apiKey: 'my-real-key',
       provider: 'openai',
-      model: 'gpt-x',
+      model: 'gpt-4o-mini',
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok && result.keySource === 'own') {
+      expect(result.provider).toBe('openai')
+      expect(result.model).toBe('gpt-4o-mini')
+    }
+  })
+
+  it('rejects keySource "own" with an unsupported provider', () => {
+    const result = validateAnswerRequest({
+      question: 'q',
+      chunks: [validChunk],
+      keySource: 'own',
+      apiKey: 'my-real-key',
+      provider: 'anthropic',
+      model: 'claude-x',
     })
     expect(result.ok).toBe(false)
   })
@@ -226,8 +242,14 @@ describe('validateModelsRequest', () => {
     expect(validateModelsRequest('a string').ok).toBe(false)
   })
 
+  it('accepts the openai provider', () => {
+    const result = validateModelsRequest({ provider: 'openai', apiKey: 'my-real-key' })
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.provider).toBe('openai')
+  })
+
   it('rejects an unsupported provider', () => {
-    expect(validateModelsRequest({ provider: 'openai', apiKey: 'my-real-key' }).ok).toBe(false)
+    expect(validateModelsRequest({ provider: 'anthropic', apiKey: 'my-real-key' }).ok).toBe(false)
     expect(validateModelsRequest({ apiKey: 'my-real-key' }).ok).toBe(false)
   })
 

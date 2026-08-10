@@ -3,7 +3,7 @@ export interface ModelInfo {
   displayName: string
 }
 
-export type FetchModelsFn = (provider: 'gemini', apiKey: string) => Promise<ModelInfo[]>
+export type FetchModelsFn = (provider: 'gemini' | 'openai', apiKey: string) => Promise<ModelInfo[]>
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL
 
