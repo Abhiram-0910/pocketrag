@@ -6,22 +6,22 @@ Claude reads this at the START of every new session to understand what happened 
 ---
 
 ## Project State
-**Last updated:** 2026-08-09
-**Current branch:** master (through `f4e2806` BYOK Milestone 7a, deployed and
-pushed — see below)
+**Last updated:** 2026-08-10
+**Current branch:** master (through `152121b` BYOK Milestone 7b — OpenAI provider,
+deployed and pushed — see below)
 **Remote:** `github.com/Abhiram-0910/pocketrag` (private) — pushed and up to date
-(confirmed `origin/master` == `39b1c89` as of this push, 2026-08-09).
-**Overall status:** MVP **+ Milestone 6 (multi-document)** + **Milestone 7a (BYOK,
-Gemini-only)** feature-complete and **fully deployed in production**. Frontend:
+(confirmed `origin/master` == `152121b` as of this push, 2026-08-10).
+**Overall status:** MVP **+ Milestone 6 (multi-document)** + **Milestone 7a+7b (BYOK,
+Gemini + OpenAI)** feature-complete and **fully deployed in production**. Frontend:
 `https://pocketrag.pages.dev` (Cloudflare Pages). API:
 `https://pocketrag-answer.abhiram-dev.workers.dev` (Cloudflare Worker). Supports a
 multi-document library, bulk drag-and-drop, a this-document/all-documents retrieval
 scope toggle with cross-document ranking, Worker-owned per-request `Doc N` citation
 labels, restore-on-reload from IndexedDB, `navigator.storage.persist()`, deleting a
-persisted document, and now bring-your-own-Gemini-API-key as an alternative to the
-shared/free-tier key — live model-list fetch, model picker, real answer calls, key
-never persisted anywhere server- or client-side. 60s timeout + manual retry still
-there as a demo-day safety net.
+persisted document, and bring-your-own-key (Gemini or OpenAI, provider picker in the
+BYOK panel) as an alternative to the shared/free-tier key — live model-list fetch,
+model picker, real answer calls, key never persisted anywhere server- or client-side.
+60s timeout + manual retry still there as a demo-day safety net.
 
 ---
 
@@ -789,6 +789,153 @@ polish/error states) are still ahead, per the original staged plan.
 (OpenAI/Anthropic/Grok/OpenRouter, reusing 7a's `providers/` pattern) is the natural
 next step in the BYOK roadmap; a styling/UX pass and the deferred WASM-variant work
 remain the other standing candidates.
+
+---
+
+### Session 9 — 2026-08-10
+**Goal:** Milestone 7b (first provider) — extend BYOK to OpenAI, reusing 7a's
+`worker/src/providers/` pattern and trust model exactly. "Prove one, then extend"
+discipline: OpenAI only this session, Anthropic/Grok/OpenRouter deferred to future
+sessions. Plan (real OpenAI docs research, not assumed from training data) written
+and approved before any code, per this project's standing rule.
+
+**Completed:**
+- [x] Verified the real OpenAI API contract before writing code: Chat Completions
+      (`POST /v1/chat/completions`, fully supported, not deprecated) chosen over the
+      newer Responses API — user's explicit call, since Chat Completions' stateless
+      single-request/response shape structurally mirrors `providers/gemini.ts`
+      almost 1:1, keeping the diff small versus also absorbing Responses' typed
+      `output` array and unused statefulness. Models list (`GET /v1/models` →
+      `{ data: [{ id, object, created, owned_by }] }`) confirmed via a working docs
+      mirror after `platform.openai.com`'s reference pages 403'd. CORS confirmed
+      (was flagged as an assumption in 7a's own plan, not settled before now):
+      `api.openai.com` sends no `Access-Control-Allow-Origin`, direct browser calls
+      are blocked — validates 7a's Worker-proxy architecture as required, not just
+      convenient.
+- [x] `worker/src/providers/openai.ts` (+test) — `callOpenAI` / `listOpenAIModels`,
+      mirroring `gemini.ts`'s two-function shape. `Authorization: Bearer` header
+      (never the URL). Models list returned **unfiltered** — OpenAI's `/v1/models`
+      has no capability field like Gemini's `supportedGenerationMethods` to filter
+      chat-capable models from embedding/moderation/image ones; a wrong pick
+      surfaces as a normal 502 on the next question rather than being hidden by a
+      staleness-prone hardcoded prefix allowlist. Deliberate tradeoff, documented in
+      code and the approved plan, not an oversight.
+- [x] `worker/src/validate.ts` — `SUPPORTED_PROVIDERS` extended to
+      `['gemini', 'openai']` (one line; validation logic itself was already
+      provider-agnostic). `worker/src/index.ts` — `handleAnswer`/`handleModels` now
+      dispatch to `callOpenAI`/`listOpenAIModels` vs `callGemini`/`listGeminiModels`
+      based on the validated provider (plain if/switch, no factory — two providers
+      doesn't justify one yet).
+- [x] `src/components/ByokPanel.tsx` — provider `<select>` (Gemini/OpenAI) added
+      above the key input; changing provider clears the fetched model list same as
+      changing the key does. `src/lib/answerRequest.ts` / `src/lib/models.ts` —
+      provider union widened to `'gemini' | 'openai'`.
+- [x] Tests: worker 91 (was 79, +12) — `openai.test.ts` (mirrors `gemini.test.ts`
+      exactly, including the two key-leak tests), `validate.test.ts` extended (the
+      old "openai is unsupported" rejection fixture flipped to an acceptance case;
+      a new `'anthropic'` fixture took over the rejection-coverage role so it wasn't
+      lost), `index.test.ts` gained explicit provider-dispatch proof for both
+      `/answer` and `/models` (a stale test that asserted `provider: 'openai'` was
+      *rejected* also got fixed — it would have silently started asserting the wrong
+      thing once openai became supported). Frontend 53 (unchanged — `ByokPanel`
+      stays unit-test-free per existing precedent for thin UI-wiring components,
+      verified live instead). `tsc`/`oxlint`/`build` clean both sides.
+- [x] **Local E2E** (Playwright installed then removed, `wrangler dev` + Vite dev,
+      real OpenAI key from a scratch file outside the repo, never printed to the
+      transcript — see Decisions): dropped a real PDF, toggled BYOK, selected
+      OpenAI, live-fetched 124 real models, picked `gpt-4o-mini`, asked a question,
+      got a real grounded answer with correct citation. One harness bug caught and
+      fixed along the way: the readiness-check regex was anchored to end-of-string,
+      but a ready document row's `<li>` also contains the "Delete" button's text
+      after the status text, so the anchor never matched — not an app bug, same
+      class of harness-selector mistake as Session 6's `.bg-blue-50` mixup.
+- [x] **Deployed the Worker** (backward compatible — `SUPPORTED_PROVIDERS` gaining
+      `'openai'` doesn't affect existing `'gemini'` requests). Live BYOK `/models`
+      and `/answer` curled directly against the deployed Worker with `provider:
+      'openai'`: `/models` 200 immediately; `/answer` 400'd once right after deploy
+      (propagation lag across edge PoPs, not a bug — two immediate retries both
+      returned clean 200s with real grounded answers) then stayed consistently 200.
+      All response bodies checked programmatically for the raw key: absent in every
+      case.
+- [x] **`wrangler tail` key-leak check — completed via a documented workaround, not
+      skipped.** See the new Known Environment Limitation below. The user ran
+      `wrangler tail --format json` themselves in a terminal outside this session
+      while Claude fired a live BYOK `/answer` request via `curl`; user confirmed
+      the captured request-lifecycle JSON was clean across `headers`, `logs`, and
+      `exceptions` — same three places checked for Gemini in Session 8.
+- [x] **Deployed Pages**, bundle-hash-verified against the live site
+      (`index-CJiIaKQt.js` both places). **Live production BYOK E2E** against
+      `pocketrag.pages.dev` itself (not local dev): real visitor flow — drop PDF,
+      toggle BYOK, select OpenAI, real key, live model fetch, real question, real
+      grounded answer citing the dropped document. Zero console errors. Screenshot
+      inspected.
+- [x] Committed (`152121b`) after the user reviewed the full literal content of
+      `providers/openai.ts` and `ByokPanel.tsx` directly (not diffs), same standard
+      as 7a. Pushed immediately — user's explicit instruction was not to leave BYOK
+      code for a second provider sitting local-only even briefly.
+
+**Decisions made:**
+- **API key handoff via an external scratch file, not pasted in chat.** User's
+  explicit call: pasting a real key into the conversation leaves a permanent copy in
+  session history (including this memory system) for zero benefit, when a file
+  outside the repo — Claude reads it at runtime, never echoes it — accomplishes the
+  same live test. Verified the scratch path is not merely gitignored but entirely
+  outside the repo's working tree (`/tmp/...` vs `/home/abhi/NewProjects/pocketrag`),
+  one level stronger than the `worker/.dev.vars` precedent. All curl calls to the
+  deployed Worker used the same pattern: a Node subprocess reads the key file and
+  builds the request body via process substitution, so the raw value never appears
+  in a visible Bash command string either.
+- **Driver scripts (Playwright script, PDF generator) live in the repo's own
+  `scratchpad/`**, not the external key-only location — Node's ESM module resolution
+  for the `playwright` bare specifier walks up from the *script's own directory*
+  looking for `node_modules`, which the external `/tmp` path has no path to. Only
+  the key file itself needed to stay external; the driver scripts contain no secret
+  material and were deleted before this session ends, matching Session 6/7's
+  scratchpad-cleanup precedent.
+
+**Known Environment Limitation (new — record for future sessions):**
+- **`wrangler tail` cannot connect from this session's Bash execution environment.**
+  Confirmed via five separate methods (plain redirect, `--format json`, `--debug`,
+  forced line-buffering via `stdbuf`, and a real pty via `script -qc`), including one
+  full 60-second wait — it never gets past its initial connecting spinner. This is
+  **not** a general network block: plain HTTPS via `curl` to both
+  `api.cloudflare.com` and the deployed Worker's own `*.workers.dev` URL succeed
+  instantly from the same environment, and `wrangler dev`/`wrangler deploy`/
+  `wrangler pages deploy` all work normally too. The restriction is specific to
+  whatever connection `wrangler tail` needs for its log-streaming relay (almost
+  certainly WebSocket-based) — distinct from the DNS-propagation-for-a-new-subdomain
+  issue documented in Session 4/5, which was transient and resolved itself.
+  **Workaround, used this session and expected to work again:** run
+  `wrangler tail` in a terminal the user controls directly, outside this session's
+  Bash tool, while Claude fires the live request via `curl` (which does work from
+  here) at the user's signal. The user then reads their own terminal's tail output
+  and reports back. Do not re-attempt `wrangler tail` from within this session's
+  Bash tool expecting a different result — the limitation reproduced consistently.
+
+**Problems encountered (all resolved this session):**
+- `platform.openai.com`'s API reference pages returned HTTP 403 to WebFetch — worked
+  around via a working docs mirror (`developers.openai.com`) and targeted web search
+  for the exact request/response shapes, rather than falling back to pre-trained
+  knowledge of an external API contract (this project's standing rule).
+- The first live BYOK `/answer` call against the freshly-deployed Worker 400'd with
+  "provider must be one of: gemini." while the immediately-preceding `/models` call
+  (same code path's `SUPPORTED_PROVIDERS` check) had just returned 200 — looked like
+  a real bug at first. Two retries both returned clean 200s; concluded edge
+  propagation lag for a deploy that had completed seconds earlier, not a code issue.
+  Confirmed stable across three total attempts before moving on.
+- `wrangler tail` hanging — see Known Environment Limitation above. Diagnosed
+  thoroughly (five methods) before concluding it was a real, reproducible limitation
+  rather than a transient fluke, then escalated to the user with a specific
+  workaround rather than silently skipping the check.
+
+**Left incomplete:** nothing from 7b's OpenAI scope. Milestone 7b's remaining three
+providers (Anthropic, Grok, OpenRouter) and 7c (UI polish/error states) are still
+ahead, per the original 7-milestone staged plan.
+
+**Next session should start with:** no queued task — ask the user. Milestone 7b
+continuing with the next provider (Anthropic is the natural pick — reuses the same
+now-twice-proven `providers/` pattern), a styling/UX pass, and the deferred
+WASM-variant work remain the other standing candidates.
 
 ---
 

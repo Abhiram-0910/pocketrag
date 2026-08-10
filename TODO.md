@@ -7,19 +7,25 @@ Read this at the start of every session to know what to work on next.
 
 ## 🔴 Current Sprint
 Milestone 6 (multi-document, bulk upload, cross-document retrieval, restore-on-reload),
-the deferred "delete a persisted document" scope, and now **Milestone 7a (BYOK,
-Gemini-only)** are all complete and deployed.
+the deferred "delete a persisted document" scope, **Milestone 7a (BYOK, Gemini-only)**,
+and now the first slice of **Milestone 7b (BYOK, OpenAI added as a second provider)**
+are all complete and deployed.
 - Frontend: https://pocketrag.pages.dev (Cloudflare Pages)
 - API: https://pocketrag-answer.abhiram-dev.workers.dev (Cloudflare Worker)
-BYOK verified end-to-end against the **live production site** (Session 8, source
-`f4e2806`): a real visitor can toggle "Use your own Gemini API key," enter a real key,
-fetch the live model list, pick a model, and get a real grounded answer — all on
-`pocketrag.pages.dev` itself, not local dev. Worker deployed first (backward compatible
-via `keySource` defaulting to `'shared'`, so the not-yet-updated frontend kept working
-in the gap), then Pages. Bundle-hash-verified against the live site.
+OpenAI BYOK verified end-to-end against the **live production site** (Session 9, source
+`152121b`): a real visitor can toggle "Use your own API key," pick OpenAI from the
+provider selector, enter a real key, fetch the live model list, pick a model, and get a
+real grounded answer — all on `pocketrag.pages.dev` itself, not local dev. Worker
+deployed first (backward compatible — `SUPPORTED_PROVIDERS` gaining `'openai'` doesn't
+affect existing `'gemini'` requests), then Pages. Bundle-hash-verified against the live
+site. The `wrangler tail` key-leak check was completed via a workaround (run by the user
+directly, outside the session's Bash tool — see AGENTS.md Session 9's Known Environment
+Limitation note) after `wrangler tail` was confirmed unable to connect from this
+session's execution environment.
 
 Full roadmap (Milestones 7-16) in 🟢 below. **No task queued — ask the user for
-direction.** Milestone 7b (remaining 4 providers) is next in the BYOK roadmap.
+direction.** Milestone 7b continuing with the next provider (Anthropic, Grok, or
+OpenRouter) is next in the BYOK roadmap.
 
 ---
 
@@ -59,8 +65,16 @@ direction.** Milestone 7b (remaining 4 providers) is next in the BYOK roadmap.
       user-supplied key; `x-goog-api-key` header auth (not a URL query param) for both
       shared and BYOK paths; independent rate-limit buckets so BYOK never touches the
       shared-tier quota. Deployed and verified live on `pocketrag.pages.dev`.
-- [ ] 7b — remaining providers: OpenAI, Anthropic, Grok, OpenRouter, reusing 7a's
-      `worker/src/providers/` pattern
+- [x] **7b — OpenAI added as a second provider** — Session 9. Chat Completions API
+      (`POST /v1/chat/completions`) chosen over the newer Responses API — stateless
+      shape matches `providers/gemini.ts`'s pattern; `Authorization: Bearer` header
+      auth; model list returned unfiltered (no capability field like Gemini's
+      `supportedGenerationMethods` to filter chat-capable models — documented
+      tradeoff, a wrong pick just 502s on the next question). Provider dispatch in
+      `index.ts`, `SUPPORTED_PROVIDERS` allowlist extended, provider selector added
+      to `ByokPanel.tsx`. Deployed and verified live on `pocketrag.pages.dev`.
+- [ ] 7b — remaining providers: Anthropic, Grok, OpenRouter, reusing the same
+      `worker/src/providers/` pattern (now proven twice)
 - [ ] 7c — UI polish/error states (may fold into 7b as each provider lands)
 - Never persist keys anywhere — no KV, no DB, no logs. In-memory for one request only.
 - Model lists fetched live from each provider's own list-models endpoint, not hardcoded
@@ -199,6 +213,14 @@ direction.** Milestone 7b (remaining 4 providers) is next in the BYOK roadmap.
       server-side, local component state client-side), header-based provider auth,
       independent shared/BYOK rate-limit buckets. Verified end-to-end on the live
       production site (not local dev) — Session 8, 2026-08-09
+- [x] Milestone 7b (first provider) — BYOK, OpenAI added alongside Gemini: Chat
+      Completions API chosen over the newer Responses API (stateless shape matches
+      the existing `providers/` pattern), `Authorization: Bearer` header auth,
+      unfiltered model list (documented tradeoff — no capability field to filter
+      chat-capable models), provider dispatch in `index.ts`, provider selector in
+      `ByokPanel.tsx`. Verified end-to-end on the live production site, including a
+      `wrangler tail` key-leak check completed via a workaround (see Ideas/Notes) —
+      Session 9, 2026-08-10
 
 ---
 
@@ -242,6 +264,19 @@ direction.** Milestone 7b (remaining 4 providers) is next in the BYOK roadmap.
   404 "no longer available to new users" for this project's API key. Pinned to
   `gemini-3.5-flash-lite` instead — deliberately, not via the floating
   `gemini-flash-lite-latest` alias. CLAUDE.md/ARCHITECTURE.md updated to match.
+- **`wrangler tail` cannot connect from this session's Bash execution environment**
+  (Session 9 finding, confirmed via five separate methods including a 60-second
+  wait) — it hangs indefinitely on its initial connecting spinner. Not a general
+  network block: plain HTTPS via `curl` to both `api.cloudflare.com` and the
+  deployed Worker's own `*.workers.dev` URL work instantly, and `wrangler dev` /
+  `deploy` / `pages deploy` all work normally. The restriction is specific to
+  whatever connection `wrangler tail`'s log-streaming relay needs (likely
+  WebSocket-based) — distinct from the Session 4/5 DNS-propagation issue below,
+  which was transient and self-resolved. **Workaround:** run `wrangler tail`
+  directly in a terminal the user controls, outside the session's Bash tool, while
+  Claude fires the live request via `curl` at the user's signal; the user reads
+  their own terminal's output and reports back. Don't re-attempt `wrangler tail`
+  from within the session expecting a different result.
 - CORRECTION to a Session 4/5 note: the earlier "this sandbox cannot reach
   `*.workers.dev`" finding was **DNS propagation delay for a brand-new subdomain**,
   not a persistent egress restriction — confirmed in Session 5 by re-testing after
