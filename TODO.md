@@ -32,14 +32,15 @@ gate) with a visible "(Experimental)" label and caveat text, since none of the t
 has a working test key to prove a real *successful* answer/model-fetch call. What
 **is** live-verified for all three, as of this session: the **failure path**. A
 deliberately-invalid key was sent against the live Worker for each of the three,
-producing a real `502` with the sanitized `"This provider is temporarily unavailable"`
-message (never the raw provider error) — and `wrangler tail`, run by the user per the
-established workaround, confirmed the corresponding structured log entry
-(`logProviderError` in `index.ts`) landed cleanly in Workers Logs for all three, with
-no trace of the fake key. This same log-and-sanitize path was extended uniformly to
-Gemini/OpenAI too, not just the 3 Experimental providers. See AGENTS.md Session 11 for
-the honest scope-of-proof caveat on what this specific check does and doesn't prove
-about key-leak resistance.
+producing a real `502` with the sanitized `"This provider isn't fully supported yet.
+Please try Gemini or OpenAI for now — we're working on it."` message (never the raw
+provider error) — and `wrangler tail`, run by the user per the established workaround,
+confirmed the corresponding structured log entry (`logProviderError` in `index.ts`)
+landed cleanly in Workers Logs for all three, with no trace of the fake key. This same
+log-and-sanitize path was extended uniformly to Gemini/OpenAI too, not just the 3
+Experimental providers. See AGENTS.md Session 11 for the honest scope-of-proof caveat
+on what this specific check does and doesn't prove about key-leak resistance, and
+Session 12 for the message-wording reword (`ebc1670`) and its live re-verification.
 
 Full roadmap (Milestones 7-16) in 🟢 below. **No task queued — ask the user for
 direction.** Remaining BYOK work: live-verify Anthropic/Grok/OpenRouter's *success*

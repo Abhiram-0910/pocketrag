@@ -1213,4 +1213,37 @@ WASM-variant work remain the other standing candidates.
 
 ---
 
+### Session 12 — 2026-08-11
+**Goal:** none queued from Session 11 — session opened with a state-check request
+(git log/status, TODO.md, AGENTS.md) rather than new feature work.
+
+**Found while reporting state:** `ebc1670` ("Reword sanitized provider-failure
+messages to point users at Gemini/OpenAI") was on `master`/`origin/master` but had no
+corresponding AGENTS.md entry and no recorded deploy — Session 11's entry only covers
+`305ef4a`. Changed `worker/src/index.ts`'s two sanitized client-facing messages from
+the old "temporarily unavailable... try again later" copy (which wrongly implied a
+retry would help an Experimental provider) to: `"This provider isn't fully supported
+yet. Please try Gemini or OpenAI for now — we're working on it."`
+(`/answer`) / equivalent for `/models`. Message-copy only — `logProviderError`, the
+log-safety tests, and `EXPERIMENTAL_PROVIDERS` untouched.
+
+**Live re-verified this session, not just trusted from git history:** fired a
+deliberately-invalid key against the live Worker's `/answer` for `grok`. Response was
+a real `502` with the exact new wording —
+`"This provider isn't fully supported yet. Please try Gemini or OpenAI for now — we're
+working on it."` — confirming `ebc1670` is both deployed to the live Worker
+(`pocketrag-answer.abhiram-dev.workers.dev`) and still active today, not just present
+in source.
+
+**Docs updated:** TODO.md's Current Sprint section quoted the old wording verbatim —
+corrected to the new copy and cross-referenced to this session.
+
+**Left incomplete:** nothing new. Same standing candidates as Session 11 — live-verify
+Anthropic/Grok/OpenRouter's success path once real test keys exist, Milestone 7c (BYOK
+UI polish), Milestones 8-16.
+
+**Next session should start with:** no queued task — ask the user.
+
+---
+
 <!-- Copy the block above for each new session -->
