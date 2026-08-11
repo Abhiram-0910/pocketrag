@@ -58,14 +58,12 @@ Live-verified with real requests against the deployed Worker: suppression confir
 messages), endpoint-independence confirmed (`grok`'s `/answer` and `/models`
 suppression windows fired independently), and genuine invalid-key rejections were
 cleanly captured and delivered with no key leak for `openrouter`/`/answer` (`401
-Missing Authentication header`) and `grok`/`/models` (`400 Incorrect API key
-provided`). **One open gap:** `grok`'s own `/answer` endpoint rejecting a genuinely
-bad key (as opposed to a bad model name) is still unverified — the first live check
-used a stale model id (`grok-beta`, not the current `grok-4`), so Grok rejected on
-model-validation before the key was ever checked, and that endpoint's suppression
-window is still active from that test. Re-verify once the window clears (or
-deliberately wait it out) — see AGENTS.md Session 13 for the full story of how this
-was caught.
+Missing Authentication header`), `grok`/`/models` (`400 Incorrect API key provided`),
+and — re-verified once its suppression window naturally cleared — `grok`/`/answer`
+itself with the correct model id (`grok-4`, not the stale `grok-beta` the first check
+mistakenly used): `400 Incorrect API key provided`. **No open gaps remain**: all 5
+providers' failure paths and the full Discord notification system are fully
+live-verified. See AGENTS.md Session 13 for the full story.
 
 Full roadmap (Milestones 7-16) in 🟢 below. **Next queued: a combined plan covering
 Milestone 7c (BYOK UI/error-state polish) and the deferred general styling/UX pass**,

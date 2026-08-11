@@ -1361,17 +1361,17 @@ Four real requests fired against the live Worker in total:
    Missing Authentication header` alert, correctly formatted, no key present.
    **Genuine key-rejection, cleanly verified.**
 
-**Left incomplete:** `grok`'s own `/answer` endpoint has not been verified against a
-genuine invalid-key rejection (only against the `grok-beta` model-not-found case) — its
-`discord-notify:grok:answer` suppression window is still active from request 1/2 above.
-Re-verify once the window naturally clears (10 minutes from request 1's timestamp this
-session), or deliberately wait it out in a future session — no code change needed,
-purely a re-run. Milestone 7c + styling/UX combined plan is queued next per the user's
-explicit sequencing (see TODO.md); not started this session.
+**Left incomplete: nothing.** `grok`'s own `/answer` endpoint was re-verified once its
+suppression window naturally cleared (confirmed expired via a direct
+`wrangler kv key get discord-notify:grok:answer` before re-firing, not assumed from
+elapsed time): `/answer`, `grok`, `model: grok-4`, fake key → real `400
+{"code":"invalid-argument","error":"Incorrect API key provided..."}` alert, correctly
+formatted, no key present. All 5 providers' failure paths and the full Discord
+notification system (delivery, suppression, endpoint-independence) are now fully
+live-verified with no remaining gaps.
 
-**Next session should start with:** either (a) the grok `/answer` genuine-key-
-rejection re-verification, a 2-minute check once due, or (b) the combined Milestone 7c
-+ styling/UX pass — the user will direct.
+**Next session should start with:** the combined Milestone 7c + styling/UX pass (see
+TODO.md) — the only queued work.
 
 ---
 
