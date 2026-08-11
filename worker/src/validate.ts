@@ -9,7 +9,7 @@ export interface InputChunk {
 
 export type KeySource = 'shared' | 'own'
 
-export const SUPPORTED_PROVIDERS = ['gemini', 'openai', 'anthropic'] as const
+export const SUPPORTED_PROVIDERS = ['gemini', 'openai', 'anthropic', 'grok', 'openrouter'] as const
 export type SupportedProvider = (typeof SUPPORTED_PROVIDERS)[number]
 
 export interface AnswerRequestBody {

@@ -6,15 +6,23 @@ interface ByokPanelProps {
   onChange: (config: KeyConfig | null) => void
 }
 
-type Provider = 'gemini' | 'openai' | 'anthropic'
+type Provider = 'gemini' | 'openai' | 'anthropic' | 'grok' | 'openrouter'
 
-const PROVIDER_LABELS: Record<Provider, string> = { gemini: 'Gemini', openai: 'OpenAI', anthropic: 'Claude' }
+const PROVIDER_LABELS: Record<Provider, string> = {
+  gemini: 'Gemini',
+  openai: 'OpenAI',
+  anthropic: 'Claude',
+  grok: 'Grok',
+  openrouter: 'OpenRouter',
+}
 
 // Providers live-verified end-to-end against their real API (see AGENTS.md session
-// logs). Anthropic's Worker code is complete and unit-tested against mocked responses
-// but has no real key to verify against yet — gated out of the picker below rather
-// than presented at the same trust level as a proven provider.
-const VERIFIED_PROVIDERS: Provider[] = ['gemini', 'openai']
+// logs). Everything else here is shipped selectable but flagged Experimental — built
+// and unit-tested against mocked responses, never exercised against a real account. A
+// failure on an Experimental provider is logged server-side (worker/src/index.ts's
+// logProviderError) and surfaced to the user as a calm generic message, never raw
+// provider error text — see QueryPanel's answerError display.
+const EXPERIMENTAL_PROVIDERS: Provider[] = ['anthropic', 'grok', 'openrouter']
 
 /**
  * Own-key entry: provider picker, key input, "fetch models" call, model picker. The key
@@ -107,15 +115,19 @@ export function ByokPanel({ onChange }: ByokPanelProps) {
             onChange={(e) => handleProviderChange(e.target.value as Provider)}
             className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
           >
-            {(Object.keys(PROVIDER_LABELS) as Provider[]).map((p) => {
-              const verified = VERIFIED_PROVIDERS.includes(p)
-              return (
-                <option key={p} value={p} disabled={!verified}>
-                  {verified ? PROVIDER_LABELS[p] : `${PROVIDER_LABELS[p]} (coming soon)`}
-                </option>
-              )
-            })}
+            {(Object.keys(PROVIDER_LABELS) as Provider[]).map((p) => (
+              <option key={p} value={p}>
+                {EXPERIMENTAL_PROVIDERS.includes(p) ? `${PROVIDER_LABELS[p]} (Experimental)` : PROVIDER_LABELS[p]}
+              </option>
+            ))}
           </select>
+
+          {EXPERIMENTAL_PROVIDERS.includes(provider) && (
+            <p className="rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700">
+              Experimental — this provider hasn't been verified against a live account yet. If something goes
+              wrong, you'll see a generic error message.
+            </p>
+          )}
 
           <div className="flex gap-2">
             <input

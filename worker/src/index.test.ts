@@ -140,10 +140,13 @@ describe('worker fetch handler — /answer, shared key', () => {
     expect(res.status).toBe(429)
   })
 
-  it('returns 502 when the Gemini call fails', async () => {
+  it('returns 502 with a sanitized message when the Gemini call fails', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500, text: async () => 'server error' }))
     const res = await worker.fetch(answerRequest(validBody), makeEnv())
     expect(res.status).toBe(502)
+    const data = (await res.json()) as { error: string }
+    expect(data.error).toBe('This provider is temporarily unavailable. Please try again later.')
+    expect(data.error).not.toContain('server error')
   })
 
   it('handles OPTIONS preflight with CORS headers and no body', async () => {
@@ -231,6 +234,83 @@ describe('worker fetch handler — /answer, BYOK', () => {
     expect((init as RequestInit).headers).toMatchObject({ 'x-api-key': 'user-supplied-key' })
   })
 
+  it('dispatches to Grok, not Gemini, when the BYOK request specifies provider "grok"', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content: 'answer' } }] }),
+      text: async () => '',
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    const res = await worker.fetch(
+      answerRequest({ ...byokBody, provider: 'grok', model: 'grok-4' }),
+      makeEnv({ GEMINI_API_KEY: 'env-secret-key' }),
+    )
+
+    expect(res.status).toBe(200)
+    const [url, init] = fetchSpy.mock.calls[0]
+    expect(url).toContain('api.x.ai')
+    expect((init as RequestInit).headers).toMatchObject({ Authorization: 'Bearer user-supplied-key' })
+  })
+
+  it('dispatches to OpenRouter, not Gemini, when the BYOK request specifies provider "openrouter"', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content: 'answer' } }] }),
+      text: async () => '',
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    const res = await worker.fetch(
+      answerRequest({ ...byokBody, provider: 'openrouter', model: 'openai/gpt-4o-mini' }),
+      makeEnv({ GEMINI_API_KEY: 'env-secret-key' }),
+    )
+
+    expect(res.status).toBe(200)
+    const [url, init] = fetchSpy.mock.calls[0]
+    expect(url).toContain('openrouter.ai')
+    expect((init as RequestInit).headers).toMatchObject({ Authorization: 'Bearer user-supplied-key' })
+  })
+
+  it('logs a structured, key-free entry and returns a sanitized message when a provider call fails (exercises the real "<Provider> API error <status>: <body>" shape and status-extraction regex, not a hand-built error)', async () => {
+    const realSecretKey = 'xai-real-secret-should-never-appear-in-logs-13579'
+    // Realistic failure body, not a trivial stand-in — includes a masked-key-lookalike
+    // fragment (the kind of thing a real provider's own error text might legitimately
+    // include), deliberately different from realSecretKey so the assertion below is
+    // meaningful rather than accidentally passing either way.
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      text: async () => 'Incorrect API key provided: xai-****...fake9999',
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const res = await worker.fetch(
+      answerRequest({ ...byokBody, provider: 'grok', model: 'grok-4', apiKey: realSecretKey }),
+      makeEnv(),
+    )
+
+    expect(res.status).toBe(502)
+    const data = (await res.json()) as { error: string }
+    expect(data.error).toBe('This provider is temporarily unavailable. Please try again later.')
+    expect(data.error).not.toContain(realSecretKey)
+
+    expect(consoleErrorSpy).toHaveBeenCalledTimes(1)
+    const logged = consoleErrorSpy.mock.calls[0][0] as string
+    // Proves the real status-extraction regex ran against the real message the real
+    // provider file threw — would fail if that regex logic were broken, not just if a
+    // key leaked.
+    const parsed = JSON.parse(logged) as { provider: string; model: string; status: string; message: string }
+    expect(parsed.provider).toBe('grok')
+    expect(parsed.model).toBe('grok-4')
+    expect(parsed.status).toBe('401')
+    expect(parsed.message).toContain('Grok API error 401')
+    expect(logged).not.toContain(realSecretKey)
+
+    consoleErrorSpy.mockRestore()
+  })
+
   it('rejects a BYOK request missing apiKey/provider/model without calling Gemini', async () => {
     const fetchSpy = vi.fn()
     vi.stubGlobal('fetch', fetchSpy)
@@ -302,7 +382,7 @@ describe('worker fetch handler — /models', () => {
   it('rejects a request with a bad provider or missing apiKey without calling the provider', async () => {
     const fetchSpy = vi.fn()
     vi.stubGlobal('fetch', fetchSpy)
-    const res = await worker.fetch(modelsRequest({ provider: 'grok', apiKey: 'user-key' }), makeEnv())
+    const res = await worker.fetch(modelsRequest({ provider: 'mistral', apiKey: 'user-key' }), makeEnv())
     expect(res.status).toBe(400)
     expect(fetchSpy).not.toHaveBeenCalled()
   })
@@ -349,15 +429,90 @@ describe('worker fetch handler — /models', () => {
     expect((init as RequestInit).headers).toMatchObject({ 'x-api-key': 'user-key' })
   })
 
+  it('dispatches to Grok, not Gemini, when provider is "grok" (and hits /language-models, not /models)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ models: [{ id: 'grok-4' }] }),
+        text: async () => '',
+      }),
+    )
+    const res = await worker.fetch(modelsRequest({ provider: 'grok', apiKey: 'user-key' }), makeEnv())
+
+    expect(res.status).toBe(200)
+    const data = (await res.json()) as { models: { id: string; displayName: string }[] }
+    expect(data.models).toEqual([{ id: 'grok-4', displayName: 'grok-4' }])
+    const fetchSpy = fetch as ReturnType<typeof vi.fn>
+    const [url, init] = fetchSpy.mock.calls[0]
+    expect(url).toContain('api.x.ai')
+    expect(url).toContain('/language-models')
+    expect((init as RequestInit).headers).toMatchObject({ Authorization: 'Bearer user-key' })
+  })
+
+  it('dispatches to OpenRouter, not Gemini, when provider is "openrouter"', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ data: [{ id: 'openai/gpt-4o-mini', name: 'OpenAI: GPT-4o-mini' }] }),
+        text: async () => '',
+      }),
+    )
+    const res = await worker.fetch(modelsRequest({ provider: 'openrouter', apiKey: 'user-key' }), makeEnv())
+
+    expect(res.status).toBe(200)
+    const data = (await res.json()) as { models: { id: string; displayName: string }[] }
+    expect(data.models).toEqual([{ id: 'openai/gpt-4o-mini', displayName: 'OpenAI: GPT-4o-mini' }])
+    const fetchSpy = fetch as ReturnType<typeof vi.fn>
+    const [url, init] = fetchSpy.mock.calls[0]
+    expect(url).toContain('openrouter.ai')
+    expect((init as RequestInit).headers).toMatchObject({ Authorization: 'Bearer user-key' })
+  })
+
+  it('logs a structured, key-free entry and returns a sanitized message when a /models provider call fails (exercises the real error shape and status-extraction regex, not a hand-built error)', async () => {
+    const realSecretKey = 'sk-or-real-secret-should-never-appear-in-logs-97531'
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      text: async () => 'Access denied for key: sk-or-****...fake1111',
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const res = await worker.fetch(modelsRequest({ provider: 'openrouter', apiKey: realSecretKey }), makeEnv())
+
+    expect(res.status).toBe(502)
+    const data = (await res.json()) as { error: string }
+    expect(data.error).toBe("This provider's model list is temporarily unavailable. Please try again later.")
+    expect(data.error).not.toContain(realSecretKey)
+
+    expect(consoleErrorSpy).toHaveBeenCalledTimes(1)
+    const logged = consoleErrorSpy.mock.calls[0][0] as string
+    const parsed = JSON.parse(logged) as { provider: string; model: string | null; status: string; message: string }
+    expect(parsed.provider).toBe('openrouter')
+    expect(parsed.model).toBeNull()
+    expect(parsed.status).toBe('403')
+    expect(parsed.message).toContain('OpenRouter API error 403')
+    expect(logged).not.toContain(realSecretKey)
+
+    consoleErrorSpy.mockRestore()
+  })
+
   it('rejects a non-POST /models request with 404', async () => {
     const res = await worker.fetch(asIncoming(new Request('http://worker.local/models')), makeEnv())
     expect(res.status).toBe(404)
   })
 
-  it('returns 502 when the provider call fails', async () => {
+  it('returns 502 with a sanitized message when the provider call fails', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 401, text: async () => 'invalid key' }))
     const res = await worker.fetch(modelsRequest({ provider: 'gemini', apiKey: 'bad-key' }), makeEnv())
     expect(res.status).toBe(502)
+    const data = (await res.json()) as { error: string }
+    expect(data.error).toBe("This provider's model list is temporarily unavailable. Please try again later.")
+    expect(data.error).not.toContain('invalid key')
   })
 
   it('shares the BYOK rate-limit bucket with BYOK /answer requests from the same IP', async () => {

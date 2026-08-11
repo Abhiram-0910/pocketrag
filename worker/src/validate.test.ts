@@ -171,14 +171,46 @@ describe('validateAnswerRequest', () => {
     }
   })
 
-  it('rejects keySource "own" with an unsupported provider', () => {
+  it('accepts a well-formed BYOK request for the grok provider', () => {
     const result = validateAnswerRequest({
       question: 'q',
       chunks: [validChunk],
       keySource: 'own',
       apiKey: 'my-real-key',
       provider: 'grok',
-      model: 'grok-x',
+      model: 'grok-4',
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok && result.keySource === 'own') {
+      expect(result.provider).toBe('grok')
+      expect(result.model).toBe('grok-4')
+    }
+  })
+
+  it('accepts a well-formed BYOK request for the openrouter provider', () => {
+    const result = validateAnswerRequest({
+      question: 'q',
+      chunks: [validChunk],
+      keySource: 'own',
+      apiKey: 'my-real-key',
+      provider: 'openrouter',
+      model: 'openai/gpt-4o-mini',
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok && result.keySource === 'own') {
+      expect(result.provider).toBe('openrouter')
+      expect(result.model).toBe('openai/gpt-4o-mini')
+    }
+  })
+
+  it('rejects keySource "own" with an unsupported provider', () => {
+    const result = validateAnswerRequest({
+      question: 'q',
+      chunks: [validChunk],
+      keySource: 'own',
+      apiKey: 'my-real-key',
+      provider: 'mistral',
+      model: 'mistral-x',
     })
     expect(result.ok).toBe(false)
   })
@@ -270,8 +302,20 @@ describe('validateModelsRequest', () => {
     if (result.ok) expect(result.provider).toBe('anthropic')
   })
 
+  it('accepts the grok provider', () => {
+    const result = validateModelsRequest({ provider: 'grok', apiKey: 'my-real-key' })
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.provider).toBe('grok')
+  })
+
+  it('accepts the openrouter provider', () => {
+    const result = validateModelsRequest({ provider: 'openrouter', apiKey: 'my-real-key' })
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.provider).toBe('openrouter')
+  })
+
   it('rejects an unsupported provider', () => {
-    expect(validateModelsRequest({ provider: 'grok', apiKey: 'my-real-key' }).ok).toBe(false)
+    expect(validateModelsRequest({ provider: 'mistral', apiKey: 'my-real-key' }).ok).toBe(false)
     expect(validateModelsRequest({ apiKey: 'my-real-key' }).ok).toBe(false)
   })
 

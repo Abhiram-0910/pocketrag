@@ -6,9 +6,30 @@ import { checkRateLimit, BYOK_DAILY_LIMIT } from './rateLimit'
 import { callGemini, listGeminiModels, DEFAULT_SHARED_MODEL } from './providers/gemini'
 import { callOpenAI, listOpenAIModels } from './providers/openai'
 import { callAnthropic, listAnthropicModels } from './providers/anthropic'
+import { callGrok, listGrokModels } from './providers/grok'
+import { callOpenRouter, listOpenRouterModels } from './providers/openrouter'
 import { corsHeaders, resolveCorsOrigin } from './cors'
 
 const RATE_LIMIT_MESSAGE = "You've hit today's request limit. Please try again tomorrow."
+// Sanitized client-facing messages for a provider-call failure — the real reason (raw
+// provider error text, which could be a confusing or unexpected third-party string)
+// goes to logProviderError below instead, never straight to the client.
+const ANSWER_UNAVAILABLE_MESSAGE = 'This provider is temporarily unavailable. Please try again later.'
+const MODELS_UNAVAILABLE_MESSAGE = "This provider's model list is temporarily unavailable. Please try again later."
+
+/**
+ * Structured, key-free failure log for a provider call — lands in Cloudflare Workers
+ * Logs automatically, no new infra. `err.message` is already proven key-free by each
+ * provider's own two key-leak tests, but this call site gets its own dedicated test
+ * too (see index.test.ts) since it's a new place that could regress independently of
+ * those. `status` is pulled from the "<Provider> API error <status>: <body>" shape
+ * every provider file already throws, rather than adding a custom error class.
+ */
+function logProviderError(provider: string, model: string | null, err: unknown): void {
+  const message = err instanceof Error ? err.message : 'unknown error'
+  const status = message.match(/error (\d{3}):/)?.[1] ?? null
+  console.error(JSON.stringify({ event: 'provider_call_failed', provider, model, status, message }))
+}
 
 function json(body: unknown, status: number, origin: string | null): Response {
   return new Response(JSON.stringify(body), {
@@ -62,6 +83,12 @@ async function handleAnswer(request: Request, env: Env, origin: string | null, i
       case 'anthropic':
         answer = await callAnthropic(fetch, apiKey, model, prompt)
         break
+      case 'grok':
+        answer = await callGrok(fetch, apiKey, model, prompt)
+        break
+      case 'openrouter':
+        answer = await callOpenRouter(fetch, apiKey, model, prompt)
+        break
       default:
         answer = await callGemini(fetch, apiKey, model, prompt)
     }
@@ -74,7 +101,8 @@ async function handleAnswer(request: Request, env: Env, origin: string | null, i
     const grounding = checkGrounding(answer, providedPairs)
     return json({ answer, groundingWarning: grounding.groundingWarning, docLabels }, 200, origin)
   } catch (err) {
-    return json({ error: err instanceof Error ? err.message : 'Failed to generate an answer.' }, 502, origin)
+    logProviderError(provider, model, err)
+    return json({ error: ANSWER_UNAVAILABLE_MESSAGE }, 502, origin)
   }
 }
 
@@ -109,12 +137,19 @@ async function handleModels(request: Request, env: Env, origin: string | null, i
       case 'anthropic':
         models = await listAnthropicModels(fetch, validation.apiKey)
         break
+      case 'grok':
+        models = await listGrokModels(fetch, validation.apiKey)
+        break
+      case 'openrouter':
+        models = await listOpenRouterModels(fetch, validation.apiKey)
+        break
       default:
         models = await listGeminiModels(fetch, validation.apiKey)
     }
     return json({ models }, 200, origin)
   } catch (err) {
-    return json({ error: err instanceof Error ? err.message : 'Failed to fetch the model list.' }, 502, origin)
+    logProviderError(validation.provider, null, err)
+    return json({ error: MODELS_UNAVAILABLE_MESSAGE }, 502, origin)
   }
 }
 
