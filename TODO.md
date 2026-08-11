@@ -23,23 +23,30 @@ directly, outside the session's Bash tool — see AGENTS.md Session 9's Known En
 Limitation note) after `wrangler tail` was confirmed unable to connect from this
 session's execution environment.
 
-**Milestone 7b — Anthropic (Claude) provider code is complete and unit-tested
-(Session 10), but NOT yet live-verified — no real Anthropic key has been available to
-test against.** Not deployed to the same trust level as Gemini/OpenAI: `ByokPanel.tsx`
-gates it behind a `VERIFIED_PROVIDERS` allowlist, rendering Claude as a disabled
-"(coming soon)" `<option>` in the provider picker so no real user can reach the
-unverified path through the normal UI. The Worker-side code
-(`worker/src/providers/anthropic.ts`, `SUPPORTED_PROVIDERS` including `'anthropic'`,
-dispatch in `index.ts`) is left fully in place and deployed — "ready to enable the
-moment it's verified," not half-built. Flip `VERIFIED_PROVIDERS` to include
-`'anthropic'` once a real key is available and Phase B (local E2E → Worker deploy →
-`wrangler tail` check → Pages deploy → live production E2E) completes per Session 9/10's
-established process.
+**Milestone 7b — all 5 BYOK providers now exist and are live on `pocketrag.pages.dev`
+(Session 11, source `305ef4a`).** Gemini and OpenAI remain fully proven (real
+grounded-answer E2E verified live, per Sessions 8-9). Anthropic, Grok, and OpenRouter
+are shipped as **Experimental**: selectable in `ByokPanel.tsx`'s provider picker (no
+longer disabled/hidden — that was Session 10's now-superseded `VERIFIED_PROVIDERS`
+gate) with a visible "(Experimental)" label and caveat text, since none of the three
+has a working test key to prove a real *successful* answer/model-fetch call. What
+**is** live-verified for all three, as of this session: the **failure path**. A
+deliberately-invalid key was sent against the live Worker for each of the three,
+producing a real `502` with the sanitized `"This provider is temporarily unavailable"`
+message (never the raw provider error) — and `wrangler tail`, run by the user per the
+established workaround, confirmed the corresponding structured log entry
+(`logProviderError` in `index.ts`) landed cleanly in Workers Logs for all three, with
+no trace of the fake key. This same log-and-sanitize path was extended uniformly to
+Gemini/OpenAI too, not just the 3 Experimental providers. See AGENTS.md Session 11 for
+the honest scope-of-proof caveat on what this specific check does and doesn't prove
+about key-leak resistance.
 
 Full roadmap (Milestones 7-16) in 🟢 below. **No task queued — ask the user for
-direction.** Milestone 7b continuing with Grok or OpenRouter (same `VERIFIED_PROVIDERS`
-gating pattern if no test key is available for those either) is next in the BYOK
-roadmap, alongside live-verifying Anthropic whenever a key becomes available.
+direction.** Remaining BYOK work: live-verify Anthropic/Grok/OpenRouter's *success*
+path (a real grounded answer, not just the failure path) whenever real test keys
+become available — flip each from Experimental to fully proven at that point, no code
+change needed beyond removing it from `EXPERIMENTAL_PROVIDERS`. 7c (UI polish) and the
+rest of the milestone roadmap (8-16) remain open otherwise.
 
 ---
 
@@ -87,17 +94,27 @@ roadmap, alongside live-verifying Anthropic whenever a key becomes available.
       tradeoff, a wrong pick just 502s on the next question). Provider dispatch in
       `index.ts`, `SUPPORTED_PROVIDERS` allowlist extended, provider selector added
       to `ByokPanel.tsx`. Deployed and verified live on `pocketrag.pages.dev`.
-- [~] 7b — Anthropic (Claude): **code complete, pending live verification** — Session 10.
-      `worker/src/providers/anthropic.ts` + `anthropic.test.ts` (10 tests, mocked
-      responses, same two-key-leak-test discipline as Gemini/OpenAI), `SUPPORTED_PROVIDERS`
-      and `index.ts` dispatch extended, deployed to the Worker. NOT live-verified — no
-      real Anthropic key available this session. Intentionally hidden from the UI via
-      `VERIFIED_PROVIDERS` in `ByokPanel.tsx` (disabled "(coming soon)" option) so it
-      isn't presented to real users at Gemini/OpenAI's proven trust level. Not equivalent
-      to a "done" provider until Phase B live verification completes.
-- [ ] 7b — remaining providers: Grok, OpenRouter, reusing the same `worker/src/providers/`
-      pattern (now proven twice, structurally built a third time for Anthropic) — apply
-      the same `VERIFIED_PROVIDERS` gating if no test key is available when built
+- [~] 7b — Anthropic (Claude), Grok, OpenRouter: **all 5 providers code-complete and
+      deployed, but Anthropic/Grok/OpenRouter's *success* path (a real answer/model-fetch
+      call) remains unverified** — Sessions 10-11. Each has its own `worker/src/providers/
+      *.ts` + mocked-response unit tests (10 each, same two-key-leak-test discipline as
+      Gemini/OpenAI); `SUPPORTED_PROVIDERS` covers all 5. Grok's models list is at
+      `/language-models` under a `models` key (not `/models`/`data` like every other
+      provider); OpenRouter's chat call sends optional `HTTP-Referer`/`X-Title` headers.
+      Session 10's `VERIFIED_PROVIDERS` disabled-gate (Anthropic hidden from the UI) was
+      **superseded this session** by `EXPERIMENTAL_PROVIDERS` — all 5 are now selectable
+      in `ByokPanel.tsx`, with the 3 unverified ones labeled "(Experimental)" plus a
+      caveat, rather than blocked outright. Backing this: a new uniform
+      log-and-sanitize path (`logProviderError` in `index.ts`) applied to **all 5**
+      providers' failure handling, not just the experimental 3 — a provider-call failure
+      logs a structured, key-free entry server-side (Workers Logs, no new infra) and
+      returns a calm generic message to the client instead of raw provider error text.
+      **Live-verified for the failure path only** (Session 11): a deliberately-invalid
+      key against the live Worker for Anthropic/Grok/OpenRouter each produced a real 502
+      + sanitized message, and `wrangler tail` (user-run) confirmed all three structured
+      log entries landed clean, no key leak. The *success* path — an actual working
+      answer through any of the 3 — is still unverified; that's what remains before they
+      can be called fully proven like Gemini/OpenAI.
 - [ ] 7c — UI polish/error states (may fold into 7b as each provider lands)
 - Never persist keys anywhere — no KV, no DB, no logs. In-memory for one request only.
 - Model lists fetched live from each provider's own list-models endpoint, not hardcoded
@@ -253,17 +270,23 @@ roadmap, alongside live-verifying Anthropic whenever a key becomes available.
 ---
 
 ## 💡 Ideas / Notes
-- **`VERIFIED_PROVIDERS` gating (Session 10) is now the standard pattern for shipping a
-  BYOK provider whose Worker code is done but has no real key to live-verify against.**
-  `worker/src/providers/<name>.ts` + full mocked-response unit tests (including the
-  two key-leak tests) can ship and deploy on the Worker side immediately — the code
-  is real, tested, and low-risk since it never touches a shared secret. What stays
-  gated is *user-facing exposure*: `ByokPanel.tsx`'s `VERIFIED_PROVIDERS` allowlist
-  renders any not-yet-live-verified provider as a disabled "(coming soon)" `<option>`,
-  which blocks selection via both mouse and keyboard. Flip the provider into
-  `VERIFIED_PROVIDERS` only after Phase B (local E2E → Worker deploy → `wrangler tail`
-  check → Pages deploy → live production E2E) actually completes with a real key.
-  Apply this to Grok/OpenRouter too if either is built before a test key exists for it.
+- **`EXPERIMENTAL_PROVIDERS` (Session 11) supersedes Session 10's `VERIFIED_PROVIDERS`
+  disabled-gate as the standard pattern for shipping a BYOK provider whose Worker code
+  is done but has no real key to live-verify against.** The disabled/"coming soon" gate
+  (used for Anthropic in Session 10) was deliberately replaced, not just renamed: a
+  key-less provider is now shipped **selectable** — real users with real keys can try
+  it — labeled "(Experimental)" with a visible caveat instead of blocked outright. This
+  only works because of the uniform log-and-sanitize path added the same session
+  (`logProviderError` in `index.ts`, applied to all 5 providers): any failure is caught,
+  logged server-side with full diagnostic detail (key-free, structured, lands in Workers
+  Logs automatically), and the client only ever sees a calm generic message — so an
+  Experimental provider's failure mode is safe to expose to real traffic even before its
+  success path is proven. `worker/src/providers/<name>.ts` + full mocked-response unit
+  tests (including the two key-leak tests) still ship and deploy on the Worker side
+  immediately regardless of which gate is used. Move a provider from
+  `EXPERIMENTAL_PROVIDERS` to fully proven once its *success* path — not just the
+  failure path — is live-verified (a real grounded answer, not just a real invalid-key
+  502). Apply this pattern to any future provider built without a test key.
 - **Evaluated PixelRAG (StarTrail-org, Apache-2.0) — declined on architecture fit, not
   quality.** Screenshot-based RAG: embeds rendered page *images* with a Qwen3-VL-Embedding-2B
   model instead of parsed text, preserving tables/charts/layout. Real and well-built, but

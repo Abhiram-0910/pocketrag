@@ -6,22 +6,30 @@ Claude reads this at the START of every new session to understand what happened 
 ---
 
 ## Project State
-**Last updated:** 2026-08-10
-**Current branch:** master (through `152121b` BYOK Milestone 7b — OpenAI provider,
-deployed and pushed — see below)
+**Last updated:** 2026-08-11
+**Current branch:** master (through `305ef4a` — Grok/OpenRouter Experimental BYOK
+providers + uniform error sanitization, deployed and pushed — see below)
 **Remote:** `github.com/Abhiram-0910/pocketrag` (private) — pushed and up to date
-(confirmed `origin/master` == `152121b` as of this push, 2026-08-10).
+(confirmed `origin/master` == `305ef4a` as of this push, 2026-08-11).
 **Overall status:** MVP **+ Milestone 6 (multi-document)** + **Milestone 7a+7b (BYOK,
-Gemini + OpenAI)** feature-complete and **fully deployed in production**. Frontend:
+all 5 providers)** feature-complete and **fully deployed in production**. Frontend:
 `https://pocketrag.pages.dev` (Cloudflare Pages). API:
 `https://pocketrag-answer.abhiram-dev.workers.dev` (Cloudflare Worker). Supports a
 multi-document library, bulk drag-and-drop, a this-document/all-documents retrieval
 scope toggle with cross-document ranking, Worker-owned per-request `Doc N` citation
 labels, restore-on-reload from IndexedDB, `navigator.storage.persist()`, deleting a
-persisted document, and bring-your-own-key (Gemini or OpenAI, provider picker in the
-BYOK panel) as an alternative to the shared/free-tier key — live model-list fetch,
-model picker, real answer calls, key never persisted anywhere server- or client-side.
-60s timeout + manual retry still there as a demo-day safety net.
+persisted document, and bring-your-own-key across 5 providers (Gemini, OpenAI,
+Anthropic, Grok, OpenRouter — provider picker in the BYOK panel) as an alternative to
+the shared/free-tier key. **Gemini and OpenAI are fully proven** (real grounded-answer
+E2E verified live). **Anthropic, Grok, and OpenRouter are Experimental** — selectable
+with a visible caveat, code-complete and unit-tested, and their *failure* path is
+live-verified (real invalid-key 502 + clean structured server-side log, confirmed via
+`wrangler tail` for all three), but their *success* path (an actual working answer) is
+not yet proven against a real key for any of the three. A uniform log-and-sanitize
+path (`logProviderError` in `worker/src/index.ts`) covers all 5 providers: any
+provider-call failure logs a structured, key-free entry server-side and returns a calm
+generic message to the client instead of raw provider error text. 60s timeout + manual
+retry still there as a demo-day safety net.
 
 ---
 
@@ -1039,6 +1047,169 @@ Anthropic key (unblocks Phase B immediately) — otherwise ask the user. Grok/Op
 (same `VERIFIED_PROVIDERS`-gated approach if no key is available for those either), a
 styling/UX pass, and the deferred WASM-variant work remain the other standing
 candidates.
+
+---
+
+### Session 11 — 2026-08-11
+**Goal:** Milestone 7b — add Grok (xAI) and OpenRouter as the remaining two BYOK
+providers, both key-less like Anthropic was, but under a **new strategy** the user
+explicitly chose over Session 10's gate: ship them **selectable** in the UI as
+"Experimental" rather than disabled, since a calm server-logged failure is an
+acceptable risk for real users to hit — and flip Anthropic to the same treatment for
+consistency, since it's in the identical technical state (built, mock-tested, never
+tried against a real key). This required designing and building a new error-capture
+path first: log full diagnostic detail server-side (key-free), show the user only a
+generic message. Plan (real xAI/OpenRouter docs research) written and approved before
+any code, per this project's standing rule.
+
+**API contracts verified against current docs before writing code:**
+- xAI (Grok): `POST https://api.x.ai/v1/chat/completions`, `Authorization: Bearer`,
+  OpenAI-compatible request/response shape (`choices[].message.content`), no required
+  `max_tokens`. Models list at `GET /v1/language-models` (**not** `/v1/models`) wrapped
+  under a `models` key (**not** `data`) — the one genuinely new shape difference from
+  every prior provider; no display-name field, same as OpenAI (falls back to id).
+- OpenRouter: `POST https://openrouter.ai/api/v1/chat/completions`, same
+  OpenAI-compatible shape, plus two **optional** identifying headers (`HTTP-Referer`,
+  `X-Title`) — the first provider on this roadmap needing anything beyond an auth
+  header on the chat call. Models list at `GET /v1/models` → `data[]` (confirmed via a
+  direct fetch of the real endpoint), each entry has a real `name` field.
+- CORS: no documented policy found for either provider (unlike Anthropic's explicit
+  dangerous-browser-access header) — noted as a real research gap rather than assumed,
+  but moot either way since Worker-proxy stays the architecture regardless.
+
+**Completed — provider code:**
+- [x] `worker/src/providers/grok.ts` + `grok.test.ts` (10 tests), `openrouter.ts` +
+      `openrouter.test.ts` (10 tests) — same injectable-`fetchImpl`,
+      throw-with-status-and-body, two-key-leak-test discipline as every prior provider.
+- [x] `worker/src/validate.ts` — `SUPPORTED_PROVIDERS` now `['gemini', 'openai',
+      'anthropic', 'grok', 'openrouter']`. `worker/src/index.ts` — `switch` dispatch in
+      both `handleAnswer`/`handleModels` extended with `grok`/`openrouter` cases.
+
+**Completed — the new error-capture/sanitization path (applied to all 5 providers,
+not just the 3 experimental ones — user's explicit call after I flagged this as an
+open decision, since it changes Gemini/OpenAI's existing behavior too):**
+- [x] `logProviderError(provider, model, err)` in `index.ts` — on any provider-call
+      failure, logs a structured JSON entry via `console.error` (`provider`, `model`,
+      `status` extracted by regex from the existing `"<Provider> API error <status>:
+      <body>"` shape every provider file already throws, `message`). No new error-class
+      hierarchy across provider files — one line of regex against an already-consistent
+      string shape. Lands in Cloudflare Workers Logs automatically, no new infra.
+- [x] Client-facing response changed from raw `err.message` to a fixed generic message
+      per endpoint: `"This provider is temporarily unavailable. Please try again
+      later."` (`/answer`) / `"This provider's model list is temporarily unavailable.
+      Please try again later."` (`/models`). Checked first that no existing test
+      asserted on the specific *content* of the old raw-error client response (only
+      status codes) — safe to change without breaking anything.
+- [x] Frontend needed **zero code change** for the sanitization to reach the user —
+      checked `answerRequest.ts`/`models.ts` first and confirmed both already just
+      forward whatever `error` string the Worker sends (`throw new Error(data?.error ??
+      ...)`), no raw-error parsing existed to remove. `QueryPanel.tsx`'s existing amber
+      failure-note display picks up the new generic message automatically.
+- [x] Two new dedicated log-safety tests in `index.test.ts` (one for `/answer`, one for
+      `/models`), built to the user's explicit refinement: **exercise the real dispatch
+      path** (mock the global `fetch`, let the real provider file construct the real
+      `"<Provider> API error <status>: <body>"` string) rather than hand-building an
+      `Error` object — so the test proves `logProviderError`'s regex-extraction logic
+      actually works against production code, not a shortcut that could pass even if
+      that logic were broken. Mocked failure bodies are realistic (e.g. `"Incorrect API
+      key provided: xai-****...fake9999"`, a masked-key-lookalike a real provider might
+      legitimately include) rather than trivial stand-ins. Each test asserts the parsed
+      log JSON's `status`/`provider`/`model`/`message` fields are all correct **and**
+      that the real distinctive secret passed as the request's `apiKey` never appears
+      anywhere in the logged string. Also strengthened the three pre-existing "returns
+      502" tests to assert the client response is the sanitized message, not the raw
+      provider text.
+- [x] Worker: 132 tests (was 105, +27). Frontend: 53 (unchanged).
+
+**Completed — frontend gating strategy change:**
+- [x] `src/components/ByokPanel.tsx` — Session 10's `VERIFIED_PROVIDERS`
+      disabled-"coming soon" gate **replaced** (not extended) with
+      `EXPERIMENTAL_PROVIDERS = ['anthropic', 'grok', 'openrouter']`. All 5 providers
+      are now selectable `<option>`s (no `disabled`); the 3 experimental ones get an
+      "(Experimental)" label suffix and a visible amber caveat paragraph (reusing the
+      existing grounding-warning visual language, not inventing new styling) when
+      selected: *"Experimental — this provider hasn't been verified against a live
+      account yet. If something goes wrong, you'll see a generic error message."*
+      `PROVIDER_LABELS`/`Provider` type widened to all 5; `answerRequest.ts`/`models.ts`
+      provider unions widened to match.
+- [x] `tsc`/`oxlint`/`build`/`vitest` clean both sides (worker 132/132, frontend
+      53/53). Full literal content of `grok.ts`, `openrouter.ts`, `index.ts`, and
+      `ByokPanel.tsx` shown to and reviewed by the user directly in chat (pasted as
+      literal text, not referenced via a tool call — the user explicitly corrected an
+      earlier pattern this session where tool-call markers appeared instead of actual
+      file content, and asked that direct-paste be the standing pattern going forward
+      for any file requested "in full").
+
+**Deployed and verified:**
+- [x] Committed `305ef4a`, pushed. Worker deployed, Pages built and deployed
+      (`--branch=main`), confirmed landed as Production via `wrangler pages deployment
+      list` (source `305ef4a`). Bundle-hash check against the live site initially
+      appeared to mismatch (`index-BLr4Py1t.js` old vs `index-D-4DzaOV.js` new) —
+      diagnosed as a stale-edge-cache read on the first plain `curl`, not a real
+      deployment problem; a cache-busting query param and the deployment-specific URL
+      both immediately showed the correct new hash, and a plain re-check 3s later
+      confirmed the production URL had caught up too. Documenting this pattern:
+      **don't conclude a deploy failed from one immediate post-deploy hash check** —
+      retry with cache-busting or a short wait before treating a mismatch as real.
+- [x] **Post-deploy invalid-key exercise, live, all 3 Experimental providers**: fired a
+      deliberately-invalid key against the live Worker's `/answer` for Anthropic, Grok,
+      and OpenRouter in turn. All three returned a real `502` with the sanitized
+      message — confirms the real API rejection path and the sanitization both work
+      end-to-end in production, not just against mocks.
+- [x] **`wrangler tail` workaround, live, all 3 providers**: user ran `wrangler tail
+      --format json` in their own terminal (session Bash still can't connect, per the
+      Session 9 Known Environment Limitation); Claude fired the same three requests one
+      at a time so each was easy to isolate in the tail output. User confirmed all
+      three structured log entries were clean: real per-provider error bodies captured
+      correctly (Anthropic 401 `"invalid x-api-key"`, Grok 400 `"Incorrect API key
+      provided"`, OpenRouter 401 `"Missing Authentication header"`), status correctly
+      regex-extracted in all three despite three different real providers' real error
+      text, and the fake key absent from all three entries.
+
+**Important honest caveat, raised by the user and worth preserving verbatim in
+substance:** the live `wrangler tail` check proves the log pipeline is clean
+end-to-end (regex extraction → JSON serialization → `console.error` → Workers Logs),
+but it does **not** prove leak-resistance against a provider that tries to echo the
+raw key back in its own error text — none of the three providers did that for an
+invalid key, so there was never a value in this specific live check that *could* have
+leaked. That harder case (a response body that itself contains something
+key-shaped) is what the unit tests' deliberately-crafted fake-secret-in-body scenarios
+exist to cover, not this live check. The live check's real contribution is confirming
+the exact code path those unit tests exercise is the one actually running in
+production — not a broader leak-proof guarantee than that.
+
+**Decisions made:**
+- **Uniform sanitize-and-log across all 5 providers, not scoped to just the 3
+  experimental ones** — flagged explicitly as an open decision during planning since it
+  changes already-shipped Gemini/OpenAI behavior; user approved applying it uniformly.
+  Simpler (one code path instead of a provider-conditional branch) and arguably a
+  correctness fix for Gemini/OpenAI too, since a raw provider error body was never a
+  deliberate UX choice for those two either — it was just what fell out of Session 4's
+  original pass-through implementation.
+- **`EXPERIMENTAL_PROVIDERS` replaces `VERIFIED_PROVIDERS` as the standing pattern**
+  for a key-less provider (see TODO.md's Ideas/Notes) — selectable-with-caveat instead
+  of disabled, now that the log-and-sanitize safety net makes a live failure an
+  acceptable (and now proven) outcome instead of something that needed to be prevented
+  outright.
+
+**Problems encountered (all resolved this session):**
+- Bundle-hash mismatch on first post-deploy check — see Deployed section above;
+  resolved as a stale-cache read, not a real deploy issue.
+- File-content review didn't actually reach the user twice this session (once for
+  `anthropic.ts`/`anthropic.test.ts` carried over from Session 10's tail end, once for
+  `grok.ts`/`openrouter.ts`/`ByokPanel.tsx` this session) — tool-call markers appeared
+  in the transcript instead of literal text. Resolved by pasting file contents directly
+  in the reply body rather than relying on a Read tool-call reference; user asked this
+  be the standing pattern for any future "show me the full file" request.
+
+**Left incomplete:** Anthropic/Grok/OpenRouter's *success* path (a real answer/model
+list through any of the three) — still unverified, blocked on real test keys for each.
+Milestone 7c (UI polish/error states) and the rest of the roadmap (8-16) remain ahead.
+
+**Next session should start with:** no queued task — ask the user. Live-verifying any
+of the 3 Experimental providers' success path (whenever a real key for that provider
+becomes available) is the natural BYOK follow-up; a styling/UX pass and the deferred
+WASM-variant work remain the other standing candidates.
 
 ---
 
