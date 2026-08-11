@@ -10,7 +10,8 @@ longer available to new API keys — pinned to 3.5 instead, see ARCHITECTURE.md)
 **Current phase:** MVP feature-complete and deployed. Frontend:
 https://pocketrag.pages.dev — API: https://pocketrag-answer.abhiram-dev.workers.dev
 **Primary goal this sprint:** none queued — ask the user for direction (candidates in
-TODO.md Backlog: styling pass, multi-document UI, restore-on-reload UI)
+TODO.md Backlog: Milestone 14's landing page, BYOK success-path verification for
+Anthropic/Grok/OpenRouter, or milestones 9-13/15-16)
 
 ---
 

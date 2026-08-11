@@ -1,6 +1,10 @@
 import { useState } from 'react'
+import { Trash } from '@phosphor-icons/react'
 import { deleteDocument } from '../lib/db'
 import { useDocumentStore, type DocEntry } from '../store/documentStore'
+import { classifyWebgpuFallback } from '../lib/errorTaxonomy'
+import { StatusBanner } from './ui/StatusBanner'
+import { Button } from './ui/Button'
 
 const BACKEND_LABEL: Record<string, string> = {
   webgpu: 'WebGPU',
@@ -55,16 +59,27 @@ export function DocumentList() {
   }
 
   const loadingModel = documents.some((d) => d.status === 'loading-model')
+  const webgpuFallback = backend === 'wasm-unavailable' || backend === 'wasm-failed'
 
   return (
-    <div className="mt-6 text-left">
-      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-gray-500">
-        {backend && (
-          <span className="rounded bg-gray-100 px-2 py-1 text-gray-700" title={backendDetail ?? undefined}>
-            Backend: {BACKEND_LABEL[backend] ?? backend}
+    <div className="text-left">
+      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+        {backend === 'webgpu' && (
+          <span
+            className="rounded bg-slate-100 px-2 py-1 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+            title={backendDetail ?? undefined}
+          >
+            Backend: {BACKEND_LABEL[backend]}
           </span>
         )}
-        {loadingModel && <span>Downloading model{modelProgress != null ? ` — ${modelProgress}%` : '…'}</span>}
+        {webgpuFallback && (
+          <StatusBanner variant="info">{classifyWebgpuFallback(backend, backendDetail ?? '').message}</StatusBanner>
+        )}
+        {loadingModel && (
+          <span className="text-slate-500 motion-safe:animate-pulse dark:text-slate-400">
+            Downloading model{modelProgress != null ? ` — ${modelProgress}%` : '…'}
+          </span>
+        )}
       </div>
 
       <ul className="space-y-2">
@@ -78,12 +93,16 @@ export function DocumentList() {
                   type="button"
                   disabled={!selectable}
                   onClick={() => selectDocument(doc.id)}
-                  className={`flex-1 rounded border p-3 text-left transition-colors ${
-                    isSelected ? 'border-blue-500 bg-blue-50' : 'border-gray-200'
-                  } ${selectable ? 'cursor-pointer hover:border-blue-300' : 'cursor-default'}`}
+                  className={`flex-1 rounded border p-3 text-left transition-colors duration-150 ${
+                    isSelected
+                      ? 'border-blue-500 bg-blue-50 dark:border-blue-400 dark:bg-blue-950'
+                      : 'border-slate-200 dark:border-slate-700'
+                  } ${selectable ? 'cursor-pointer hover:border-blue-300 dark:hover:border-blue-500' : 'cursor-default'}`}
                 >
-                  <p className="truncate text-sm font-medium text-gray-900">{doc.fileName}</p>
-                  <p className={`mt-0.5 text-xs ${doc.status === 'error' ? 'text-red-600' : 'text-gray-500'}`}>
+                  <p className="truncate text-sm font-medium text-slate-900 dark:text-slate-100">{doc.fileName}</p>
+                  <p
+                    className={`mt-0.5 text-xs ${doc.status === 'error' ? 'text-red-600 dark:text-red-400' : 'text-slate-500 dark:text-slate-400'}`}
+                  >
                     {statusText(doc)}
                   </p>
                 </button>
@@ -94,9 +113,9 @@ export function DocumentList() {
                     type="button"
                     onClick={() => removeDocument(doc.id)}
                     aria-label={`Remove ${doc.fileName}`}
-                    className="rounded border border-gray-200 px-3 text-gray-400 hover:border-red-300 hover:text-red-600"
+                    className="min-h-11 min-w-11 cursor-pointer rounded border border-slate-200 px-3 text-slate-400 hover:border-red-300 hover:text-red-600 dark:border-slate-700 dark:text-slate-500 dark:hover:border-red-500 dark:hover:text-red-400"
                   >
-                    ✕
+                    <Trash className="mx-auto size-4" weight="bold" aria-hidden="true" />
                   </button>
                 )}
                 {/* A ready doc is persisted, so deletion is destructive — an inline two-step
@@ -109,32 +128,26 @@ export function DocumentList() {
                       setDeleteError(null)
                     }}
                     aria-label={`Delete ${doc.fileName}`}
-                    className="rounded border border-gray-200 px-3 text-xs text-gray-400 hover:border-red-300 hover:text-red-600"
+                    className="flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded border border-slate-200 px-3 text-xs text-slate-400 hover:border-red-300 hover:text-red-600 dark:border-slate-700 dark:text-slate-500 dark:hover:border-red-500 dark:hover:text-red-400"
                   >
-                    Delete
+                    <Trash className="size-4" weight="bold" aria-hidden="true" />
                   </button>
                 )}
                 {doc.status === 'ready' && confirmingId === doc.id && (
-                  <div className="flex items-center gap-2 rounded border border-red-200 bg-red-50 px-3 text-xs text-red-700">
-                    <span>Delete permanently?</span>
-                    <button
-                      type="button"
-                      onClick={() => void handleDelete(doc.id)}
-                      className="rounded bg-red-600 px-2 py-1 font-medium text-white hover:bg-red-700"
-                    >
-                      Delete
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setConfirmingId(null)}
-                      className="rounded border border-red-300 px-2 py-1 text-red-700 hover:bg-red-100"
-                    >
-                      Cancel
-                    </button>
-                  </div>
+                  <StatusBanner variant="error" className="items-center">
+                    <span className="flex flex-wrap items-center gap-2">
+                      Delete permanently?
+                      <Button variant="destructive" onClick={() => void handleDelete(doc.id)}>
+                        Delete
+                      </Button>
+                      <Button variant="secondary" onClick={() => setConfirmingId(null)}>
+                        Cancel
+                      </Button>
+                    </span>
+                  </StatusBanner>
                 )}
               </div>
-              {deleteError?.id === doc.id && <p className="mt-1 text-xs text-red-600">{deleteError.message}</p>}
+              {deleteError?.id === doc.id && <StatusBanner variant="error" className="mt-1">{deleteError.message}</StatusBanner>}
             </li>
           )
         })}

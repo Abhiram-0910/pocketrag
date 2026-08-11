@@ -1,3 +1,5 @@
+import { WorkerRequestError, parseWorkerErrorResponse } from './apiError'
+
 // The Worker owns Doc N labelling and returns this label→documentId map so the client
 // can resolve real titles for the legend/Sources (documentId → fileName lives locally).
 export interface DocLabel {
@@ -40,7 +42,7 @@ export type FetchAnswerFn = (
 export type AnswerAttemptResult =
   | { outcome: 'success'; answer: string; groundingWarning: boolean; docLabels: DocLabel[] }
   | { outcome: 'timeout' }
-  | { outcome: 'error'; message: string }
+  | { outcome: 'error'; message: string; status?: number; resetAt?: string }
 
 function isAbortError(err: unknown): boolean {
   return err instanceof DOMException && err.name === 'AbortError'
@@ -61,6 +63,9 @@ export async function attemptAnswer(
     return { outcome: 'success', answer, groundingWarning, docLabels }
   } catch (err) {
     if (isAbortError(err)) return { outcome: 'timeout' }
+    if (err instanceof WorkerRequestError) {
+      return { outcome: 'error', message: err.message, status: err.status, resetAt: err.resetAt }
+    }
     return { outcome: 'error', message: err instanceof Error ? err.message : 'unknown error' }
   } finally {
     clearTimeout(timeoutId)
@@ -81,8 +86,7 @@ export const fetchAnswerFromWorker: FetchAnswerFn = async (question, chunks, key
     signal,
   })
   if (!res.ok) {
-    const data = (await res.json().catch(() => null)) as { error?: string } | null
-    throw new Error(data?.error ?? `Answer request failed (${res.status}).`)
+    throw await parseWorkerErrorResponse(res, `Answer request failed (${res.status}).`)
   }
   return (await res.json()) as AnswerResponse
 }

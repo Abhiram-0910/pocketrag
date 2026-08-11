@@ -98,7 +98,7 @@ async function handleAnswer(
       ? await checkRateLimit(env.RATE_LIMIT_KV, ip, 'byok', BYOK_DAILY_LIMIT)
       : await checkRateLimit(env.RATE_LIMIT_KV, ip, 'shared')
   if (!rateLimit.allowed) {
-    return json({ error: RATE_LIMIT_MESSAGE }, 429, origin)
+    return json({ error: RATE_LIMIT_MESSAGE, resetAt: rateLimit.resetAt }, 429, origin)
   }
 
   // The Worker owns the Doc N labelling — it builds the prompt and grounds against
@@ -169,7 +169,7 @@ async function handleModels(
   // reasoning as /answer's BYOK path (abuse guard on our Worker, not quota protection).
   const rateLimit = await checkRateLimit(env.RATE_LIMIT_KV, ip, 'byok', BYOK_DAILY_LIMIT)
   if (!rateLimit.allowed) {
-    return json({ error: RATE_LIMIT_MESSAGE }, 429, origin)
+    return json({ error: RATE_LIMIT_MESSAGE, resetAt: rateLimit.resetAt }, 429, origin)
   }
 
   try {

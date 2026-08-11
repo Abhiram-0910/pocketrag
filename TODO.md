@@ -65,15 +65,30 @@ mistakenly used): `400 Incorrect API key provided`. **No open gaps remain**: all
 providers' failure paths and the full Discord notification system are fully
 live-verified. See AGENTS.md Session 13 for the full story.
 
-Full roadmap (Milestones 7-16) in 🟢 below. **Next queued: a combined plan covering
-Milestone 7c (BYOK UI/error-state polish) and the deferred general styling/UX pass**,
-scoped to finish completely rather than partially, per explicit sequencing — this was
-deliberately built after the Discord work above, not before. Remaining BYOK work:
-live-verify Anthropic/Grok/OpenRouter's *success* path (a real grounded answer, not
-just the failure path) whenever real test keys become available — flip each from
-Experimental to fully proven at that point, no code change needed beyond removing it
-from `EXPERIMENTAL_PROVIDERS`. Rest of the milestone roadmap (8-16) remains open
-otherwise.
+**Milestone 7c + Milestone 8 + general styling/UX pass — built and live (Session 14).**
+Combined per explicit user sequencing (queued at the end of Session 13). Minimalist
+Swiss design system, light + dark (OS-preference only, no manual toggle), Inter font
+(self-hosted, not Google Fonts CDN), `@phosphor-icons/react` (the one new dependency
+this session). New shared primitives (`src/components/ui/Button.tsx`,
+`StatusBanner.tsx`) and a real error taxonomy (`src/lib/errorTaxonomy.ts`) replace
+every ad-hoc colored box and generic error string across `DropZone.tsx`,
+`DocumentList.tsx`, `ByokPanel.tsx`, and `QueryPanel.tsx`. Rate-limit responses now
+carry an exact `resetAt` timestamp (`worker/src/rateLimit.ts`/`index.ts`), formatted
+in the user's local timezone — satisfies Milestone 8's literal requirement, which
+nothing in the API carried structured data for before this session. A real keyboard-
+accessibility bug (file-upload trigger unreachable via Tab, `display:none` vs.
+`sr-only`) was caught by a Playwright pass and fixed. Frontend: 61/61 tests. Worker:
+151/151. Deployed and bundle-hash-verified live. See AGENTS.md Session 14 for the
+full design-system rationale, the `invalid-key` taxonomy scope correction found during
+implementation, and per-file restyle details.
+
+Full roadmap (Milestones 7-16) in 🟢 below. **No task queued — ask the user for
+direction.** Remaining BYOK work: live-verify Anthropic/Grok/OpenRouter's *success*
+path (a real grounded answer, not just the failure path) whenever real test keys
+become available — flip each from Experimental to fully proven at that point, no code
+change needed beyond removing it from `EXPERIMENTAL_PROVIDERS`. Milestone 14's
+landing-page half (deliberately out of scope this session — see Session 14) and
+milestones 9-13/15-16 remain open otherwise.
 
 ---
 
@@ -142,14 +157,20 @@ otherwise.
       log entries landed clean, no key leak. The *success* path — an actual working
       answer through any of the 3 — is still unverified; that's what remains before they
       can be called fully proven like Gemini/OpenAI.
-- [ ] 7c — UI polish/error states (may fold into 7b as each provider lands)
+- [x] **7c — UI polish/error states — Session 14.** `Button`/`StatusBanner` primitives
+      applied throughout `ByokPanel.tsx`: loading spinner, password show/hide toggle,
+      Experimental caveat and fetch-error both through `StatusBanner`, real
+      `errorTaxonomy.classify()` wiring instead of a raw message string.
 - Never persist keys anywhere — no KV, no DB, no logs. In-memory for one request only.
 - Model lists fetched live from each provider's own list-models endpoint, not hardcoded
 
-### 8. Error UX overhaul
-- Plain-language error taxonomy: rate limit (with exact reset time in the user's
-  local timezone), invalid key, model unavailable, network error, unreadable PDF,
-  WebGPU unsupported, etc.
+### 8. Error UX overhaul ✅ COMPLETE — Session 14
+- [x] Plain-language error taxonomy (`src/lib/errorTaxonomy.ts`) — rate limit (exact
+      reset time in the user's local timezone, via a new `resetAt` field on the
+      Worker's 429 response), provider-unavailable (covers "invalid key" too — see
+      AGENTS.md Session 14 for why these aren't actually distinguishable client-side),
+      network error, unreadable PDF, WebGPU unsupported (correctly `info` severity,
+      not `error` — it's a working automatic fallback).
 
 ### 9. Handwritten/Scanned Notes
 - Separate tab from Documents
@@ -175,6 +196,11 @@ otherwise.
 ### 13. Export answer/chat as PDF
 
 ### 14. Landing page + full UI/UX pass
+- [x] **Full UI/UX pass — Session 14.** Design system (Minimalist Swiss, light+dark,
+      Inter, Phosphor icons), responsive breakpoints, dark mode, shared primitives
+      applied across `App.tsx` + all 4 components. See AGENTS.md Session 14.
+- [ ] Landing page — deliberately kept out of Session 14's scope (restyle-only, no new
+      screens/routes/marketing copy, per explicit user choice). Still open.
 
 ### 15. Security review
 - `/claude-security` → scan codebase, fix findings

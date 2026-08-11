@@ -4,7 +4,10 @@ import { getAllChunks, getChunksForDocument, type ChunkRecord } from '../lib/db'
 import { rankChunks, type ScoredChunk } from '../lib/retrieval'
 import { attemptAnswer, fetchAnswerFromWorker, type DocLabel, type KeyConfig } from '../lib/answerRequest'
 import { canRunQuery } from '../lib/queryScope'
+import { classify, type TaxonomyResult } from '../lib/errorTaxonomy'
 import { useDocumentStore } from '../store/documentStore'
+import { StatusBanner } from './ui/StatusBanner'
+import { Button } from './ui/Button'
 
 const TOP_K = 3
 const ANSWER_TIMEOUT_MS = 60_000
@@ -23,7 +26,7 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
   const [submittedQuestion, setSubmittedQuestion] = useState<string | null>(null)
   const [answer, setAnswer] = useState<string | null>(null)
   const [groundingWarning, setGroundingWarning] = useState(false)
-  const [answerError, setAnswerError] = useState<string | null>(null)
+  const [answerError, setAnswerError] = useState<TaxonomyResult | null>(null)
   const [docLabels, setDocLabels] = useState<DocLabel[]>([])
   const [scope, setScope] = useState<'document' | 'all'>('document')
 
@@ -65,12 +68,17 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
         setDocLabels(result.docLabels)
       } else if (result.outcome === 'timeout') {
         if (isRetry) {
-          setAnswerError('Answer generation timed out again — showing raw matched passages below.')
+          setAnswerError({
+            type: 'unknown',
+            severity: 'warning',
+            message: 'Answer generation timed out again — showing raw matched passages below.',
+          })
         } else {
           setTimedOut(true)
         }
       } else {
-        setAnswerError(`Answer generation failed (${result.message}) — showing raw matched passages below.`)
+        const classified = classify({ message: result.message, status: result.status, resetAt: result.resetAt })
+        setAnswerError({ ...classified, message: `${classified.message} — showing raw matched passages below.` })
       }
       setAwaitingAnswer(false)
     },
@@ -136,16 +144,18 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
       : 'Finish setting up your API key first'
 
   return (
-    <div className="mt-8 text-left">
+    <div className="text-left">
       {hasReadyDoc && (
-        <div className="mb-2 inline-flex overflow-hidden rounded border border-gray-200 text-xs">
+        <div className="mb-2 inline-flex overflow-hidden rounded border border-slate-200 text-xs dark:border-slate-700">
           {(['document', 'all'] as const).map((option) => (
             <button
               key={option}
               type="button"
               onClick={() => setScope(option)}
-              className={`px-3 py-1.5 ${
-                scope === option ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+              className={`min-h-11 cursor-pointer px-3 py-1.5 transition-colors duration-150 ${
+                scope === option
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white text-slate-600 hover:bg-slate-50 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-800'
               }`}
             >
               {option === 'document' ? 'This document' : 'All documents'}
@@ -153,73 +163,80 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
           ))}
         </div>
       )}
-      <form onSubmit={handleSubmit} className="flex gap-2">
+      <form onSubmit={handleSubmit} className="flex flex-col gap-2 sm:flex-row">
         <input
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           disabled={!canQuery || busy}
           placeholder={placeholder}
-          className="flex-1 rounded border border-gray-300 px-3 py-2 text-sm disabled:bg-gray-50 disabled:text-gray-400"
+          className="min-h-11 flex-1 rounded border border-slate-300 px-3 py-2 text-sm text-slate-900 disabled:bg-slate-50 disabled:text-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500 dark:disabled:bg-slate-950 dark:disabled:text-slate-600"
         />
-        <button
-          type="submit"
-          disabled={!canQuery || busy || !query.trim()}
-          className="rounded bg-blue-600 px-4 py-2 text-sm text-white disabled:bg-gray-300"
-        >
+        <Button type="submit" loading={busy} disabled={!canQuery || busy || !query.trim()}>
           {busy ? 'Searching…' : 'Search'}
-        </button>
+        </Button>
       </form>
 
-      {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+      {error && (
+        <StatusBanner variant="error" className="mt-2">
+          {error}
+        </StatusBanner>
+      )}
 
       {awaitingAnswer && !timedOut && (
-        <p className="mt-4 text-sm text-gray-500">
+        <p className="mt-4 text-sm text-slate-500 motion-safe:animate-pulse dark:text-slate-400">
           Generating an answer… this usually takes a few seconds, but can occasionally take up to a few
           minutes on the free tier. Please don't close this tab.
         </p>
       )}
 
       {timedOut && (
-        <div className="mt-4 rounded border border-amber-200 bg-amber-50 p-4">
-          <p className="text-sm text-amber-800">This is taking longer than expected.</p>
-          <button
-            type="button"
-            onClick={handleRetry}
-            className="mt-2 rounded bg-amber-600 px-3 py-1.5 text-sm text-white"
-          >
-            Try again
-          </button>
-        </div>
+        <StatusBanner variant="warning" className="mt-4 items-center">
+          <span className="flex flex-wrap items-center gap-2">
+            This is taking longer than expected.
+            <Button variant="secondary" onClick={handleRetry}>
+              Try again
+            </Button>
+          </span>
+        </StatusBanner>
       )}
 
       {answer && (
-        <div className="mt-4 rounded border border-blue-200 bg-blue-50 p-4">
-          {groundingWarning && (
-            <p className="mb-2 text-xs font-medium text-amber-700">
-              This answer may not be fully grounded in the source document — verify against the sources below.
-            </p>
-          )}
-          <p className="text-sm text-gray-900">{answer}</p>
+        <div className="mt-4 space-y-2 rounded border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+          <StatusBanner variant={groundingWarning ? 'warning' : 'success'}>
+            {groundingWarning
+              ? 'This answer may not be fully grounded in the source document — verify against the sources below.'
+              : 'Grounded in your documents.'}
+          </StatusBanner>
+          <p className="text-sm text-slate-900 dark:text-slate-100">{answer}</p>
           {docLabels.length > 0 && (
-            <p className="mt-2 text-xs text-gray-500">
+            <p className="text-xs text-slate-500 dark:text-slate-400">
               {docLabels.map((d) => `Doc ${d.label} = ${titleFor(d.documentId)}`).join(' · ')}
             </p>
           )}
         </div>
       )}
 
-      {answerError && <p className="mt-4 text-sm text-amber-700">{answerError}</p>}
+      {answerError && (
+        <StatusBanner variant={answerError.severity} className="mt-4">
+          {answerError.message}
+        </StatusBanner>
+      )}
 
       {results && results.length > 0 && (
         <details className="mt-4" open={!answer}>
-          <summary className="cursor-pointer text-sm font-medium text-gray-700">Sources ({results.length})</summary>
+          <summary className="cursor-pointer text-sm font-medium text-slate-700 dark:text-slate-300">
+            Sources ({results.length})
+          </summary>
           <ul className="mt-3 space-y-3">
             {results.map(({ chunk, score }) => (
-              <li key={chunk.id} className="rounded border border-gray-200 p-3 text-sm text-gray-700">
-                <p className="mb-1 text-xs text-gray-500">
-                  <span className="font-medium text-gray-700">{titleFor(chunk.documentId)}</span> · page {chunk.page} ·
-                  score {score.toFixed(3)}
+              <li
+                key={chunk.id}
+                className="rounded border border-slate-200 p-3 text-sm text-slate-700 dark:border-slate-700 dark:text-slate-300"
+              >
+                <p className="mb-1 text-xs text-slate-500 dark:text-slate-400">
+                  <span className="font-medium text-slate-700 dark:text-slate-300">{titleFor(chunk.documentId)}</span> ·
+                  page {chunk.page} · score {score.toFixed(3)}
                 </p>
                 {chunk.text}
               </li>
@@ -227,7 +244,9 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
           </ul>
         </details>
       )}
-      {results && results.length === 0 && <p className="mt-4 text-sm text-gray-500">No chunks found.</p>}
+      {results && results.length === 0 && (
+        <p className="mt-4 text-sm text-slate-500 dark:text-slate-400">No chunks found.</p>
+      )}
     </div>
   )
 }

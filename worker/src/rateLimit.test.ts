@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { checkRateLimit, type KVLike } from './rateLimit'
 
 function fakeKV(initial: Record<string, string> = {}): KVLike & { store: Record<string, string> } {
@@ -11,6 +11,10 @@ function fakeKV(initial: Record<string, string> = {}): KVLike & { store: Record<
     },
   }
 }
+
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 describe('checkRateLimit', () => {
   it('allows the first request from a fresh IP', async () => {
@@ -68,5 +72,17 @@ describe('checkRateLimit', () => {
     const kv = fakeKV()
     const result = await checkRateLimit(kv, '1.2.3.4', 'shared')
     expect(result.remaining).toBe(49)
+  })
+
+  it('resetAt is the next UTC midnight, both when allowed and when denied', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-11T15:42:00.000Z'))
+    const kv = fakeKV()
+    const allowed = await checkRateLimit(kv, '1.2.3.4', 'shared', 1)
+    expect(allowed.resetAt).toBe('2026-08-12T00:00:00.000Z')
+    const denied = await checkRateLimit(kv, '1.2.3.4', 'shared', 1)
+    expect(denied.allowed).toBe(false)
+    expect(denied.resetAt).toBe('2026-08-12T00:00:00.000Z')
+    vi.useRealTimers()
   })
 })

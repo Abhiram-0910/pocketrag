@@ -9,7 +9,10 @@ Keep this updated as the project evolves.
 | Layer | Technology | Why chosen |
 |-------|-----------|------------|
 | Frontend | React + Vite + TypeScript | Fast dev loop, no server needed for a browser-only app |
-| Styling | Tailwind CSS | Utility-first, no CSS-in-JS runtime cost |
+| Styling | Tailwind CSS v4, no config file (CSS-first `@theme`) | Utility-first, no CSS-in-JS runtime cost |
+| Design system | Minimalist Swiss, light+dark (`prefers-color-scheme` only, no manual toggle) | Session 14 — matches a privacy-focused local-first tool's "professional tool" positioning; see AGENTS.md Session 14 for the full rationale and `src/components/ui/` for the shared `Button`/`StatusBanner` primitives |
+| Icons | `@phosphor-icons/react` | Session 14's one new dependency — the app previously had zero icons beyond a Unicode `✕` |
+| Font | Inter, self-hosted (`public/fonts/`) | Not Google Fonts CDN — avoids a third-party request on every load, consistent with this app's local-first posture |
 | State | Zustand | Minimal cross-component state without Redux boilerplate |
 | PDF parsing | pdf.js | Runs entirely client-side via WASM, no server upload |
 | Embeddings | `@huggingface/transformers` (Xenova/all-MiniLM-L6-v2, q8) | Runs in-browser via WebGPU/WASM in a Worker, keeps documents local. Not `@xenova/transformers` — that package is deprecated and pulled in a critical protobufjs RCE via its bundled onnxruntime-web; `@huggingface/transformers` is the maintained successor, same API, same model IDs |

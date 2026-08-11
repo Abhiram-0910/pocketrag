@@ -1,6 +1,11 @@
 import { useState } from 'react'
+import { Eye, EyeSlash } from '@phosphor-icons/react'
 import type { KeyConfig } from '../lib/answerRequest'
 import { fetchModelsFromWorker, type ModelInfo } from '../lib/models'
+import { WorkerRequestError } from '../lib/apiError'
+import { classify, type TaxonomyResult } from '../lib/errorTaxonomy'
+import { StatusBanner } from './ui/StatusBanner'
+import { Button } from './ui/Button'
 
 interface ByokPanelProps {
   onChange: (config: KeyConfig | null) => void
@@ -39,7 +44,8 @@ export function ByokPanel({ onChange }: ByokPanelProps) {
   const [models, setModels] = useState<ModelInfo[]>([])
   const [selectedModel, setSelectedModel] = useState('')
   const [fetching, setFetching] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<TaxonomyResult | null>(null)
+  const [showKey, setShowKey] = useState(false)
 
   const handleToggle = (next: boolean) => {
     setUseOwnKey(next)
@@ -77,7 +83,7 @@ export function ByokPanel({ onChange }: ByokPanelProps) {
     try {
       const fetched = await fetchModelsFromWorker(provider, trimmedKey)
       if (fetched.length === 0) {
-        setError('This key returned no usable models.')
+        setError({ type: 'unknown', severity: 'error', message: 'This key returned no usable models.' })
         setModels([])
         setSelectedModel('')
         onChange(null)
@@ -87,7 +93,11 @@ export function ByokPanel({ onChange }: ByokPanelProps) {
       setSelectedModel(fetched[0].id)
       onChange({ keySource: 'own', apiKey: trimmedKey, provider, model: fetched[0].id })
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch model list.')
+      const classified =
+        err instanceof WorkerRequestError
+          ? classify({ message: err.message, status: err.status, resetAt: err.resetAt })
+          : classify({ message: err instanceof Error ? err.message : 'Failed to fetch model list.' })
+      setError(classified)
       setModels([])
       setSelectedModel('')
       onChange(null)
@@ -102,18 +112,23 @@ export function ByokPanel({ onChange }: ByokPanelProps) {
   }
 
   return (
-    <div className="mb-4 text-left text-sm">
-      <label className="flex items-center gap-2 text-gray-700">
-        <input type="checkbox" checked={useOwnKey} onChange={(e) => handleToggle(e.target.checked)} />
+    <div className="text-left text-sm">
+      <label className="flex min-h-11 cursor-pointer items-center gap-2 text-slate-700 dark:text-slate-300">
+        <input
+          type="checkbox"
+          checked={useOwnKey}
+          onChange={(e) => handleToggle(e.target.checked)}
+          className="size-4 cursor-pointer accent-blue-600"
+        />
         Use your own API key
       </label>
 
       {useOwnKey && (
-        <div className="mt-2 space-y-2 rounded border border-gray-200 p-3">
+        <div className="mt-2 space-y-2 rounded border border-slate-200 p-3 dark:border-slate-700">
           <select
             value={provider}
             onChange={(e) => handleProviderChange(e.target.value as Provider)}
-            className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
+            className="min-h-11 w-full rounded border border-slate-300 px-2 py-1.5 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
           >
             {(Object.keys(PROVIDER_LABELS) as Provider[]).map((p) => (
               <option key={p} value={p}>
@@ -123,36 +138,41 @@ export function ByokPanel({ onChange }: ByokPanelProps) {
           </select>
 
           {EXPERIMENTAL_PROVIDERS.includes(provider) && (
-            <p className="rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700">
+            <StatusBanner variant="warning">
               Experimental — this provider hasn't been verified against a live account yet. If something goes
               wrong, you'll see a generic error message.
-            </p>
+            </StatusBanner>
           )}
 
           <div className="flex gap-2">
-            <input
-              type="password"
-              value={apiKey}
-              onChange={(e) => handleApiKeyChange(e.target.value)}
-              placeholder={`${PROVIDER_LABELS[provider]} API key`}
-              autoComplete="off"
-              className="flex-1 rounded border border-gray-300 px-2 py-1.5 text-sm"
-            />
-            <button
-              type="button"
-              onClick={() => void handleFetchModels()}
-              disabled={!apiKey.trim() || fetching}
-              className="rounded bg-gray-800 px-3 py-1.5 text-sm text-white disabled:bg-gray-300"
-            >
+            <div className="relative flex-1">
+              <input
+                type={showKey ? 'text' : 'password'}
+                value={apiKey}
+                onChange={(e) => handleApiKeyChange(e.target.value)}
+                placeholder={`${PROVIDER_LABELS[provider]} API key`}
+                autoComplete="off"
+                className="min-h-11 w-full rounded border border-slate-300 py-1.5 pr-9 pl-2 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+              />
+              <button
+                type="button"
+                onClick={() => setShowKey((v) => !v)}
+                aria-label={showKey ? 'Hide API key' : 'Show API key'}
+                className="absolute inset-y-0 right-0 flex w-9 cursor-pointer items-center justify-center text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
+              >
+                {showKey ? <EyeSlash className="size-4" weight="bold" /> : <Eye className="size-4" weight="bold" />}
+              </button>
+            </div>
+            <Button onClick={() => void handleFetchModels()} disabled={!apiKey.trim() || fetching} loading={fetching}>
               {fetching ? 'Fetching…' : 'Fetch models'}
-            </button>
+            </Button>
           </div>
 
           {models.length > 0 && (
             <select
               value={selectedModel}
               onChange={(e) => handleModelChange(e.target.value)}
-              className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
+              className="min-h-11 w-full rounded border border-slate-300 px-2 py-1.5 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
             >
               {models.map((model) => (
                 <option key={model.id} value={model.id}>
@@ -162,7 +182,7 @@ export function ByokPanel({ onChange }: ByokPanelProps) {
             </select>
           )}
 
-          {error && <p className="text-xs text-red-600">{error}</p>}
+          {error && <StatusBanner variant={error.severity}>{error.message}</StatusBanner>}
         </div>
       )}
     </div>

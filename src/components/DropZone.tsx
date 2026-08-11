@@ -1,8 +1,10 @@
 import { useCallback, useState, type ChangeEvent, type DragEvent } from 'react'
+import { UploadSimple } from '@phosphor-icons/react'
 import { extractPdfText } from '../lib/pdf'
 import { embedDocument } from '../lib/embeddingClient'
 import { saveDocument, type ChunkRecord } from '../lib/db'
 import { useDocumentStore } from '../store/documentStore'
+import { StatusBanner } from './ui/StatusBanner'
 
 export function DropZone() {
   const [isDragging, setIsDragging] = useState(false)
@@ -121,23 +123,33 @@ export function DropZone() {
       }}
       onDragLeave={() => setIsDragging(false)}
       onDrop={handleDrop}
-      className={`flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-10 text-center transition-colors ${
-        isDragging ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
+      className={`flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-6 text-center transition-colors duration-150 sm:p-10 ${
+        isDragging
+          ? 'border-blue-500 bg-blue-50 dark:border-blue-400 dark:bg-blue-950'
+          : 'border-slate-300 dark:border-slate-700'
       }`}
     >
-      <p className="text-gray-600">Drag PDFs here, or</p>
-      <label className="cursor-pointer text-blue-600 underline">
+      <UploadSimple className="size-6 text-slate-400 dark:text-slate-500" weight="bold" aria-hidden="true" />
+      <p className="text-slate-600 dark:text-slate-400">Drag PDFs here, or</p>
+      <label className="inline-flex min-h-11 cursor-pointer items-center rounded text-blue-600 underline underline-offset-2 focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-blue-600 dark:text-blue-400 dark:focus-within:outline-blue-400">
         browse
+        {/* sr-only (not `hidden`/display:none) so the native file input stays keyboard-
+            focusable and tabbable — display:none removes an element from the tab order
+            entirely, which would make this trigger mouse-only. */}
         <input
           type="file"
           accept="application/pdf"
           multiple
-          className="hidden"
+          className="sr-only"
           onChange={handleFileInput}
           disabled={busy}
         />
       </label>
-      {rejectMsg && <p className="text-sm text-red-600">{rejectMsg}</p>}
+      {rejectMsg && (
+        <StatusBanner variant="warning" className="w-full text-left">
+          {rejectMsg}
+        </StatusBanner>
+      )}
     </div>
   )
 }

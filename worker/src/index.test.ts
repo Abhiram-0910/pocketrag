@@ -145,7 +145,7 @@ describe('worker fetch handler — /answer, shared key', () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
-  it('returns 429 once the shared rate limit is exceeded', async () => {
+  it('returns 429 once the shared rate limit is exceeded, with a resetAt timestamp', async () => {
     mockGeminiSuccess('answer (page 1).')
     const env = makeEnv()
     for (let i = 0; i < 50; i++) {
@@ -153,6 +153,8 @@ describe('worker fetch handler — /answer, shared key', () => {
     }
     const res = await worker.fetch(answerRequest(validBody), env, makeCtx())
     expect(res.status).toBe(429)
+    const data = (await res.json()) as { error: string; resetAt: string }
+    expect(data.resetAt).toMatch(/^\d{4}-\d{2}-\d{2}T00:00:00\.000Z$/)
   })
 
   it('returns 502 with a sanitized message when the Gemini call fails', async () => {

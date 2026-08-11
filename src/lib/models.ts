@@ -1,3 +1,5 @@
+import { parseWorkerErrorResponse } from './apiError'
+
 export interface ModelInfo {
   id: string
   displayName: string
@@ -21,8 +23,7 @@ export const fetchModelsFromWorker: FetchModelsFn = async (provider, apiKey) => 
     body: JSON.stringify({ provider, apiKey }),
   })
   if (!res.ok) {
-    const data = (await res.json().catch(() => null)) as { error?: string } | null
-    throw new Error(data?.error ?? `Model list request failed (${res.status}).`)
+    throw await parseWorkerErrorResponse(res, `Model list request failed (${res.status}).`)
   }
   const data = (await res.json()) as { models: ModelInfo[] }
   return data.models

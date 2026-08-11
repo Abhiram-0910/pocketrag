@@ -1,1 +1,28 @@
 @import "tailwindcss";
+
+/* Self-hosted (not Google Fonts CDN) to avoid a third-party request on every load —
+   consistent with this app's local-first/no-external-calls posture. Variable font,
+   one file covers the 400-700 weight range this design system uses. */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/inter-latin-variable.woff2') format('woff2');
+}
+
+@theme {
+  --font-sans:
+    'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+/* Lets native controls (checkboxes, scrollbars) render in the browser's own dark
+   theme instead of always defaulting to a stark light-mode widget. */
+:root {
+  color-scheme: light dark;
+}
+
+body {
+  font-family: var(--font-sans);
+  @apply bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-50;
+}

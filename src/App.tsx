@@ -39,10 +39,10 @@ function App() {
   }, [restoreDocuments])
 
   return (
-    <main className="mx-auto max-w-2xl p-8">
-      <h1 className="text-2xl font-semibold text-gray-900">PocketRAG</h1>
-      <p className="mt-1 text-gray-500">Drop a PDF, then ask a question about it.</p>
-      <div className="mt-6">
+    <main className="mx-auto max-w-2xl px-4 py-8 sm:px-8">
+      <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-50">PocketRAG</h1>
+      <p className="mt-1 text-slate-500 dark:text-slate-400">Drop a PDF, then ask a question about it.</p>
+      <div className="mt-6 space-y-6">
         <DropZone />
         <DocumentList />
         <ByokPanel onChange={setKeyConfig} />

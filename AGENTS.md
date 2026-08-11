@@ -1375,4 +1375,139 @@ TODO.md) — the only queued work.
 
 ---
 
+### Session 14 — 2026-08-11
+**Goal:** Combined Milestone 7c (BYOK UI/error-state polish) + Milestone 8 (error UX
+overhaul) + the deferred general styling/UX pass, in one coherent pass per the user's
+explicit sequencing (queued at the end of Session 13). Plan mode used: researched the
+current UI (three parallel Explore agents — BYOK/error-state code, general styling
+foundation, prior backlog notes) confirmed this was a genuine blank slate (no design
+tokens, no dark mode, zero responsive breakpoints, no icon library, no shared
+component primitives), then used the `ui-ux-pro-max` skill's `--design-system` search
+for real style/color/typography options before asking the user to decide scope.
+
+**Decisions the user made before any code (via `AskUserQuestion`):**
+- Style: **Minimalist Swiss, light + dark** (not dark-only or glassmorphism) — fits a
+  privacy-focused local-first tool's "documentation site / professional tool"
+  positioning better than something decorative.
+- New dependency approved: **`@phosphor-icons/react`** — the only new dependency in
+  this pass (project rule: ask before adding one). The app previously had zero icons
+  beyond a Unicode `✕`.
+- **Milestone 8 folded in** rather than left separate — polishing error-state visuals
+  (7c) without fixing the underlying generic-message taxonomy (8) would've meant
+  re-skinning messages that were still unhelpful.
+- **No new landing/marketing screen** — restyle the existing 5 components + `App.tsx`
+  shell in place; Milestone 14's "landing page" half stays open, separate future work.
+
+**Design system, as shipped:**
+- Font: **Inter**, self-hosted (not Google Fonts CDN) — `public/fonts/inter-latin-variable.woff2`
+  (variable font, one file, `font-weight: 100 900` range) + `@font-face` in
+  `src/index.css`, avoiding a third-party request on every load, consistent with this
+  app's local-first posture. `--font-sans` token in a Tailwind v4 `@theme` block.
+- Dark mode: **`prefers-color-scheme` only**, zero config (Tailwind v4's `dark:`
+  variant works this way natively since there's no `tailwind.config.*`) — no manual
+  toggle. `color-scheme: light dark` added to `:root` so native controls (checkboxes)
+  render in the correct theme too — caught via the Playwright visual check below,
+  where a checkbox looked like a stark white square against the dark background
+  before this one-line fix.
+- Colors: kept blue (primary), red (error), amber (warning) as-is — already
+  established conventions. Added **green (success)** and a **neutral slate (info)**
+  tone, both previously unused anywhere in the app.
+- No CSS-custom-property token layer, no animation library, no manual dark/light
+  toggle — all explicitly scoped out in the plan with the specific trigger to add them
+  later if actually needed.
+
+**Built — shared primitives (`src/components/ui/`, new):**
+- `Button.tsx` — variant (primary/secondary/destructive), `loading` prop (Phosphor
+  spinner, replaces every "Fetching…"/"Searching…" text-only loading state), 44px min
+  touch target, visible focus ring.
+- `StatusBanner.tsx` — variant (error/warning/success/info), fixed icon+color per
+  variant. Replaced every ad-hoc `border-*-200 bg-*-50 p-*` box across all 4 restyled
+  components (5+ near-duplicate blocks collapsed into one).
+
+**Built — Milestone 8 error taxonomy:**
+- `src/lib/errorTaxonomy.ts` (new, pure functions, fully unit-tested) — `classify()`
+  for Worker API failures (rate-limit/provider-unavailable/network/unknown by HTTP
+  status), `classifyPdfError()`, `classifyWebgpuFallback()`.
+- **Important scope correction found during implementation, not in the original
+  plan:** the plan listed `invalid-key` as its own taxonomy type alongside
+  `provider-unavailable`. Turns out these are **not actually distinguishable**
+  client-side — the Worker deliberately sanitizes every provider-call failure (bad
+  key, provider outage, bad model, etc.) into the same generic 502 message across all
+  5 providers (Sessions 11-13's uniform sanitize-and-log decision, a deliberate
+  security choice, not a gap). Dropped `invalid-key` as a separate type and documented
+  why directly in `errorTaxonomy.ts` rather than silently building something that
+  implied a distinction the architecture doesn't actually support.
+- `worker/src/rateLimit.ts` — `RateLimitResult` gains `resetAt` (ISO timestamp, next
+  UTC midnight, computed once per check and returned whether allowed or denied).
+  `worker/src/index.ts`'s two 429 branches now include it in the response body.
+  Backward compatible (old clients ignore the new field). New tests: `rateLimit.test.ts`
+  asserts the exact UTC-midnight value via fake timers; `index.test.ts` asserts the
+  429 response shape. Frontend (`src/lib/apiError.ts`'s new `WorkerRequestError`
+  class + `parseWorkerErrorResponse` helper, shared by `answerRequest.ts` and
+  `models.ts`) threads `status`/`resetAt` from the HTTP response all the way to
+  `errorTaxonomy.classify()`, which formats the reset time via
+  `Intl.DateTimeFormat` in the user's local timezone — satisfies Milestone 8's literal
+  "exact reset time in the user's local timezone" requirement, which the Worker's
+  429 response never carried any structured data for before this session.
+
+**Restyled (design system + Phosphor icons + responsive breakpoints + dark mode
+applied throughout, per-file specifics):**
+- `App.tsx` — shell tokens, `space-y-6` for consistent inter-section rhythm (removed
+  now-redundant `mt-*`/`mb-*` margins from each child component).
+- `DropZone.tsx` — tokens, `UploadSimple` icon, `StatusBanner` for the non-PDF reject
+  message (reclassified from red/error to amber/warning — skipping some files isn't a
+  failure). **Real accessibility bug found and fixed** (see below).
+- `DocumentList.tsx` — `StatusBanner` for the WebGPU-fallback notice (via
+  `classifyWebgpuFallback`, correctly `info` severity not `error` — it's an automatic
+  working fallback, not a failure) and the delete-confirm/delete-error boxes,
+  `Trash` icon (replaces `✕`), `motion-safe:animate-pulse` on the model-download text.
+- `QueryPanel.tsx` (largest) — `Button`/`StatusBanner` throughout, `success` variant
+  (green, newly available) for a fully-grounded answer vs. `warning` for a
+  not-fully-grounded one, responsive `flex-col sm:flex-row` question input so it
+  stacks on mobile instead of staying a cramped fixed row, `answerError` now carries a
+  real `TaxonomyResult` (type/severity/message) instead of a plain string.
+- `ByokPanel.tsx` (Milestone 7c) — `Button` with `loading`, password show/hide toggle
+  (`Eye`/`EyeSlash`, a guideline the UI/UX skill flagged as missing), Experimental
+  caveat and fetch-error both through `StatusBanner`, error path now uses
+  `errorTaxonomy.classify()` via the new `WorkerRequestError` (catches the real
+  status/resetAt instead of just a message string).
+
+**Real bug caught by the Playwright verification pass, not by review:** the file-input
+"browse" trigger in `DropZone.tsx` used `className="hidden"` (`display:none`) on the
+native `<input type="file">`, which removes an element from the tab order entirely —
+keyboard-only users could never reach it. Playwright's keyboard-nav check (Tab ×3)
+landed on `document.body` instead of a real control, which is what surfaced it. Fixed
+by switching to `sr-only` (visually hidden, stays focusable) plus a `focus-within:`
+ring on the wrapping `<label>` (peer-selectors don't work here since the input is a
+descendant of the label, not a preceding sibling). Re-verified: focus now correctly
+lands on the input after 3 tabs.
+
+**Verification:**
+- Frontend: 61/61 tests (was 53, +8 for `errorTaxonomy.ts`). Worker: 151/151 (was
+  150, +1 for `resetAt`'s UTC-midnight assertion). `tsc`/`oxlint` clean both sides.
+  `npm run build` clean, bundle-size guard passes (JS bundle grew ~638KB → ~670KB from
+  Phosphor + new code, comfortably within budget).
+- Playwright installed temporarily (per this project's established per-session
+  pattern), used to check: light mode, dark mode, mobile viewport (375px, no
+  horizontal overflow), keyboard-only navigation (caught the bug above),
+  `prefers-reduced-motion` respected, zero console errors on load. Screenshots
+  inspected visually. Uninstalled after — confirmed zero leftover in
+  `package.json`/`package-lock.json`, browser cache removed.
+- Deployed: Worker first (`wrangler deploy`, backward-compatible `resetAt` addition),
+  then frontend build + `wrangler pages deploy dist --project-name=pocketrag
+  --branch=main`, confirmed landed as Production via `wrangler pages deployment
+  list`, bundle-hash-verified against the live `pocketrag.pages.dev` URL directly
+  (not just the deployment-specific URL).
+
+**Left incomplete:** Milestone 14's landing-page half (deliberately out of scope per
+the user's choice). Anthropic/Grok/OpenRouter's BYOK *success* path still needs real
+test keys (unchanged standing item from prior sessions). No new gaps from this
+session's own scope.
+
+**Next session should start with:** no queued task — ask the user. Milestone 14's
+landing page, the BYOK success-path verification (whenever test keys exist), or
+milestones 9-16 are the standing candidates.
+
+---
+
 <!-- Copy the block above for each new session -->
