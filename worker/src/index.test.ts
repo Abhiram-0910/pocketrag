@@ -145,7 +145,7 @@ describe('worker fetch handler — /answer, shared key', () => {
     const res = await worker.fetch(answerRequest(validBody), makeEnv())
     expect(res.status).toBe(502)
     const data = (await res.json()) as { error: string }
-    expect(data.error).toBe('This provider is temporarily unavailable. Please try again later.')
+    expect(data.error).toBe("This provider isn't fully supported yet. Please try Gemini or OpenAI for now — we're working on it.")
     expect(data.error).not.toContain('server error')
   })
 
@@ -293,7 +293,7 @@ describe('worker fetch handler — /answer, BYOK', () => {
 
     expect(res.status).toBe(502)
     const data = (await res.json()) as { error: string }
-    expect(data.error).toBe('This provider is temporarily unavailable. Please try again later.')
+    expect(data.error).toBe("This provider isn't fully supported yet. Please try Gemini or OpenAI for now — we're working on it.")
     expect(data.error).not.toContain(realSecretKey)
 
     expect(consoleErrorSpy).toHaveBeenCalledTimes(1)
@@ -486,7 +486,7 @@ describe('worker fetch handler — /models', () => {
 
     expect(res.status).toBe(502)
     const data = (await res.json()) as { error: string }
-    expect(data.error).toBe("This provider's model list is temporarily unavailable. Please try again later.")
+    expect(data.error).toBe("This provider's model list isn't available yet. Please try Gemini or OpenAI for now — we're working on it.")
     expect(data.error).not.toContain(realSecretKey)
 
     expect(consoleErrorSpy).toHaveBeenCalledTimes(1)
@@ -511,7 +511,7 @@ describe('worker fetch handler — /models', () => {
     const res = await worker.fetch(modelsRequest({ provider: 'gemini', apiKey: 'bad-key' }), makeEnv())
     expect(res.status).toBe(502)
     const data = (await res.json()) as { error: string }
-    expect(data.error).toBe("This provider's model list is temporarily unavailable. Please try again later.")
+    expect(data.error).toBe("This provider's model list isn't available yet. Please try Gemini or OpenAI for now — we're working on it.")
     expect(data.error).not.toContain('invalid key')
   })
 

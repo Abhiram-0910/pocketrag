@@ -14,8 +14,10 @@ const RATE_LIMIT_MESSAGE = "You've hit today's request limit. Please try again t
 // Sanitized client-facing messages for a provider-call failure — the real reason (raw
 // provider error text, which could be a confusing or unexpected third-party string)
 // goes to logProviderError below instead, never straight to the client.
-const ANSWER_UNAVAILABLE_MESSAGE = 'This provider is temporarily unavailable. Please try again later.'
-const MODELS_UNAVAILABLE_MESSAGE = "This provider's model list is temporarily unavailable. Please try again later."
+const ANSWER_UNAVAILABLE_MESSAGE =
+  "This provider isn't fully supported yet. Please try Gemini or OpenAI for now — we're working on it."
+const MODELS_UNAVAILABLE_MESSAGE =
+  "This provider's model list isn't available yet. Please try Gemini or OpenAI for now — we're working on it."
 
 /**
  * Structured, key-free failure log for a provider call — lands in Cloudflare Workers
