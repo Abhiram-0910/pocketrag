@@ -252,10 +252,26 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
 
 # worker/.dev.vars (gitignored, local dev only — see worker/.dev.vars.example)
 GEMINI_API_KEY=
+DISCORD_WEBHOOK_URL=
 
-# Deployed Worker secret (never in a file):
+# Deployed Worker secrets (never in a file):
 #   cd worker && wrangler secret put GEMINI_API_KEY
+#   cd worker && wrangler secret put DISCORD_WEBHOOK_URL
 ```
+
+`DISCORD_WEBHOOK_URL` is optional — the Worker checks it for truthiness before doing
+anything, so the notification system stays fully inert (no KV read, no fetch) until
+the secret is set. When set, every provider-call failure across all 5 BYOK providers
+(`worker/src/index.ts`'s `notifyDiscordOfFailure`, called from both `/answer` and
+`/models`'s catch blocks) posts a sanitized embed (provider, model, status, message —
+same already-key-free string `logProviderError` uses, never the raw error/key) to the
+webhook, registered via `ctx.waitUntil` so it survives after the response is sent
+without blocking or delaying it. Suppressed to one alert per (provider, endpoint) per
+10-minute window (`discord-notify:<provider>:<answer|models>` in the existing
+`RATE_LIMIT_KV`, see `worker/src/discord.ts`) so a real outage or abuse burst doesn't
+spam the channel — `/answer` and `/models` are tracked independently since they hit
+different provider endpoints and can fail on their own (a `/models` failure never
+suppresses a subsequent `/answer` alert for the same provider, or vice versa).
 
 **Live production:**
 - Frontend: `https://pocketrag.pages.dev` (Cloudflare Pages, project `pocketrag`,

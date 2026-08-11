@@ -1246,4 +1246,133 @@ UI polish), Milestones 8-16.
 
 ---
 
+### Session 13 — 2026-08-11
+**Goal:** Discord webhook notifications for provider-call failures, sequenced before a
+combined Milestone 7c (BYOK UI polish) + general styling/UX pass per the user's
+explicit ordering. Full plan (Discord API contract research, design, tests, deploy,
+live-verification steps) written via plan mode and approved before any code, per this
+project's standing rule.
+
+**API contract researched before coding:** `POST
+https://discord.com/api/webhooks/{id}/{token}` — no auth header beyond the URL itself;
+payload is `embeds: [...]` (title, color, `fields[]`, `timestamp`); success `204`;
+Discord's own rate limits (per-webhook ~30/min, per-channel 5/5s, global 50/s) are
+irrelevant given the suppression window below, so no retry/backoff logic was built.
+
+**Built:**
+- `worker/src/discord.ts` (new) — `buildDiscordPayload` (pure, embed shape, message
+  truncated to 1000 chars to stay under Discord's 1024-char field cap,
+  `allowed_mentions: { parse: [] }` defensively), `sendDiscordAlert` (never throws —
+  wraps the POST in try/catch, swallows any failure since `logProviderError`'s
+  `console.error` already ran and stays the source of truth regardless), `shouldNotify`
+  (KV-backed suppression check, reusing `rateLimit.ts`'s existing `KVLike` interface
+  rather than redeclaring one).
+- `worker/src/index.ts` — `ctx: ExecutionContext` threaded into the top-level `fetch`
+  handler and both `handleAnswer`/`handleModels`, required so the Workers runtime
+  doesn't tear down the un-awaited Discord POST after the response is sent.
+  `logProviderError`'s inline status-extraction regex factored into a shared
+  `extractFailureDetails` helper, reused by the new `notifyDiscordOfFailure`. Called
+  from both catch blocks (`/answer` and `/models`, all 5 providers via the existing
+  `switch` dispatch — no provider-conditional branching, matching Session 11's uniform
+  sanitize-and-log decision). Gated on `env.DISCORD_WEBHOOK_URL` being truthy, so the
+  whole feature is inert (no KV read, no fetch attempted) until the secret exists —
+  safe to deploy before it's set.
+- `DISCORD_WEBHOOK_URL` wired as an optional Worker secret, mirroring
+  `GEMINI_API_KEY`'s exact existing pattern: placeholder added to `worker/.dev.vars`
+  (gitignored) and `worker/.dev.vars.example` (committed), `wrangler types` re-run to
+  regenerate `Env` in `worker-configuration.d.ts` (gitignored, never hand-edited), no
+  `wrangler.jsonc` change (secrets are deliberately never declared there).
+
+**Suppression key design — revised mid-review, not shipped as first drafted:** the
+initial plan proposed `discord-notify:<provider>` (one 10-minute window shared across
+`/answer` and `/models`). The user caught that this wasn't actually reasoned through in
+the plan and asked for an explicit justification before approving. Walked through the
+tradeoff: a shared window risks a `/models` failure silently suppressing a later, more
+user-impacting `/answer` failure for the same provider, since the two hit different
+provider endpoints and can fail independently — nothing is lost from the actual record
+either way (Workers Logs still captures every failure on both endpoints, unsuppressed;
+only the Discord alert itself is throttled), but the *visibility* gap was real enough
+that the user chose the finer-grained option. Shipped as
+`discord-notify:<provider>:<answer|models>` — `worker/src/discord.ts`'s `shouldNotify`
+takes an explicit `endpoint: 'answer' | 'models'` parameter, threaded through
+`notifyDiscordOfFailure` and both call sites. Both `discord.test.ts` and
+`index.test.ts` got a dedicated test proving a `/models` failure does *not* suppress a
+subsequent `/answer` alert for the same provider (and vice versa).
+
+**Tests:**
+- `worker/src/discord.test.ts` (new): payload shape (fields, truncation, null
+  fallbacks, `allowed_mentions`), `sendDiscordAlert` never throws (network rejection,
+  non-2xx response), a key-leak test structurally proving `DiscordFailurePayload` has
+  no `apiKey` field at all (the module cannot receive a raw key, let alone leak one),
+  `shouldNotify` suppression/independence/TTL behavior.
+- `worker/src/index.test.ts`: a `ctx` mock helper (`waitUntil` pushes into a
+  per-test-reset array; `flushWaitUntil()` awaits it) threaded as a third argument into
+  every `worker.fetch(...)` call site (~33, done mechanically via a small paren-
+  balancing script rather than by hand — a plain find/replace couldn't handle the
+  varied multi-line call shapes safely). New dedicated leak tests for `/answer` and
+  `/models` mirroring Session 11's `logProviderError` discipline exactly: drive a real
+  failure through the real dispatch path with a distinctive fake secret as the apiKey,
+  assert the Discord POST body contains the correct sanitized fields and never the real
+  secret. Plus a same-endpoint suppression test and a cross-endpoint independence test.
+- Worker: 150 tests (was 148 after `ctx` threading alone, +2 for the endpoint-
+  independence fix). Frontend: 53 (untouched).
+
+**Problems encountered (both self-caught during this session, one before deploy, one
+after):**
+- Four of the new tests called `vi.spyOn(console, 'error').mockImplementation(...)`
+  without capturing and `.mockRestore()`-ing the spy, breaking every other test in the
+  file's established pattern. This wasn't cosmetic — it made an unrelated, order-
+  dependent test fail (`/models` log-safety test asserted `console.error` called once,
+  got 5) when the full suite ran, despite passing in isolation. Fixed by matching the
+  existing pattern (capture the spy, `mockRestore()` at the end) in all four; full
+  suite green afterward.
+- **Live-verification test-construction bug, caught by the user reviewing the actual
+  Discord screenshot, not by me:** the live check fired `/answer` against `grok` with
+  model `grok-beta` — a stale id not used anywhere else in this codebase (every other
+  reference, including the test suite, uses `grok-4`). Grok's API rejects unknown
+  models with `400 Model not found` before/regardless of checking the bearer token, so
+  that request never actually exercised a key-rejection path — the Discord alert it
+  produced was real and correctly formatted, just not a test of what it was meant to
+  test. Separately, I initially asked the user to check for three "message slots"
+  corresponding 1:1 to the three requests fired, when the second request was expected
+  to produce zero messages (correct suppression) — the resulting confusion about which
+  screenshot message was which was a reporting error on my part, not a system bug, and
+  took an extra round-trip to untangle. Recorded here so the next session doesn't
+  repeat either mistake.
+
+**Deployed and live-verified (`pocketrag-answer.abhiram-dev.workers.dev`):** two
+deploys this session (once after the initial `ctx`-threading build, once after the
+suppression-key revision), each smoke-checked immediately after to confirm the
+existing sanitized-failure behavior was unchanged. User created the Discord webhook
+and ran `wrangler secret put DISCORD_WEBHOOK_URL` themselves (never pasted in chat).
+Four real requests fired against the live Worker in total:
+1. `/answer`, `grok`, `model: grok-beta`, fake key → real `400 Model not found`
+   alert delivered, correctly formatted, no key present — but not a key-rejection test
+   (see caveat above).
+2. `/answer`, `grok`, identical body, ~3s later → correctly suppressed, **zero**
+   Discord messages (same `discord-notify:grok:answer` window) — suppression proven.
+3. `/models`, `grok`, fake key (no model field — `/models` requests never send one) →
+   real `400 Incorrect API key provided...` alert, `Model: n/a` (correct — `handleModels`
+   always passes `model: null`), no key present. **Genuine key-rejection, cleanly
+   verified**, and its independent delivery (not suppressed by request 1's `/answer`
+   window) proves endpoint-independence.
+4. `/answer`, `openrouter`, valid model shape (`openai/gpt-4o-mini`), fake key, fired
+   to avoid waiting out `grok:answer`'s still-active suppression window → real `401
+   Missing Authentication header` alert, correctly formatted, no key present.
+   **Genuine key-rejection, cleanly verified.**
+
+**Left incomplete:** `grok`'s own `/answer` endpoint has not been verified against a
+genuine invalid-key rejection (only against the `grok-beta` model-not-found case) — its
+`discord-notify:grok:answer` suppression window is still active from request 1/2 above.
+Re-verify once the window naturally clears (10 minutes from request 1's timestamp this
+session), or deliberately wait it out in a future session — no code change needed,
+purely a re-run. Milestone 7c + styling/UX combined plan is queued next per the user's
+explicit sequencing (see TODO.md); not started this session.
+
+**Next session should start with:** either (a) the grok `/answer` genuine-key-
+rejection re-verification, a 2-minute check once due, or (b) the combined Milestone 7c
++ styling/UX pass — the user will direct.
+
+---
+
 <!-- Copy the block above for each new session -->

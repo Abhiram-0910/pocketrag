@@ -42,12 +42,40 @@ Experimental providers. See AGENTS.md Session 11 for the honest scope-of-proof c
 on what this specific check does and doesn't prove about key-leak resistance, and
 Session 12 for the message-wording reword (`ebc1670`) and its live re-verification.
 
-Full roadmap (Milestones 7-16) in 🟢 below. **No task queued — ask the user for
-direction.** Remaining BYOK work: live-verify Anthropic/Grok/OpenRouter's *success*
-path (a real grounded answer, not just the failure path) whenever real test keys
-become available — flip each from Experimental to fully proven at that point, no code
-change needed beyond removing it from `EXPERIMENTAL_PROVIDERS`. 7c (UI polish) and the
-rest of the milestone roadmap (8-16) remain open otherwise.
+**Discord webhook notifications for provider-call failures — built and live
+(Session 13).** Every failure across all 5 BYOK providers on both `/answer` and
+`/models` now posts a sanitized embed (provider, model, status, message — the same
+already-key-free string `logProviderError` uses) to a Discord channel via
+`worker/src/discord.ts`, fire-and-forget via `ctx.waitUntil` (never blocks/delays the
+response, never throws). Suppressed to one alert per `(provider, endpoint)` per
+10-minute window (`discord-notify:<provider>:<answer|models>` in the existing
+`RATE_LIMIT_KV`) — `/answer` and `/models` are tracked independently since they can
+fail on their own. `DISCORD_WEBHOOK_URL` is an optional Worker secret (mirrors
+`GEMINI_API_KEY`'s setup); the feature is fully inert until it's set.
+
+Live-verified with real requests against the deployed Worker: suppression confirmed
+(a same-provider, same-endpoint repeat within the window produced zero Discord
+messages), endpoint-independence confirmed (`grok`'s `/answer` and `/models`
+suppression windows fired independently), and genuine invalid-key rejections were
+cleanly captured and delivered with no key leak for `openrouter`/`/answer` (`401
+Missing Authentication header`) and `grok`/`/models` (`400 Incorrect API key
+provided`). **One open gap:** `grok`'s own `/answer` endpoint rejecting a genuinely
+bad key (as opposed to a bad model name) is still unverified — the first live check
+used a stale model id (`grok-beta`, not the current `grok-4`), so Grok rejected on
+model-validation before the key was ever checked, and that endpoint's suppression
+window is still active from that test. Re-verify once the window clears (or
+deliberately wait it out) — see AGENTS.md Session 13 for the full story of how this
+was caught.
+
+Full roadmap (Milestones 7-16) in 🟢 below. **Next queued: a combined plan covering
+Milestone 7c (BYOK UI/error-state polish) and the deferred general styling/UX pass**,
+scoped to finish completely rather than partially, per explicit sequencing — this was
+deliberately built after the Discord work above, not before. Remaining BYOK work:
+live-verify Anthropic/Grok/OpenRouter's *success* path (a real grounded answer, not
+just the failure path) whenever real test keys become available — flip each from
+Experimental to fully proven at that point, no code change needed beyond removing it
+from `EXPERIMENTAL_PROVIDERS`. Rest of the milestone roadmap (8-16) remains open
+otherwise.
 
 ---
 

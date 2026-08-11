@@ -1,6 +1,21 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import worker from './index'
 import type { KVLike } from './rateLimit'
+
+// No real Workers runtime in these tests (plain node vitest, no Miniflare), so
+// ExecutionContext is hand-mocked. Every makeCtx() call in a test pushes into the
+// same per-test array, reset in beforeEach — tests that care about the fire-and-forget
+// Discord call await flushWaitUntil() before asserting on it.
+let waitUntilPromises: Promise<unknown>[]
+function makeCtx(): ExecutionContext {
+  return { waitUntil: (p: Promise<unknown>) => waitUntilPromises.push(p) } as unknown as ExecutionContext
+}
+function flushWaitUntil(): Promise<unknown> {
+  return Promise.all(waitUntilPromises)
+}
+beforeEach(() => {
+  waitUntilPromises = []
+})
 
 function fakeKV(): KVLike {
   const store: Record<string, string> = {}
@@ -81,7 +96,7 @@ afterEach(() => {
 describe('worker fetch handler — /answer, shared key', () => {
   it('returns a composed answer, doc labels, and CORS headers for a valid request', async () => {
     mockGeminiSuccess('The mitochondrion powers the cell (Doc 1, page 1).')
-    const res = await worker.fetch(answerRequest(validBody), makeEnv())
+    const res = await worker.fetch(answerRequest(validBody), makeEnv(), makeCtx())
 
     expect(res.status).toBe(200)
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('http://localhost:5173')
@@ -103,21 +118,21 @@ describe('worker fetch handler — /answer, shared key', () => {
       text: async () => '',
     })
     vi.stubGlobal('fetch', fetchSpy)
-    await worker.fetch(answerRequest(validBody), makeEnv({ GEMINI_API_KEY: 'env-secret-key' }))
+    await worker.fetch(answerRequest(validBody), makeEnv({ GEMINI_API_KEY: 'env-secret-key' }), makeCtx())
 
     const [, init] = fetchSpy.mock.calls[0]
     expect((init as RequestInit).headers).toMatchObject({ 'x-goog-api-key': 'env-secret-key' })
   })
 
   it('rejects a non-POST /answer request with 404', async () => {
-    const res = await worker.fetch(asIncoming(new Request('http://worker.local/answer')), makeEnv())
+    const res = await worker.fetch(asIncoming(new Request('http://worker.local/answer')), makeEnv(), makeCtx())
     expect(res.status).toBe(404)
   })
 
   it('rejects an unknown path with 404', async () => {
     const res = await worker.fetch(
       asIncoming(new Request('http://worker.local/other', { method: 'POST', body: '{}' })),
-      makeEnv(),
+      makeEnv(), makeCtx()
     )
     expect(res.status).toBe(404)
   })
@@ -125,7 +140,7 @@ describe('worker fetch handler — /answer, shared key', () => {
   it('returns 400 for invalid input without calling Gemini', async () => {
     const fetchSpy = vi.fn()
     vi.stubGlobal('fetch', fetchSpy)
-    const res = await worker.fetch(answerRequest({ question: '', chunks: [] }), makeEnv())
+    const res = await worker.fetch(answerRequest({ question: '', chunks: [] }), makeEnv(), makeCtx())
     expect(res.status).toBe(400)
     expect(fetchSpy).not.toHaveBeenCalled()
   })
@@ -134,15 +149,15 @@ describe('worker fetch handler — /answer, shared key', () => {
     mockGeminiSuccess('answer (page 1).')
     const env = makeEnv()
     for (let i = 0; i < 50; i++) {
-      await worker.fetch(answerRequest(validBody), env)
+      await worker.fetch(answerRequest(validBody), env, makeCtx())
     }
-    const res = await worker.fetch(answerRequest(validBody), env)
+    const res = await worker.fetch(answerRequest(validBody), env, makeCtx())
     expect(res.status).toBe(429)
   })
 
   it('returns 502 with a sanitized message when the Gemini call fails', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500, text: async () => 'server error' }))
-    const res = await worker.fetch(answerRequest(validBody), makeEnv())
+    const res = await worker.fetch(answerRequest(validBody), makeEnv(), makeCtx())
     expect(res.status).toBe(502)
     const data = (await res.json()) as { error: string }
     expect(data.error).toBe("This provider isn't fully supported yet. Please try Gemini or OpenAI for now — we're working on it.")
@@ -157,7 +172,7 @@ describe('worker fetch handler — /answer, shared key', () => {
           headers: { Origin: 'http://localhost:5173' },
         }),
       ),
-      makeEnv(),
+      makeEnv(), makeCtx()
     )
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('http://localhost:5173')
   })
@@ -172,7 +187,7 @@ describe('worker fetch handler — /answer, shared key', () => {
           body: JSON.stringify(validBody),
         }),
       ),
-      makeEnv(),
+      makeEnv(), makeCtx()
     )
     expect(res.headers.get('Access-Control-Allow-Origin')).toBeNull()
   })
@@ -187,7 +202,7 @@ describe('worker fetch handler — /answer, BYOK', () => {
       text: async () => '',
     })
     vi.stubGlobal('fetch', fetchSpy)
-    const res = await worker.fetch(answerRequest(byokBody), makeEnv({ GEMINI_API_KEY: 'env-secret-key' }))
+    const res = await worker.fetch(answerRequest(byokBody), makeEnv({ GEMINI_API_KEY: 'env-secret-key' }), makeCtx())
 
     expect(res.status).toBe(200)
     const [url, init] = fetchSpy.mock.calls[0]
@@ -206,7 +221,7 @@ describe('worker fetch handler — /answer, BYOK', () => {
     vi.stubGlobal('fetch', fetchSpy)
     const res = await worker.fetch(
       answerRequest({ ...byokBody, provider: 'openai', model: 'gpt-4o-mini' }),
-      makeEnv({ GEMINI_API_KEY: 'env-secret-key' }),
+      makeEnv({ GEMINI_API_KEY: 'env-secret-key' }), makeCtx()
     )
 
     expect(res.status).toBe(200)
@@ -225,7 +240,7 @@ describe('worker fetch handler — /answer, BYOK', () => {
     vi.stubGlobal('fetch', fetchSpy)
     const res = await worker.fetch(
       answerRequest({ ...byokBody, provider: 'anthropic', model: 'claude-sonnet-4-5' }),
-      makeEnv({ GEMINI_API_KEY: 'env-secret-key' }),
+      makeEnv({ GEMINI_API_KEY: 'env-secret-key' }), makeCtx()
     )
 
     expect(res.status).toBe(200)
@@ -244,7 +259,7 @@ describe('worker fetch handler — /answer, BYOK', () => {
     vi.stubGlobal('fetch', fetchSpy)
     const res = await worker.fetch(
       answerRequest({ ...byokBody, provider: 'grok', model: 'grok-4' }),
-      makeEnv({ GEMINI_API_KEY: 'env-secret-key' }),
+      makeEnv({ GEMINI_API_KEY: 'env-secret-key' }), makeCtx()
     )
 
     expect(res.status).toBe(200)
@@ -263,7 +278,7 @@ describe('worker fetch handler — /answer, BYOK', () => {
     vi.stubGlobal('fetch', fetchSpy)
     const res = await worker.fetch(
       answerRequest({ ...byokBody, provider: 'openrouter', model: 'openai/gpt-4o-mini' }),
-      makeEnv({ GEMINI_API_KEY: 'env-secret-key' }),
+      makeEnv({ GEMINI_API_KEY: 'env-secret-key' }), makeCtx()
     )
 
     expect(res.status).toBe(200)
@@ -288,7 +303,7 @@ describe('worker fetch handler — /answer, BYOK', () => {
 
     const res = await worker.fetch(
       answerRequest({ ...byokBody, provider: 'grok', model: 'grok-4', apiKey: realSecretKey }),
-      makeEnv(),
+      makeEnv(), makeCtx()
     )
 
     expect(res.status).toBe(502)
@@ -311,10 +326,97 @@ describe('worker fetch handler — /answer, BYOK', () => {
     consoleErrorSpy.mockRestore()
   })
 
+  it('sends a Discord alert with sanitized failure details and never the raw API key, registered via ctx.waitUntil', async () => {
+    const realSecretKey = 'xai-real-secret-should-never-reach-discord-11223'
+    const discordWebhookUrl = 'https://discord.com/api/webhooks/1/token'
+    const fetchSpy = vi.fn().mockImplementation(async (url: string) => {
+      if (url === discordWebhookUrl) return { ok: true, status: 204, text: async () => '' }
+      return { ok: false, status: 401, text: async () => 'Incorrect API key provided: xai-****...fake9999' }
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const res = await worker.fetch(
+      answerRequest({ ...byokBody, provider: 'grok', model: 'grok-4', apiKey: realSecretKey }),
+      makeEnv({ DISCORD_WEBHOOK_URL: discordWebhookUrl }), makeCtx()
+    )
+    expect(res.status).toBe(502)
+    await flushWaitUntil()
+
+    const discordCall = fetchSpy.mock.calls.find(([url]) => url === discordWebhookUrl)
+    expect(discordCall).toBeDefined()
+    const [, init] = discordCall!
+    const body = (init as RequestInit).body as string
+    expect(body).not.toContain(realSecretKey)
+    const parsed = JSON.parse(body) as { embeds: Array<{ fields: Array<{ name: string; value: string }> }> }
+    const fields = Object.fromEntries(parsed.embeds[0].fields.map((f) => [f.name, f.value]))
+    expect(fields.Provider).toBe('grok')
+    expect(fields.Model).toBe('grok-4')
+    expect(fields.Status).toBe('401')
+    expect(fields.Message).toContain('Grok API error 401')
+
+    consoleErrorSpy.mockRestore()
+  })
+
+  it('suppresses a second Discord alert for the same provider+endpoint within the window', async () => {
+    const discordWebhookUrl = 'https://discord.com/api/webhooks/1/token'
+    const fetchSpy = vi.fn().mockImplementation(async (url: string) => {
+      if (url === discordWebhookUrl) return { ok: true, status: 204, text: async () => '' }
+      return { ok: false, status: 500, text: async () => 'server error' }
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const env = makeEnv({ DISCORD_WEBHOOK_URL: discordWebhookUrl })
+
+    await worker.fetch(answerRequest({ ...byokBody, provider: 'grok', model: 'grok-4' }), env, makeCtx())
+    await flushWaitUntil()
+    await worker.fetch(answerRequest({ ...byokBody, provider: 'grok', model: 'grok-4' }), env, makeCtx())
+    await flushWaitUntil()
+
+    const discordCalls = fetchSpy.mock.calls.filter(([url]) => url === discordWebhookUrl)
+    expect(discordCalls).toHaveLength(1)
+
+    consoleErrorSpy.mockRestore()
+  })
+
+  it('does not let a /models failure for a provider suppress a subsequent /answer failure for the same provider', async () => {
+    const discordWebhookUrl = 'https://discord.com/api/webhooks/1/token'
+    const fetchSpy = vi.fn().mockImplementation(async (url: string) => {
+      if (url === discordWebhookUrl) return { ok: true, status: 204, text: async () => '' }
+      return { ok: false, status: 500, text: async () => 'server error' }
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const env = makeEnv({ DISCORD_WEBHOOK_URL: discordWebhookUrl })
+
+    await worker.fetch(request('/models', { provider: 'grok', apiKey: 'user-key' }), env, makeCtx())
+    await flushWaitUntil()
+    await worker.fetch(answerRequest({ ...byokBody, provider: 'grok', model: 'grok-4' }), env, makeCtx())
+    await flushWaitUntil()
+
+    const discordCalls = fetchSpy.mock.calls.filter(([url]) => url === discordWebhookUrl)
+    expect(discordCalls).toHaveLength(2)
+
+    consoleErrorSpy.mockRestore()
+  })
+
+  it('does not attempt a Discord alert when DISCORD_WEBHOOK_URL is not set (default env)', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({ ok: false, status: 500, text: async () => 'server error' })
+    vi.stubGlobal('fetch', fetchSpy)
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await worker.fetch(answerRequest(validBody), makeEnv(), makeCtx())
+    await flushWaitUntil()
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1) // only the provider call, no Discord call attempted
+
+    consoleErrorSpy.mockRestore()
+  })
+
   it('rejects a BYOK request missing apiKey/provider/model without calling Gemini', async () => {
     const fetchSpy = vi.fn()
     vi.stubGlobal('fetch', fetchSpy)
-    const res = await worker.fetch(answerRequest({ ...validBody, keySource: 'own' }), makeEnv())
+    const res = await worker.fetch(answerRequest({ ...validBody, keySource: 'own' }), makeEnv(), makeCtx())
     expect(res.status).toBe(400)
     expect(fetchSpy).not.toHaveBeenCalled()
   })
@@ -324,13 +426,13 @@ describe('worker fetch handler — /answer, BYOK', () => {
     const env = makeEnv()
     // Exhaust the shared bucket (limit 50).
     for (let i = 0; i < 50; i++) {
-      await worker.fetch(answerRequest(validBody), env)
+      await worker.fetch(answerRequest(validBody), env, makeCtx())
     }
-    const sharedBlocked = await worker.fetch(answerRequest(validBody), env)
+    const sharedBlocked = await worker.fetch(answerRequest(validBody), env, makeCtx())
     expect(sharedBlocked.status).toBe(429)
 
     // A BYOK request from the same IP must still go through — separate bucket.
-    const byokRes = await worker.fetch(answerRequest(byokBody), env)
+    const byokRes = await worker.fetch(answerRequest(byokBody), env, makeCtx())
     expect(byokRes.status).toBe(200)
   })
 })
@@ -362,7 +464,7 @@ describe('worker fetch handler — /models', () => {
 
   it('returns the model list with CORS headers for a valid request', async () => {
     mockGeminiModelList()
-    const res = await worker.fetch(modelsRequest({ provider: 'gemini', apiKey: 'user-key' }), makeEnv())
+    const res = await worker.fetch(modelsRequest({ provider: 'gemini', apiKey: 'user-key' }), makeEnv(), makeCtx())
 
     expect(res.status).toBe(200)
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('http://localhost:5173')
@@ -372,7 +474,7 @@ describe('worker fetch handler — /models', () => {
 
   it('sends the request-supplied key as a header, never in the URL', async () => {
     mockGeminiModelList()
-    await worker.fetch(modelsRequest({ provider: 'gemini', apiKey: 'user-key' }), makeEnv())
+    await worker.fetch(modelsRequest({ provider: 'gemini', apiKey: 'user-key' }), makeEnv(), makeCtx())
     const fetchSpy = fetch as ReturnType<typeof vi.fn>
     const [url, init] = fetchSpy.mock.calls[0]
     expect(url).not.toContain('user-key')
@@ -382,7 +484,7 @@ describe('worker fetch handler — /models', () => {
   it('rejects a request with a bad provider or missing apiKey without calling the provider', async () => {
     const fetchSpy = vi.fn()
     vi.stubGlobal('fetch', fetchSpy)
-    const res = await worker.fetch(modelsRequest({ provider: 'mistral', apiKey: 'user-key' }), makeEnv())
+    const res = await worker.fetch(modelsRequest({ provider: 'mistral', apiKey: 'user-key' }), makeEnv(), makeCtx())
     expect(res.status).toBe(400)
     expect(fetchSpy).not.toHaveBeenCalled()
   })
@@ -397,7 +499,7 @@ describe('worker fetch handler — /models', () => {
         text: async () => '',
       }),
     )
-    const res = await worker.fetch(modelsRequest({ provider: 'openai', apiKey: 'user-key' }), makeEnv())
+    const res = await worker.fetch(modelsRequest({ provider: 'openai', apiKey: 'user-key' }), makeEnv(), makeCtx())
 
     expect(res.status).toBe(200)
     const data = (await res.json()) as { models: { id: string; displayName: string }[] }
@@ -418,7 +520,7 @@ describe('worker fetch handler — /models', () => {
         text: async () => '',
       }),
     )
-    const res = await worker.fetch(modelsRequest({ provider: 'anthropic', apiKey: 'user-key' }), makeEnv())
+    const res = await worker.fetch(modelsRequest({ provider: 'anthropic', apiKey: 'user-key' }), makeEnv(), makeCtx())
 
     expect(res.status).toBe(200)
     const data = (await res.json()) as { models: { id: string; displayName: string }[] }
@@ -439,7 +541,7 @@ describe('worker fetch handler — /models', () => {
         text: async () => '',
       }),
     )
-    const res = await worker.fetch(modelsRequest({ provider: 'grok', apiKey: 'user-key' }), makeEnv())
+    const res = await worker.fetch(modelsRequest({ provider: 'grok', apiKey: 'user-key' }), makeEnv(), makeCtx())
 
     expect(res.status).toBe(200)
     const data = (await res.json()) as { models: { id: string; displayName: string }[] }
@@ -461,7 +563,7 @@ describe('worker fetch handler — /models', () => {
         text: async () => '',
       }),
     )
-    const res = await worker.fetch(modelsRequest({ provider: 'openrouter', apiKey: 'user-key' }), makeEnv())
+    const res = await worker.fetch(modelsRequest({ provider: 'openrouter', apiKey: 'user-key' }), makeEnv(), makeCtx())
 
     expect(res.status).toBe(200)
     const data = (await res.json()) as { models: { id: string; displayName: string }[] }
@@ -482,7 +584,7 @@ describe('worker fetch handler — /models', () => {
     vi.stubGlobal('fetch', fetchSpy)
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-    const res = await worker.fetch(modelsRequest({ provider: 'openrouter', apiKey: realSecretKey }), makeEnv())
+    const res = await worker.fetch(modelsRequest({ provider: 'openrouter', apiKey: realSecretKey }), makeEnv(), makeCtx())
 
     expect(res.status).toBe(502)
     const data = (await res.json()) as { error: string }
@@ -501,14 +603,46 @@ describe('worker fetch handler — /models', () => {
     consoleErrorSpy.mockRestore()
   })
 
+  it('sends a Discord alert for a /models failure with sanitized details, model null, and never the raw API key', async () => {
+    const realSecretKey = 'sk-or-real-secret-should-never-reach-discord-44556'
+    const discordWebhookUrl = 'https://discord.com/api/webhooks/1/token'
+    const fetchSpy = vi.fn().mockImplementation(async (url: string) => {
+      if (url === discordWebhookUrl) return { ok: true, status: 204, text: async () => '' }
+      return { ok: false, status: 403, text: async () => 'Access denied for key: sk-or-****...fake1111' }
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const res = await worker.fetch(
+      modelsRequest({ provider: 'openrouter', apiKey: realSecretKey }),
+      makeEnv({ DISCORD_WEBHOOK_URL: discordWebhookUrl }), makeCtx()
+    )
+    expect(res.status).toBe(502)
+    await flushWaitUntil()
+
+    const discordCall = fetchSpy.mock.calls.find(([url]) => url === discordWebhookUrl)
+    expect(discordCall).toBeDefined()
+    const [, init] = discordCall!
+    const body = (init as RequestInit).body as string
+    expect(body).not.toContain(realSecretKey)
+    const parsed = JSON.parse(body) as { embeds: Array<{ fields: Array<{ name: string; value: string }> }> }
+    const fields = Object.fromEntries(parsed.embeds[0].fields.map((f) => [f.name, f.value]))
+    expect(fields.Provider).toBe('openrouter')
+    expect(fields.Model).toBe('n/a')
+    expect(fields.Status).toBe('403')
+    expect(fields.Message).toContain('OpenRouter API error 403')
+
+    consoleErrorSpy.mockRestore()
+  })
+
   it('rejects a non-POST /models request with 404', async () => {
-    const res = await worker.fetch(asIncoming(new Request('http://worker.local/models')), makeEnv())
+    const res = await worker.fetch(asIncoming(new Request('http://worker.local/models')), makeEnv(), makeCtx())
     expect(res.status).toBe(404)
   })
 
   it('returns 502 with a sanitized message when the provider call fails', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 401, text: async () => 'invalid key' }))
-    const res = await worker.fetch(modelsRequest({ provider: 'gemini', apiKey: 'bad-key' }), makeEnv())
+    const res = await worker.fetch(modelsRequest({ provider: 'gemini', apiKey: 'bad-key' }), makeEnv(), makeCtx())
     expect(res.status).toBe(502)
     const data = (await res.json()) as { error: string }
     expect(data.error).toBe("This provider's model list isn't available yet. Please try Gemini or OpenAI for now — we're working on it.")
@@ -520,13 +654,13 @@ describe('worker fetch handler — /models', () => {
     const env = makeEnv()
     // Exhaust the BYOK bucket (limit 500) via /models calls only.
     for (let i = 0; i < 500; i++) {
-      await worker.fetch(modelsRequest({ provider: 'gemini', apiKey: 'user-key' }), env)
+      await worker.fetch(modelsRequest({ provider: 'gemini', apiKey: 'user-key' }), env, makeCtx())
     }
-    const modelsBlocked = await worker.fetch(modelsRequest({ provider: 'gemini', apiKey: 'user-key' }), env)
+    const modelsBlocked = await worker.fetch(modelsRequest({ provider: 'gemini', apiKey: 'user-key' }), env, makeCtx())
     expect(modelsBlocked.status).toBe(429)
 
     // A BYOK /answer request from the same IP must also be blocked — same bucket.
-    const answerBlocked = await worker.fetch(answerRequest(byokBody), env)
+    const answerBlocked = await worker.fetch(answerRequest(byokBody), env, makeCtx())
     expect(answerBlocked.status).toBe(429)
   })
 })
