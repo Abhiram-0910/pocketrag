@@ -82,13 +82,26 @@ accessibility bug (file-upload trigger unreachable via Tab, `display:none` vs.
 full design-system rationale, the `invalid-key` taxonomy scope correction found during
 implementation, and per-file restyle details.
 
-Full roadmap (Milestones 7-16) in 🟢 below. **No task queued — ask the user for
-direction.** Remaining BYOK work: live-verify Anthropic/Grok/OpenRouter's *success*
-path (a real grounded answer, not just the failure path) whenever real test keys
-become available — flip each from Experimental to fully proven at that point, no code
-change needed beyond removing it from `EXPERIMENTAL_PROVIDERS`. Milestone 14's
-landing-page half (deliberately out of scope this session — see Session 14) and
-milestones 9-13/15-16 remain open otherwise.
+**Milestone 11 — Better retrieval, Phase A of 3 built and live (Session 15).** Staged
+plan: Phase A (hybrid keyword+embedding search) done this session; Phase B (client-side
+reranking) and Phase C (multi-turn conversation context) remain, each a separate
+future step — see AGENTS.md Session 15 for the full staging rationale and the
+decisions already locked in for B/C (client-side cross-encoder reranking, not
+Worker/LLM; frozen per-conversation Doc N labels; client-side context blending for
+follow-ups, not LLM query rewriting). Phase A: `src/lib/bm25.ts` (new BM25 scorer) +
+`hybridRankChunks` in `src/lib/retrieval.ts` (Reciprocal Rank Fusion, k=60, combining
+BM25 and cosine rank) is now the unconditional default for every query, no toggle.
+Live-verified with a real multi-chunk PDF — a chunk containing a unique exact-match
+term correctly outranked two topically-similar-but-wrong chunks. Frontend: 75/75
+tests. Deployed (frontend only — Phase A touches no Worker code).
+
+Full roadmap (Milestones 7-16) in 🟢 below. **Next queued: Milestone 11 Phase B**
+(client-side reranking) — do not attempt Phase B and Phase C together. Remaining BYOK
+work: live-verify Anthropic/Grok/OpenRouter's *success* path (a real grounded answer,
+not just the failure path) whenever real test keys become available — flip each from
+Experimental to fully proven at that point, no code change needed beyond removing it
+from `EXPERIMENTAL_PROVIDERS`. Milestone 14's landing-page half (deliberately out of
+scope, Session 14) and milestones 9-10/12-13/15-16 remain open otherwise.
 
 ---
 
@@ -185,9 +198,11 @@ milestones 9-13/15-16 remain open otherwise.
 - Fits the existing trust model: only relevant content leaves the browser
 
 ### 11. Better retrieval
-- Hybrid keyword+embedding search
-- Reranking
-- Multi-turn conversation context
+- [x] **Phase A — Hybrid keyword+embedding search — Session 15.** `src/lib/bm25.ts` +
+      `hybridRankChunks` in `retrieval.ts`, Reciprocal Rank Fusion (k=60). Live-verified.
+- [ ] Phase B — Reranking (client-side cross-encoder, decision locked in Session 15)
+- [ ] Phase C — Multi-turn conversation context (frozen Doc N labels, client-side
+      context blending — decisions locked in Session 15)
 
 ### 12. Hybrid web search toggle
 - Modes: notes-only / web-only / hybrid

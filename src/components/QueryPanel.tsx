@@ -1,7 +1,7 @@
 import { useCallback, useState, type FormEvent } from 'react'
 import { embedQuery } from '../lib/embeddingClient'
 import { getAllChunks, getChunksForDocument, type ChunkRecord } from '../lib/db'
-import { rankChunks, type ScoredChunk } from '../lib/retrieval'
+import { hybridRankChunks, type ScoredChunk } from '../lib/retrieval'
 import { attemptAnswer, fetchAnswerFromWorker, type DocLabel, type KeyConfig } from '../lib/answerRequest'
 import { canRunQuery } from '../lib/queryScope'
 import { classify, type TaxonomyResult } from '../lib/errorTaxonomy'
@@ -33,8 +33,10 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
   const documents = useDocumentStore((s) => s.documents)
   const selectedId = useDocumentStore((s) => s.selectedId)
   // "this document" queries the selected ready doc; "all documents" pools every stored
-  // doc. rankChunks is scope-agnostic (all embeddings are unit-normalized by the same
-  // model, so cosine scores are directly comparable across documents — see ARCHITECTURE.md).
+  // doc. hybridRankChunks is scope-agnostic (all embeddings are unit-normalized by the
+  // same model, so cosine scores are directly comparable across documents — see
+  // ARCHITECTURE.md — and BM25's IDF/avgdl are recomputed fresh over whichever pool is
+  // passed in, so keyword scores are always relative to the current scope too).
   const selectedReadyId = documents.find((d) => d.id === selectedId && d.status === 'ready')?.id ?? null
   const hasReadyDoc = documents.some((d) => d.status === 'ready')
   const docsReady = canRunQuery(documents, selectedId, scope)
@@ -111,7 +113,7 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
           const chunkSource = useAll ? getAllChunks() : getChunksForDocument(selectedReadyId as string)
           chunkSource
             .then(async (chunks) => {
-              const ranked = rankChunks(msg.embedding, chunks, TOP_K)
+              const ranked = hybridRankChunks(msg.embedding, question, chunks, TOP_K)
               setResults(ranked)
               await runAnswerAttempt(question, ranked, false, activeKeyConfig)
             })

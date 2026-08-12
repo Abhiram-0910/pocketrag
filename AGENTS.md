@@ -1510,4 +1510,87 @@ milestones 9-16 are the standing candidates.
 
 ---
 
+### Session 15 — 2026-08-12
+**Goal:** Milestone 11, "Better retrieval" — hybrid keyword+embedding search, a
+reranking step, multi-turn conversation context. Staged into 3 independent phases
+(plan mode used, current retrieval/prompt/grounding code read end-to-end via two
+parallel Explore agents before any design, real BM25/RRF/reranking/query-rewriting
+technique research done via WebSearch rather than assumed) — this entry covers
+**Phase A only** (hybrid retrieval). Phase B (client-side reranking) and Phase C
+(multi-turn context) remain, each to be its own separately-shippable step.
+
+**Decisions made before code, via `AskUserQuestion`:**
+- Reranking (Phase B, not yet built): **client-side cross-encoder**, not Worker/LLM
+  reranking — an LLM rerank call would mean sending a much larger candidate pool
+  (15-20 chunks) to the Worker every query instead of just the final 3, a real
+  regression against this project's stated trust model (CLAUDE.md: "documents never
+  leave the browser except the few retrieved snippets").
+- Doc N citation labels (Phase C, not yet built): **frozen per-conversation**, not
+  per-request — `assignDocLabels`' own doc comment already documents labels as "NOT
+  stable across queries" today; multi-turn history display needs them to stay stable.
+- Follow-up query augmentation (Phase C, not yet built): **client-side context
+  blending** (concatenate recent history into the retrieval query text), not an LLM
+  query-rewrite call — zero extra Worker/LLM round-trips.
+- Hybrid search (Phase A): **unconditional new default for every query**, no UI
+  toggle — cheap, pure client CPU, no added latency/Worker cost.
+
+**Built — Phase A (`src/lib/bm25.ts`, new; `src/lib/retrieval.ts`, extended):**
+- `bm25Score()` — standard BM25 (`k1=1.2`, `b=0.75`, Lucene/Elasticsearch defaults),
+  IDF/avgdl recomputed fresh per call over whatever pool is passed in (no persistent
+  index — this runs entirely client-side over a small, single-user chunk pool).
+  Tokenization: `\w+`, lowercased, no stemming (`ponytail:` noted, upgrade path if
+  precision issues surface).
+- `hybridRankChunks()` — fuses embedding cosine rank and BM25 rank via **Reciprocal
+  Rank Fusion** (`k=60`, standard default), not naive score averaging — researched
+  and confirmed this matters: BM25 is unbounded-positive, cosine is bounded, so
+  averaging raw scores would let whichever ranker produces larger absolute numbers
+  dominate; RRF operates on rank position instead, sidestepping the scale mismatch
+  entirely. Reuses `rankChunks` internally for the cosine leg (full-pool, not sliced)
+  rather than reimplementing cosine sort.
+- `QueryPanel.tsx`: 3-line integration change — `rankChunks` swapped for
+  `hybridRankChunks`, now passing `question` through as the BM25 query text alongside
+  the embedding.
+
+**Verified this session, not assumed:** the entire cosine-similarity shortcut in
+`similarity.ts` (dot product only, no norm division) — and now half of
+`hybridRankChunks` — depends on every embedding being L2-normalized. Traced this to
+its actual source rather than trusting it as inherited fact: `embedding.worker.ts`'s
+`embedText()` (the single function both `embedDocument` and `embedQuery` call
+through) explicitly passes `{ pooling: 'mean', normalize: true }` to transformers.js's
+`extractor()` call, and transformers.js's own docs confirm `normalize: true` means
+unit-length (L2) normalization, off by default. Both facts checked directly this
+session, not carried over from an earlier session's note.
+
+**Tests:** `bm25.test.ts` (9 cases — an exact hand-derived known-answer case reducing
+to `ln(4/3)` for the simplest possible input, plus TF-saturation, IDF-rarity,
+length-normalization, and edge cases, each isolating one formula property rather than
+just smoke-testing). `retrieval.test.ts` additions (5 cases for `hybridRankChunks`,
+including a fully hand-verified case proving a chunk with the worst possible cosine
+match but a unique exact keyword hit gets pulled into the top-3 where pure cosine
+alone would have excluded it entirely). Frontend: 75/75 (was 61, +14).
+`tsc`/`oxlint`/build clean.
+
+**Live verification:** hand-wrote a minimal PDF generator (matching the Session 6
+convention of not adding a PDF library for a throwaway fixture) — a real 3-page,
+6-real-chunk document with a distinctive exact-match term (`QX88421`) embedded in one
+chunk alongside two other chunks that are topically similar-sounding (shift/staffing
+language) but don't contain it. Drove the actual running app via a temporarily
+installed Playwright (installed → used → uninstalled, standard per-session pattern):
+uploaded the PDF, asked "What is QX88421?", confirmed the correct chunk ranked #1 of
+3 sources — ahead of the two semantically-adjacent-but-wrong chunks. Zero console
+errors.
+
+**Deployed:** frontend only (Phase A touches no Worker code) — `npm run build` +
+`wrangler pages deploy dist --project-name=pocketrag --branch=main`.
+
+**Left incomplete:** Phase B (client-side reranking) and Phase C (multi-turn
+conversation context) — both fully scoped in the approved plan, not started. Standing
+items from prior sessions (BYOK success-path verification, Milestone 14's landing
+page, milestones 9-10/12-13/15-16) remain untouched.
+
+**Next session should start with:** Phase B (client-side cross-encoder reranking),
+per the staged plan — do not attempt B and C together.
+
+---
+
 <!-- Copy the block above for each new session -->
