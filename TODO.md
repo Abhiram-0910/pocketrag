@@ -82,21 +82,35 @@ accessibility bug (file-upload trigger unreachable via Tab, `display:none` vs.
 full design-system rationale, the `invalid-key` taxonomy scope correction found during
 implementation, and per-file restyle details.
 
-**Milestone 11 — Better retrieval, Phase A of 3 built and live (Session 15).** Staged
-plan: Phase A (hybrid keyword+embedding search) done this session; Phase B (client-side
-reranking) and Phase C (multi-turn conversation context) remain, each a separate
-future step — see AGENTS.md Session 15 for the full staging rationale and the
-decisions already locked in for B/C (client-side cross-encoder reranking, not
-Worker/LLM; frozen per-conversation Doc N labels; client-side context blending for
-follow-ups, not LLM query rewriting). Phase A: `src/lib/bm25.ts` (new BM25 scorer) +
-`hybridRankChunks` in `src/lib/retrieval.ts` (Reciprocal Rank Fusion, k=60, combining
-BM25 and cosine rank) is now the unconditional default for every query, no toggle.
-Live-verified with a real multi-chunk PDF — a chunk containing a unique exact-match
-term correctly outranked two topically-similar-but-wrong chunks. Frontend: 75/75
-tests. Deployed (frontend only — Phase A touches no Worker code).
+**Milestone 11 — Better retrieval, Phase A + B of 3 built and live (Sessions 15-16).**
+Staged plan: Phase A (hybrid keyword+embedding search, Session 15) and Phase B
+(client-side reranking, Session 16) done; Phase C (multi-turn conversation context)
+remains, a separate future step — see AGENTS.md Sessions 15-16 for the full staging
+rationale and the decisions locked in for C (frozen per-conversation Doc N labels,
+client-side context blending for follow-ups, not LLM query rewriting).
 
-Full roadmap (Milestones 7-16) in 🟢 below. **Next queued: Milestone 11 Phase B**
-(client-side reranking) — do not attempt Phase B and Phase C together. Remaining BYOK
+Phase A: `src/lib/bm25.ts` + `hybridRankChunks` in `retrieval.ts` (Reciprocal Rank
+Fusion, k=60), now the unconditional default for every query. Phase B: `src/lib/reranker.ts`
++ a second model in `embedding.worker.ts` (`Xenova/ms-marco-MiniLM-L-2-v2`, the
+smaller of two real MS MARCO cross-encoder sizes checked — chosen specifically to
+avoid roughly doubling the app's first-use download) — hybrid search now retrieves a
+15-chunk pool, reranks it, keeps the top-3, with a graceful fallback to hybrid-only
+results if reranking itself fails. Real progress UI added for the reranker's one-time
+model download (`"Downloading reranking model — N%…"`, matching `DocumentList`'s
+existing convention), not left as a silent gap.
+
+Both phases live-verified with a real multi-chunk PDF — Phase A: a chunk with a
+unique exact-match term correctly outranked two topically-similar-but-wrong chunks.
+Phase B: displayed scores visibly switched from RRF values to real cross-encoder
+logits, confirming live execution; same correct chunk still surfaced; ~3.9s full
+round-trip including a cold model download. **Known follow-up, not yet fixed:** the
+Sources list's displayed "score" uses two different, confusing scales depending on
+whether reranking ran (bounded RRF value vs. unbounded raw logit) — noted for a
+future UI polish pass, not a correctness issue. Frontend: 81/81 tests. Both phases
+deployed frontend-only (neither touches Worker code).
+
+Full roadmap (Milestones 7-16) in 🟢 below. **Next queued: Milestone 11 Phase C**
+(multi-turn conversation context) — do not bundle with anything else. Remaining BYOK
 work: live-verify Anthropic/Grok/OpenRouter's *success* path (a real grounded answer,
 not just the failure path) whenever real test keys become available — flip each from
 Experimental to fully proven at that point, no code change needed beyond removing it
@@ -200,7 +214,10 @@ scope, Session 14) and milestones 9-10/12-13/15-16 remain open otherwise.
 ### 11. Better retrieval
 - [x] **Phase A — Hybrid keyword+embedding search — Session 15.** `src/lib/bm25.ts` +
       `hybridRankChunks` in `retrieval.ts`, Reciprocal Rank Fusion (k=60). Live-verified.
-- [ ] Phase B — Reranking (client-side cross-encoder, decision locked in Session 15)
+- [x] **Phase B — Reranking — Session 16.** Client-side cross-encoder
+      (`Xenova/ms-marco-MiniLM-L-2-v2`), `src/lib/reranker.ts` + a second model in
+      `embedding.worker.ts`. Live-verified. Known follow-up: Sources list score
+      display uses two inconsistent scales (RRF vs. raw logit) — future UI polish.
 - [ ] Phase C — Multi-turn conversation context (frozen Doc N labels, client-side
       context blending — decisions locked in Session 15)
 

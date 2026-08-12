@@ -13,9 +13,20 @@ export interface PageInput {
   text: string
 }
 
+export interface RerankCandidate {
+  id: string
+  text: string
+}
+
+export interface RerankScore {
+  id: string
+  score: number
+}
+
 export type WorkerRequest =
   | { type: 'embed-document'; pages: PageInput[] }
   | { type: 'embed-query'; text: string }
+  | { type: 'rerank'; query: string; candidates: RerankCandidate[] }
 
 export type WorkerResponse =
   | { type: 'backend'; backend: BackendState; detail: string }
@@ -25,4 +36,5 @@ export type WorkerResponse =
   | { type: 'embed-progress'; done: number; total: number }
   | { type: 'result'; chunks: EmbeddedChunk[]; dims: number }
   | { type: 'query-embedding'; embedding: number[] }
+  | { type: 'rerank-result'; scores: RerankScore[] }
   | { type: 'error'; message: string }

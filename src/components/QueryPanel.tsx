@@ -1,7 +1,9 @@
 import { useCallback, useState, type FormEvent } from 'react'
-import { embedQuery } from '../lib/embeddingClient'
+import { embedQuery, rerankChunks } from '../lib/embeddingClient'
 import { getAllChunks, getChunksForDocument, type ChunkRecord } from '../lib/db'
 import { hybridRankChunks, type ScoredChunk } from '../lib/retrieval'
+import { applyRerank, type RerankScore } from '../lib/reranker'
+import type { RerankCandidate } from '../workers/embedding.types'
 import { attemptAnswer, fetchAnswerFromWorker, type DocLabel, type KeyConfig } from '../lib/answerRequest'
 import { canRunQuery } from '../lib/queryScope'
 import { classify, type TaxonomyResult } from '../lib/errorTaxonomy'
@@ -10,10 +12,36 @@ import { StatusBanner } from './ui/StatusBanner'
 import { Button } from './ui/Button'
 
 const TOP_K = 3
+// Wider candidate pool handed to the cross-encoder reranker — hybrid search narrows
+// the full chunk pool down to this many first, then reranking narrows it to TOP_K.
+const RERANK_POOL_SIZE = 15
 const ANSWER_TIMEOUT_MS = 60_000
 
 interface QueryPanelProps {
   keyConfig: KeyConfig | null
+}
+
+/**
+ * Promise wrapper around the callback-based rerankChunks, for this one call site.
+ * `onProgress` only ever fires on a cold model load (subsequent queries reuse the
+ * already-loaded model and skip straight to the result) — surfaced in the UI so a
+ * slow-connection first-time download doesn't read as a silent hang, matching
+ * DocumentList's existing "Downloading model — N%" treatment for the embedding model.
+ */
+function rerankChunksAsync(
+  question: string,
+  candidates: RerankCandidate[],
+  onProgress: (percent: number) => void,
+): Promise<RerankScore[]> {
+  return new Promise((resolve, reject) => {
+    rerankChunks(question, candidates, {
+      onBackend: () => {},
+      onModelProgress: (msg) => onProgress(msg.percent),
+      onModelReady: () => {},
+      onRerankResult: (msg) => resolve(msg.scores),
+      onError: (msg) => reject(new Error(msg.message)),
+    })
+  })
 }
 
 export function QueryPanel({ keyConfig }: QueryPanelProps) {
@@ -29,6 +57,7 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
   const [answerError, setAnswerError] = useState<TaxonomyResult | null>(null)
   const [docLabels, setDocLabels] = useState<DocLabel[]>([])
   const [scope, setScope] = useState<'document' | 'all'>('document')
+  const [rerankModelProgress, setRerankModelProgress] = useState<number | null>(null)
 
   const documents = useDocumentStore((s) => s.documents)
   const selectedId = useDocumentStore((s) => s.selectedId)
@@ -113,7 +142,30 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
           const chunkSource = useAll ? getAllChunks() : getChunksForDocument(selectedReadyId as string)
           chunkSource
             .then(async (chunks) => {
-              const ranked = hybridRankChunks(msg.embedding, question, chunks, TOP_K)
+              // Hybrid search narrows the full pool to a wider candidate set first;
+              // the cross-encoder reranker then narrows that down to the final TOP_K.
+              const candidates = hybridRankChunks(msg.embedding, question, chunks, RERANK_POOL_SIZE)
+              let ranked = candidates.slice(0, TOP_K)
+              if (candidates.length > TOP_K) {
+                try {
+                  const scores = await rerankChunksAsync(
+                    question,
+                    candidates.map(({ chunk }) => ({ id: chunk.id, text: chunk.text })),
+                    setRerankModelProgress,
+                  )
+                  ranked = applyRerank(
+                    scores,
+                    candidates.map(({ chunk }) => chunk),
+                    TOP_K,
+                  )
+                } catch {
+                  // Reranking failed (e.g. model load/inference error) — fall back to
+                  // hybrid search's own top-K rather than failing the whole query.
+                  ranked = candidates.slice(0, TOP_K)
+                } finally {
+                  setRerankModelProgress(null)
+                }
+              }
               setResults(ranked)
               await runAnswerAttempt(question, ranked, false, activeKeyConfig)
             })
@@ -183,6 +235,12 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
         <StatusBanner variant="error" className="mt-2">
           {error}
         </StatusBanner>
+      )}
+
+      {rerankModelProgress != null && (
+        <p className="mt-4 text-sm text-slate-500 motion-safe:animate-pulse dark:text-slate-400">
+          Downloading reranking model — {rerankModelProgress}%… (one-time, cached after this)
+        </p>
       )}
 
       {awaitingAnswer && !timedOut && (

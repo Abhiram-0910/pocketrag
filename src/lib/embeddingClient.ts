@@ -1,4 +1,4 @@
-import type { PageInput, WorkerRequest, WorkerResponse } from '../workers/embedding.types'
+import type { PageInput, RerankCandidate, WorkerRequest, WorkerResponse } from '../workers/embedding.types'
 
 let worker: Worker | null = null
 
@@ -88,5 +88,45 @@ export function embedQuery(text: string, handlers: EmbedQueryHandlers): void {
     }
   }
   const request: WorkerRequest = { type: 'embed-query', text }
+  w.postMessage(request)
+}
+
+export interface RerankHandlers {
+  onBackend: (payload: Extract<WorkerResponse, { type: 'backend' }>) => void
+  onModelProgress: (payload: Extract<WorkerResponse, { type: 'model-progress' }>) => void
+  onModelReady: () => void
+  onRerankResult: (payload: Extract<WorkerResponse, { type: 'rerank-result' }>) => void
+  onError: (payload: Extract<WorkerResponse, { type: 'error' }>) => void
+}
+
+/** Reranks a candidate pool through the same worker's cross-encoder model. */
+export function rerankChunks(query: string, candidates: RerankCandidate[], handlers: RerankHandlers): void {
+  const w = getWorker()
+  w.onmessage = (event: MessageEvent<WorkerResponse>) => {
+    const msg = event.data
+    switch (msg.type) {
+      case 'backend':
+        handlers.onBackend(msg)
+        break
+      case 'model-progress':
+        handlers.onModelProgress(msg)
+        break
+      case 'model-ready':
+        handlers.onModelReady()
+        break
+      case 'rerank-result':
+        handlers.onRerankResult(msg)
+        break
+      case 'error':
+        handlers.onError(msg)
+        break
+      case 'chunked':
+      case 'embed-progress':
+      case 'result':
+      case 'query-embedding':
+        break
+    }
+  }
+  const request: WorkerRequest = { type: 'rerank', query, candidates }
   w.postMessage(request)
 }

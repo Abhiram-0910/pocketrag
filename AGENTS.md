@@ -1593,4 +1593,104 @@ per the staged plan — do not attempt B and C together.
 
 ---
 
+### Session 16 — 2026-08-12
+**Goal:** Milestone 11 Phase B — client-side reranking, per the staged plan approved
+in Session 15. Decisions for this phase were already locked in during Session 15's
+planning (client-side cross-encoder, not Worker/LLM reranking — a Worker rerank call
+would have meant sending the full 15-20 chunk candidate pool to the Worker every
+query instead of just the final 3, a real privacy regression against this project's
+stated trust model).
+
+**Built:**
+- `src/lib/reranker.ts` (new, pure) — `applyRerank()`: sorts a candidate pool by
+  cross-encoder score, slices to `topK`. Same "keep the scoring/sort logic pure and
+  testable, keep the model-loading shell separate" split `rankChunks`/
+  `cosineSimilarity` already established.
+- `worker/src/workers/embedding.worker.ts` extended with a second model —
+  reused `resolveBackend` (already generic over the extractor type) rather than
+  writing new WebGPU/WASM detection logic or spinning up a second worker thread.
+  Confirmed the real transformers.js API shape before writing code, not assumed from
+  the embedding model's own shape: cross-encoders use `AutoModelForSequenceClassification`
+  + `AutoTokenizer` with a batched `text_pair` input, not the `feature-extraction`
+  pipeline — output accessed via `logits.tolist()`, matching this file's existing
+  `.tolist()` convention.
+- **Model choice: `Xenova/ms-marco-MiniLM-L-2-v2`, not `-L-6-v2`.** Checked real
+  published ONNX file sizes rather than assuming: q8-quantized `-L-6-v2` is ~23MB —
+  the *same size* as the embedding model this app already downloads, which would have
+  roughly doubled the total first-use download. `-L-2-v2` quantized is ~15.7MB, a
+  smaller addition. Traded some rerank quality for a leaner download, consistent with
+  this project's established sensitivity to download size (WASM bundle-size guard,
+  the Session 14 self-hosted-font decision).
+- `src/lib/embeddingClient.ts` gained `rerankChunks()`, mirroring `embedQuery`'s
+  exact callback/handler pattern. `QueryPanel.tsx`: hybrid search now retrieves a
+  15-chunk candidate pool (`RERANK_POOL_SIZE`), reranks it, takes the final top-3 —
+  with a try/catch fallback to hybrid-only results if reranking itself fails (model
+  load/inference error), so a rerank failure degrades gracefully instead of failing
+  the whole query.
+
+**Loading-state decision, made explicitly (not left as a gap):** the user's review
+caught that `onModelProgress` was wired to a no-op, meaning a slow-connection
+first-time model download (cold load) would show no feedback beyond the existing
+generic "Searching…" button state. Decided **not** to treat the generic spinner as
+sufficient — wired real progress instead: new `rerankModelProgress` state, threaded
+through a `rerankChunksAsync` promise wrapper's `onProgress` callback, surfaced as
+"Downloading reranking model — N%… (one-time, cached after this)" — reusing
+`DocumentList.tsx`'s exact existing convention for the embedding model's own first
+download. This satisfies CLAUDE.md's own standing rule ("explicit loading/progress UI
+for anything that can take >200ms") rather than assuming the answer-generation
+spinner already covered it. The message only ever appears on a genuine cold load —
+`onModelProgress` simply never fires on a warm cache hit, so no stale/misleading
+state risk on subsequent queries.
+
+**Tests:** `reranker.test.ts` (6 cases — sort-by-score, topK truncation, empty pool,
+object-identity preservation, a candidate missing a score sorts last rather than
+throwing, and unbounded/negative raw-logit scores sort correctly — cross-encoder
+output isn't 0-1 bounded like a sigmoid score, confirmed via real research earlier
+this session, not assumed). Frontend: 81/81 (was 75, +6). `tsc`/`oxlint`/build clean;
+bundle-size guard passes (the model itself downloads lazily at runtime, same as the
+embedding model, so it never touches the build-time JS bundle at all).
+
+**Live verification:** real 6-chunk PDF (same fixture as Phase A) through the actual
+running app via a temporarily installed Playwright — asked an ambiguous query ("What
+was checked for accuracy?"), confirmed the reranker genuinely executed (displayed
+scores visibly switched from RRF fusion values like `0.033` to real raw cross-encoder
+logits like `-11.118`, `-11.274`, `-11.448` — direct proof of a live code-path
+change, not just a passing build), the correct chunk (containing `QX88421`, same one
+Phase A found) still surfaced, full round-trip including a cold model download took
+~3.9s, zero console errors. Playwright installed → used → uninstalled per the
+established per-session pattern, confirmed no leftover in `package.json`/lockfile.
+
+**Observed during live verification, flagged as a future polish item, not fixed this
+session:** the Sources list's displayed "score" now shows two very different,
+confusing scales depending on whether reranking ran — RRF fusion values (bounded,
+small, e.g. `0.033`) when the candidate pool was too small to rerank, vs. raw
+cross-encoder logits (unbounded, e.g. `-11.118`) once reranking is active. Not a
+correctness bug (the number was always an internal diagnostic, not something the UI
+claims a fixed meaning for), but worth addressing in a future UI polish pass — either
+normalize/hide the raw score or label the two cases differently.
+
+**Review round (this session):** the user's approval pass caught two things before
+sign-off, both addressed: (1) the loading-state gap above, and (2) a readability nit
+— `getReranker()`'s destructure aliased the shared `resolveBackend` return field from
+`extractor` to `reranker` locally (the field name is generic/shared with
+`getExtractor()`, but this call site holds a `{tokenizer, model}` pair, not an
+extractor).
+
+**Deployed:** frontend only (Phase B touches no Worker code, same as Phase A) —
+`npm run build` + `wrangler pages deploy dist --project-name=pocketrag
+--branch=main`, confirmed Production via `wrangler pages deployment list`,
+bundle-hash-verified against the live `pocketrag.pages.dev` URL directly.
+
+**Left incomplete:** Phase C (multi-turn conversation context) — fully scoped in the
+Session 15 plan (frozen per-conversation Doc N labels, client-side context blending
+for follow-ups), not started, deliberately kept as its own separate future step per
+the staged plan. The RRF-vs-raw-logit score display inconsistency noted above. Other
+standing items unchanged (BYOK success-path verification, Milestone 14 landing page,
+milestones 9-10/12-13/15-16).
+
+**Next session should start with:** Phase C (multi-turn conversation context), or
+whichever the user directs — do not attempt it bundled with anything else.
+
+---
+
 <!-- Copy the block above for each new session -->
