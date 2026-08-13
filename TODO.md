@@ -109,13 +109,25 @@ whether reranking ran (bounded RRF value vs. unbounded raw logit) — noted for 
 future UI polish pass, not a correctness issue. Frontend: 81/81 tests. Both phases
 deployed frontend-only (neither touches Worker code).
 
-Full roadmap (Milestones 7-16) in 🟢 below. **Next queued: Milestone 11 Phase C**
-(multi-turn conversation context) — do not bundle with anything else. Remaining BYOK
-work: live-verify Anthropic/Grok/OpenRouter's *success* path (a real grounded answer,
-not just the failure path) whenever real test keys become available — flip each from
-Experimental to fully proven at that point, no code change needed beyond removing it
-from `EXPERIMENTAL_PROVIDERS`. Milestone 14's landing-page half (deliberately out of
-scope, Session 14) and milestones 9-10/12-13/15-16 remain open otherwise.
+**Milestone 11 Phase C — split into C1 (done, Session 17) and C2 (queued next).** C1:
+frozen `Doc N` labels across a conversation — the client now echoes back the
+`docLabels` map from its last answer, and `assignDocLabels()` (`worker/src/labels.ts`)
+only appends labels for newly-seen documents, never reassigning an existing one. New
+`docLabels` field on `AnswerRequestBody`, capped at `MAX_DOC_LABELS` (20) and rejected
+on malformed/duplicate entries. `checkGrounding()` needed no logic change — see
+AGENTS.md Session 17 for why. Live-verified: direct-curl proof that an earlier
+document's label survives a turn where it isn't retrieved, and a real 3-turn browser
+run with zero console errors. ARCHITECTURE.md's "NOT stable across queries" note is
+superseded — see the updated citation-labels bullet there.
+
+Full roadmap (Milestones 7-16) in 🟢 below. **Next queued: Milestone 11 Phase C2**
+(client-side retrieval-query blending, prompt history, conversation UI — "Clear
+conversation" control) — fully scoped already, do not bundle with anything else.
+Remaining BYOK work: live-verify Anthropic/Grok/OpenRouter's *success* path (a real
+grounded answer, not just the failure path) whenever real test keys become available —
+flip each from Experimental to fully proven at that point, no code change needed beyond
+removing it from `EXPERIMENTAL_PROVIDERS`. Milestone 14's landing-page half (deliberately
+out of scope, Session 14) and milestones 9-10/12-13/15-16 remain open otherwise.
 
 ---
 
@@ -218,8 +230,10 @@ scope, Session 14) and milestones 9-10/12-13/15-16 remain open otherwise.
       (`Xenova/ms-marco-MiniLM-L-2-v2`), `src/lib/reranker.ts` + a second model in
       `embedding.worker.ts`. Live-verified. Known follow-up: Sources list score
       display uses two inconsistent scales (RRF vs. raw logit) — future UI polish.
-- [ ] Phase C — Multi-turn conversation context (frozen Doc N labels, client-side
-      context blending — decisions locked in Session 15)
+- [x] **Phase C1 — Frozen Doc N labels across a conversation — Session 17.**
+      `assignDocLabels()` takes an `existing` param; client echoes back `docLabels`.
+- [ ] Phase C2 — Client-side retrieval-query blending, prompt history, conversation UI
+      (decisions/full design locked in Session 17's plan — not started)
 
 ### 12. Hybrid web search toggle
 - Modes: notes-only / web-only / hybrid

@@ -3,6 +3,7 @@ import {
   MAX_API_KEY_LENGTH,
   MAX_CHUNKS,
   MAX_CHUNK_TEXT_LENGTH,
+  MAX_DOC_LABELS,
   MAX_MODEL_LENGTH,
   MAX_QUESTION_LENGTH,
   validateAnswerRequest,
@@ -272,6 +273,66 @@ describe('validateAnswerRequest', () => {
     })
     expect(emptyKeyWithGarbageProvider.ok).toBe(false)
     if (!emptyKeyWithGarbageProvider.ok) expect(emptyKeyWithGarbageProvider.error).not.toContain(secretKey)
+  })
+
+  it('defaults docLabels to an empty array when omitted', () => {
+    const result = validateAnswerRequest({ question: 'q', chunks: [validChunk] })
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.docLabels).toEqual([])
+  })
+
+  it('accepts a well-formed docLabels array and returns it', () => {
+    const docLabels = [
+      { label: 1, documentId: 'doc-a' },
+      { label: 2, documentId: 'doc-b' },
+    ]
+    const result = validateAnswerRequest({ question: 'q', chunks: [validChunk], docLabels })
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.docLabels).toEqual(docLabels)
+  })
+
+  it('rejects a non-array docLabels', () => {
+    const result = validateAnswerRequest({ question: 'q', chunks: [validChunk], docLabels: 'not an array' })
+    expect(result.ok).toBe(false)
+  })
+
+  it('caps an oversized docLabels array server-side', () => {
+    const docLabels = Array.from({ length: MAX_DOC_LABELS + 5 }, (_, i) => ({
+      label: i + 1,
+      documentId: `doc-${i}`,
+    }))
+    const result = validateAnswerRequest({ question: 'q', chunks: [validChunk], docLabels })
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.docLabels).toHaveLength(MAX_DOC_LABELS)
+  })
+
+  it('rejects a malformed docLabels entry', () => {
+    expect(
+      validateAnswerRequest({ question: 'q', chunks: [validChunk], docLabels: [{ label: 'one', documentId: 'a' }] })
+        .ok,
+    ).toBe(false)
+    expect(
+      validateAnswerRequest({ question: 'q', chunks: [validChunk], docLabels: [{ label: 1 }] }).ok,
+    ).toBe(false)
+    expect(
+      validateAnswerRequest({ question: 'q', chunks: [validChunk], docLabels: [{ label: 0, documentId: 'a' }] }).ok,
+    ).toBe(false)
+  })
+
+  it('rejects docLabels with a duplicate documentId', () => {
+    const docLabels = [
+      { label: 1, documentId: 'doc-a' },
+      { label: 2, documentId: 'doc-a' },
+    ]
+    expect(validateAnswerRequest({ question: 'q', chunks: [validChunk], docLabels }).ok).toBe(false)
+  })
+
+  it('rejects docLabels with a duplicate label number', () => {
+    const docLabels = [
+      { label: 1, documentId: 'doc-a' },
+      { label: 1, documentId: 'doc-b' },
+    ]
+    expect(validateAnswerRequest({ question: 'q', chunks: [validChunk], docLabels }).ok).toBe(false)
   })
 })
 

@@ -103,7 +103,10 @@ async function handleAnswer(
 
   // The Worker owns the Doc N labelling — it builds the prompt and grounds against
   // it — and returns the label→documentId map so the client can show real titles.
-  const docLabels = assignDocLabels(validation.chunks)
+  // validation.docLabels is the map the client echoed back from its last response in
+  // this conversation (Milestone 11 Phase C) — assignDocLabels only appends labels
+  // for documents not already in it, keeping "Doc N" frozen across turns.
+  const docLabels = assignDocLabels(validation.chunks, validation.docLabels)
   const labelOf = new Map(docLabels.map((doc) => [doc.documentId, doc.label]))
   const prompt = buildPrompt(validation.question, validation.chunks, labelOf)
 

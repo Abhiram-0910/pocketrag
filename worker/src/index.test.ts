@@ -110,6 +110,23 @@ describe('worker fetch handler — /answer, shared key', () => {
     expect(data.docLabels).toEqual([{ label: 1, documentId: 'doc-1' }])
   })
 
+  it('keeps a prior-turn docLabels entry frozen and appends a new document at the next label', async () => {
+    mockGeminiSuccess('See Doc 2, page 1.')
+    const body = {
+      question: 'What gives bread its chewy texture?',
+      chunks: [{ text: 'Kneading develops gluten.', page: 1, score: 0.7, documentId: 'doc-2' }],
+      docLabels: [{ label: 1, documentId: 'doc-1' }],
+    }
+    const res = await worker.fetch(answerRequest(body), makeEnv(), makeCtx())
+
+    expect(res.status).toBe(200)
+    const data = (await res.json()) as { docLabels: { label: number; documentId: string }[] }
+    expect(data.docLabels).toEqual([
+      { label: 1, documentId: 'doc-1' },
+      { label: 2, documentId: 'doc-2' },
+    ])
+  })
+
   it('calls Gemini with the env secret key when keySource is omitted (backward compatible)', async () => {
     const fetchSpy = vi.fn().mockResolvedValue({
       ok: true,

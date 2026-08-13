@@ -61,7 +61,7 @@ pocketrag/
 | `worker/src/index.ts` | `POST /answer` handler: CORS → rate limit → validate → build prompt → call Gemini → groundedness check → JSON response |
 | `worker/src/validate.ts` | Caps chunk count (5) and per-chunk text length (2000 chars) server-side — never trusts the client |
 | `worker/src/prompt.ts` | Grounded-QA prompt: answer only from passages, cite `(Doc N, page M)`, admit gaps |
-| `worker/src/labels.ts` | `assignDocLabels()` — per-request `Doc N` ↔ documentId map (see Key Architectural Decisions) |
+| `worker/src/labels.ts` | `assignDocLabels()` — `Doc N` ↔ documentId map, frozen per conversation via an `existing` param (see Key Architectural Decisions) |
 | `worker/src/grounding.ts` | `checkGrounding()` — citation-level groundedness heuristic over `(Doc N, page)` pairs |
 | `worker/src/rateLimit.ts` | KV counter-per-IP-per-day, 50/day default |
 | `worker/src/gemini.ts` | Thin, injectable-`fetch` wrapper around Gemini's `generateContent` endpoint |
@@ -186,8 +186,8 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
   (`validate.ts`, `prompt.ts`, `grounding.ts`, `rateLimit.ts`, `gemini.ts`) is written
   as pure functions taking injected dependencies (a `KVLike` interface, an injectable
   `fetchImpl`) specifically to make this possible.
-- **Multi-document citations via per-request `Doc N` labels (Worker-owned):** with
-  retrieval able to span multiple documents, a page number alone is ambiguous, so
+- **Multi-document citations via `Doc N` labels, frozen per conversation (Worker-owned):**
+  with retrieval able to span multiple documents, a page number alone is ambiguous, so
   passages are labelled `[Doc N, Page M]` and the model cites `(Doc N, page M)`. The
   **Worker** is the single source of truth for the label mapping — `assignDocLabels()`
   (`worker/src/labels.ts`) assigns `Doc N` per distinct `documentId` in first-appearance
@@ -195,10 +195,23 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
   against that same mapping. It returns the `label → documentId` map to the client, which
   joins `documentId → fileName` (known only in the browser) to render a legend under the
   answer (`Doc 1 = report.pdf · Doc 2 = notes.pdf`) and the Sources list. Filenames never
-  leave the browser; only opaque `documentId` UUIDs are sent. **These labels are generated
-  fresh per answer and are NOT stable across queries** — the same document can be `Doc 1`
-  for one question and `Doc 2` for another, depending on which chunks rank where. Nothing
-  should assume a persistent document-number.
+  leave the browser; only opaque `documentId` UUIDs are sent.
+  **Superseded in Milestone 11 Phase C:** labels used to be generated fresh per answer and
+  explicitly documented as NOT stable across queries — the same document could be `Doc 1`
+  for one question and `Doc 2` for another. That's deliberately no longer true. The client
+  now echoes back the `docLabels` map it last received (an optional `docLabels` field on
+  `AnswerRequestBody`, capped server-side at `MAX_DOC_LABELS` and rejected outright if
+  malformed or containing a duplicate `label`/`documentId`), and `assignDocLabels()` takes
+  that map as an `existing` parameter: entries already in it are never reassigned or
+  reordered, only appended to for documents seen for the first time in that call. A
+  document is `Doc 1` for the rest of a conversation once assigned, even if a later
+  question in between doesn't retrieve it. Numbering restarts at `Doc 1` only when the
+  client-side conversation state resets (a page reload today). The Worker remains the sole
+  owner of the mapping — the client only ever echoes back what the Worker last told it,
+  never invents label numbers itself. `checkGrounding()` needed no logic change for this:
+  it only ever compares an answer against the *current* turn's `(label, page)` pairs,
+  built fresh from that turn's chunks through whatever `labelOf` map resulted — whether a
+  label is new or carried over from an earlier turn is invisible to it.
 - **Citation-level groundedness check (`checkGrounding`), not semantic verification:**
   from the Milestone 4 grill-me discussion — flags an answer if it cites a `(Doc N, page M)`
   pair that wasn't in the input passages (which now also catches citing a valid document but

@@ -91,6 +91,7 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
         requestChunks,
         activeKeyConfig,
         ANSWER_TIMEOUT_MS,
+        docLabels,
       )
 
       if (result.outcome === 'success') {
@@ -113,7 +114,7 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
       }
       setAwaitingAnswer(false)
     },
-    [],
+    [docLabels],
   )
 
   const handleSubmit = useCallback(
@@ -132,7 +133,9 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
       setAnswerError(null)
       setTimedOut(false)
       setGroundingWarning(false)
-      setDocLabels([])
+      // docLabels is intentionally NOT reset here — Milestone 11 Phase C freezes "Doc N"
+      // labels for the lifetime of the conversation, so the map from the previous
+      // answer carries forward and gets echoed back to the Worker in runAnswerAttempt.
 
       embedQuery(question, {
         onBackend: () => {},

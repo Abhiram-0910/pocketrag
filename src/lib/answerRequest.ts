@@ -37,6 +37,7 @@ export type FetchAnswerFn = (
   chunks: RequestAnswerChunk[],
   keyConfig: KeyConfig,
   signal: AbortSignal,
+  docLabels: DocLabel[],
 ) => Promise<AnswerResponse>
 
 export type AnswerAttemptResult =
@@ -55,12 +56,19 @@ export async function attemptAnswer(
   chunks: RequestAnswerChunk[],
   keyConfig: KeyConfig,
   timeoutMs: number,
+  docLabels: DocLabel[] = [],
 ): Promise<AnswerAttemptResult> {
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    const { answer, groundingWarning, docLabels } = await fetchAnswer(question, chunks, keyConfig, controller.signal)
-    return { outcome: 'success', answer, groundingWarning, docLabels }
+    const { answer, groundingWarning, docLabels: responseDocLabels } = await fetchAnswer(
+      question,
+      chunks,
+      keyConfig,
+      controller.signal,
+      docLabels,
+    )
+    return { outcome: 'success', answer, groundingWarning, docLabels: responseDocLabels }
   } catch (err) {
     if (isAbortError(err)) return { outcome: 'timeout' }
     if (err instanceof WorkerRequestError) {
@@ -75,14 +83,14 @@ export async function attemptAnswer(
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL
 
 /** Real implementation of FetchAnswerFn — posts to the Cloudflare Worker. */
-export const fetchAnswerFromWorker: FetchAnswerFn = async (question, chunks, keyConfig, signal) => {
+export const fetchAnswerFromWorker: FetchAnswerFn = async (question, chunks, keyConfig, signal, docLabels) => {
   if (!API_BASE_URL) {
     throw new Error('Answer generation is not configured yet (VITE_API_BASE_URL is unset).')
   }
   const res = await fetch(`${API_BASE_URL}/answer`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question, chunks, ...keyConfig }),
+    body: JSON.stringify({ question, chunks, ...keyConfig, docLabels }),
     signal,
   })
   if (!res.ok) {

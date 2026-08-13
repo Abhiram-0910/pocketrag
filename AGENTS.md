@@ -1693,4 +1693,124 @@ whichever the user directs — do not attempt it bundled with anything else.
 
 ---
 
+### Session 17 — 2026-08-13
+**Goal:** Milestone 11 Phase C — multi-turn conversation context, the most invasive
+phase of the milestone (touches `worker/src/prompt.ts`, `labels.ts`, `grounding.ts`,
+`validate.ts` — the citation/grounding contract stable since Milestone 4). Two
+decisions were locked from Session 15's planning and not re-litigated: (1) `Doc N`
+labels freeze per-conversation, not per-request; (2) follow-up retrieval uses
+client-side context blending, not LLM query rewriting. Plan mode used given the
+trust-model scope; read `prompt.ts`/`labels.ts`/`grounding.ts`/`validate.ts`/
+`index.ts`/`QueryPanel.tsx` in full before designing anything.
+
+**Staging decision (this session's plan, approved before code):** split Phase C into
+C1 (frozen labels only) and C2 (context blending + prompt history + conversation UI),
+mirroring how Milestone 11 itself was staged A→B and BYOK was staged 7a→7b. Only C1
+built this session; C2 is fully designed in the approved plan
+(`/home/abhi/.claude/plans/joyful-popping-seal.md`) but deliberately deferred.
+
+**Built (C1):**
+- `worker/src/labels.ts` — `assignDocLabels(chunks, existing = [])`: existing entries
+  are spread in first and never reassigned/reordered; a document not in `existing` gets
+  the next label continuing from `existing`'s max (`Math.max` over existing labels + 1),
+  never reusing a gap. Doc comment rewritten — no longer claims labels are unstable
+  across queries.
+- `worker/src/validate.ts` — `DocLabel` moved here (was defined in `labels.ts`, which
+  already imports `InputChunk` from `validate.ts`; keeping the shared type in
+  `validate.ts` avoided a circular import between the two files). New optional
+  `docLabels?: DocLabel[]` field on `AnswerRequestBody`; new `MAX_DOC_LABELS = 20` cap;
+  `isValidDocLabel()` (integer label 1..20, documentId string 1..128 chars, same shape
+  discipline as `isValidChunk`); `hasDuplicateDocLabels()` — a legitimate client only
+  ever echoes back a map this same Worker returned, so a duplicate `documentId` or
+  `label` number means corrupted state, and the whole request is rejected (fail closed,
+  not guess-which-to-keep). `ValidationResult`'s both branches gained `docLabels:
+  DocLabel[]`, always present after validation (`[]` when the field was absent).
+- `worker/src/index.ts` — `assignDocLabels(validation.chunks, validation.docLabels)`
+  replaces the old stateless call; `checkGrounding`'s call site is **completely
+  unchanged** (see below for why). Response still returns `docLabels` — now the full
+  accumulated array, which is exactly what the client persists and echoes back.
+- Client: `src/lib/answerRequest.ts` — `FetchAnswerFn`/`attemptAnswer` gained a
+  `docLabels` param (defaults to `[]`); `fetchAnswerFromWorker` sends it in the POST
+  body. `src/components/QueryPanel.tsx` — the one-line behavioral change this whole
+  phase hinges on: `setDocLabels([])` was deleted from `handleSubmit` (used to reset
+  the label map on every new question). `docLabels` state is now the running
+  conversation map, threaded into `runAnswerAttempt` → `attemptAnswer`, replaced (not
+  merged — the Worker already returns the full accumulated set) from each response.
+  `runAnswerAttempt`'s `useCallback` deps gained `docLabels` (was `[]`, would have been
+  a stale-closure bug otherwise).
+
+**Why `checkGrounding` needed zero logic changes (verified, not assumed):** it only
+ever receives `providedPairs`, built fresh every call in `index.ts` from *that turn's*
+`validation.chunks` mapped through *that turn's* `labelOf`. Whether a chunk's label is
+brand-new or three turns old is invisible to the function — it just compares
+`{label, page}` pairs. Added a direct test proving this (call `assignDocLabels` twice,
+second call passing the first's output as `existing` with a different chunk set, then
+run `checkGrounding` against the second turn's non-trivial labels) rather than just
+asserting it in a comment.
+
+**Tests:** `labels.test.ts` (+4: existing label preserved when the doc isn't in this
+turn's chunks; never reassigns even when appearance order changes; continues from
+`existing`'s max without reusing gaps; default `existing=[]` matches old behavior).
+`grounding.test.ts` (+1, the frozen-label case above). `validate.test.ts` (+7: default
+`[]`, well-formed accepted, non-array rejected, oversized capped, malformed entry
+rejected, duplicate documentId rejected, duplicate label rejected). `index.test.ts`
+(+1: a prior-turn `docLabels` plus a new document's chunk returns a response that keeps
+the old entry and appends exactly one new one). `answerRequest.test.ts` (+1, and the
+existing keyConfig-passthrough test updated for the new call signature). Worker:
+164/164 passing — **fully reconciled, no open gap:** `git stash`'d this session's
+uncommitted changes and re-ran the worker suite against the exact pre-C1 tree, got
+151/151, matching Session 14's recorded 151/151 exactly (Sessions 15-16, Milestone 11
+Phase A/B, were both explicitly frontend-only and never touched `worker/`, so the
+baseline didn't move between Session 14 and this one). `git stash pop` restored C1's
+changes, re-ran, got 164/164 — exactly 151 + this session's +13
+(labels +4, grounding +1, validate +7, index +1). An earlier draft of this note said
+"was 156," which was simply a wrong guess, not a real discrepancy — corrected here
+after actually checking. Frontend: 82/82 (was 81, +1). `tsc`/`oxlint`/`npm run build`
+clean both sides; bundle-size guard passes (no bundle-affecting change).
+
+**Live verification:** direct curl against a real running `wrangler dev` proved the
+exact invariant this phase exists for — turn 1 (doc-1 only) returns `docLabels:
+[{label:1, documentId:'doc-1'}]`; turn 2 (doc-2 only, with turn 1's map echoed back)
+returns `[{label:1,documentId:'doc-1'},{label:2,documentId:'doc-2'}]` — doc-1 kept
+label 1 despite not being in turn 2's chunks; turn 3 (doc-1 again, both labels echoed
+back) still returns both unchanged, doc-1 still label 1. Then a real 3-turn browser run
+(Playwright, installed → used → uninstalled per convention) against both `wrangler dev`
+and Vite dev with two hand-generated PDFs (`biology.pdf`, `cooking.pdf` — same
+no-library minimal-PDF-writer approach as Session 6): scope set to "All documents" from
+turn 1, so both documents entered the label map immediately rather than staggered
+across turns as the plan's live-verification scenario intended — the small 3-line test
+fixtures meant both documents' chunks landed in the very first retrieval pool. This
+weakened the browser run as a demonstration of staggered introduction specifically, but
+still proved the actually-new/risky part — the client-side persist-and-echo wiring
+end-to-end in a real browser — cleanly: the `Doc 1 = biology.pdf · Doc 2 = cooking.pdf`
+legend stayed byte-identical across all 3 turns, zero console errors. Combined with the
+curl checks (which did isolate the staggered-introduction scenario precisely against
+the real Worker), this was judged sufficient rather than re-running the browser test
+with per-turn scope switching.
+
+**Problems encountered (environment, not app bugs):** a stale `workerd` process from an
+earlier, unrelated session was already bound to port 8787, causing the first `wrangler
+dev` attempt to fail with "Address already in use" and several confusing follow-up
+processes appearing to respawn on that port after being killed. Root cause turned out
+to be leftover processes, not a live respawn — resolved by finding the actual listening
+PID via `lsof -ti :8787` and killing it directly (`pkill -f` pattern matching produced
+no output and no effect in this sandbox for unclear reasons — avoid it, use `lsof -ti`
++ `kill` by PID instead). Once the port was genuinely clear, `run_in_background`-managed
+`wrangler dev`/`vite` came up cleanly on the first try.
+
+**Left incomplete:** the `scratchpad/` directory this session created (fixture PDFs,
+screenshots, the verify script) — cleanup via `rm -rf scratchpad/` was explicitly denied
+by the user's permission settings mid-session; left in place rather than retried. The
+user should delete it manually or explicitly approve removal next session. C2 (context
+blending, prompt history, conversation UI) — fully designed, not started, deliberately
+deferred per this session's staging decision. Other standing items unchanged (BYOK
+success-path verification, Milestone 14 landing page, milestones 9-10/12-13/15-16).
+
+**Next session should start with:** Milestone 11 Phase C2, per the design already
+locked in this session's approved plan — do not re-derive it from scratch, the plan
+file has the full mechanics for both the retrieval-query blending and the prompt
+history/conversation UI. Confirm with the user whether to delete `scratchpad/` first.
+
+---
+
 <!-- Copy the block above for each new session -->

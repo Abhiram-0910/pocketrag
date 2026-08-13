@@ -7,6 +7,11 @@ export interface InputChunk {
   documentId: string
 }
 
+export interface DocLabel {
+  label: number
+  documentId: string
+}
+
 export type KeySource = 'shared' | 'own'
 
 export const SUPPORTED_PROVIDERS = ['gemini', 'openai', 'anthropic', 'grok', 'openrouter'] as const
@@ -22,10 +27,15 @@ export interface AnswerRequestBody {
   apiKey?: string
   provider?: SupportedProvider
   model?: string
+  // The label→documentId map the client last received from this same conversation
+  // (Milestone 11 Phase C) — echoed back so assignDocLabels can keep "Doc N" frozen
+  // instead of recomputing it fresh every request. Missing/absent means a fresh
+  // conversation (or an older client that predates this field).
+  docLabels?: DocLabel[]
 }
 
 export type ValidationResult =
-  | { ok: true; question: string; chunks: InputChunk[]; keySource: 'shared' }
+  | { ok: true; question: string; chunks: InputChunk[]; keySource: 'shared'; docLabels: DocLabel[] }
   | {
       ok: true
       question: string
@@ -34,6 +44,7 @@ export type ValidationResult =
       apiKey: string
       provider: SupportedProvider
       model: string
+      docLabels: DocLabel[]
     }
   | { ok: false; error: string }
 
@@ -51,6 +62,9 @@ export const MAX_DOCUMENT_ID_LENGTH = 128
 // rejecting an oversized one.
 export const MAX_API_KEY_LENGTH = 200
 export const MAX_MODEL_LENGTH = 128
+// A conversation realistically cites a handful of distinct documents, not dozens —
+// generous enough for real multi-doc use, small enough to bound the label lookup.
+export const MAX_DOC_LABELS = 20
 
 function isValidChunk(value: unknown): value is InputChunk {
   if (typeof value !== 'object' || value === null) return false
@@ -65,11 +79,35 @@ function isValidChunk(value: unknown): value is InputChunk {
   )
 }
 
+function isValidDocLabel(value: unknown): value is DocLabel {
+  if (typeof value !== 'object' || value === null) return false
+  const label = value as Record<string, unknown>
+  return (
+    typeof label.label === 'number' &&
+    Number.isInteger(label.label) &&
+    label.label >= 1 &&
+    label.label <= MAX_DOC_LABELS &&
+    typeof label.documentId === 'string' &&
+    label.documentId.length > 0 &&
+    label.documentId.length <= MAX_DOCUMENT_ID_LENGTH
+  )
+}
+
+// A legitimate client only ever echoes back a docLabels map exactly as this same
+// Worker last returned it — well-formed by construction. A duplicate documentId or
+// label number means the map was corrupted (bug, tampering, or a stale/mixed-up
+// client state), so fail closed rather than guess which entry to keep.
+function hasDuplicateDocLabels(labels: DocLabel[]): boolean {
+  const documentIds = new Set(labels.map((l) => l.documentId))
+  const labelNumbers = new Set(labels.map((l) => l.label))
+  return documentIds.size !== labels.length || labelNumbers.size !== labels.length
+}
+
 export function validateAnswerRequest(body: unknown): ValidationResult {
   if (typeof body !== 'object' || body === null) {
     return { ok: false, error: 'Request body must be a JSON object.' }
   }
-  const { question, chunks, keySource, apiKey, provider, model } = body as Record<string, unknown>
+  const { question, chunks, keySource, apiKey, provider, model, docLabels } = body as Record<string, unknown>
 
   if (typeof question !== 'string' || question.trim().length === 0) {
     return { ok: false, error: 'question must be a non-empty string.' }
@@ -93,6 +131,23 @@ export function validateAnswerRequest(body: unknown): ValidationResult {
     validatedChunks.push({ ...chunk, text: chunk.text.slice(0, MAX_CHUNK_TEXT_LENGTH) })
   }
 
+  const validatedDocLabels: DocLabel[] = []
+  if (docLabels !== undefined) {
+    if (!Array.isArray(docLabels)) {
+      return { ok: false, error: 'docLabels must be an array.' }
+    }
+    const cappedLabels = docLabels.slice(0, MAX_DOC_LABELS)
+    for (const label of cappedLabels) {
+      if (!isValidDocLabel(label)) {
+        return { ok: false, error: 'Each docLabels entry must have label (integer) and documentId (string).' }
+      }
+      validatedDocLabels.push(label)
+    }
+    if (hasDuplicateDocLabels(validatedDocLabels)) {
+      return { ok: false, error: 'docLabels must not contain duplicate label or documentId values.' }
+    }
+  }
+
   const trimmedQuestion = question.trim()
   const resolvedKeySource = keySource ?? 'shared'
   if (resolvedKeySource !== 'shared' && resolvedKeySource !== 'own') {
@@ -100,7 +155,13 @@ export function validateAnswerRequest(body: unknown): ValidationResult {
   }
 
   if (resolvedKeySource === 'shared') {
-    return { ok: true, question: trimmedQuestion, chunks: validatedChunks, keySource: 'shared' }
+    return {
+      ok: true,
+      question: trimmedQuestion,
+      chunks: validatedChunks,
+      keySource: 'shared',
+      docLabels: validatedDocLabels,
+    }
   }
 
   if (typeof apiKey !== 'string' || apiKey.length === 0 || apiKey.length > MAX_API_KEY_LENGTH) {
@@ -121,6 +182,7 @@ export function validateAnswerRequest(body: unknown): ValidationResult {
     apiKey,
     provider: provider as SupportedProvider,
     model,
+    docLabels: validatedDocLabels,
   }
 }
 
