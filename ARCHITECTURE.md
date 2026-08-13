@@ -206,12 +206,38 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
   reordered, only appended to for documents seen for the first time in that call. A
   document is `Doc 1` for the rest of a conversation once assigned, even if a later
   question in between doesn't retrieve it. Numbering restarts at `Doc 1` only when the
-  client-side conversation state resets (a page reload today). The Worker remains the sole
-  owner of the mapping — the client only ever echoes back what the Worker last told it,
-  never invents label numbers itself. `checkGrounding()` needed no logic change for this:
-  it only ever compares an answer against the *current* turn's `(label, page)` pairs,
-  built fresh from that turn's chunks through whatever `labelOf` map resulted — whether a
-  label is new or carried over from an earlier turn is invisible to it.
+  client-side conversation state resets (a page reload, or the explicit "Clear
+  conversation" control added in Phase C2, below). The Worker remains the sole owner of
+  the mapping — the client only ever echoes back what the Worker last told it, never
+  invents label numbers itself. `checkGrounding()` needed no logic change for this: it
+  only ever compares an answer against the *current* turn's `(label, page)` pairs, built
+  fresh from that turn's chunks through whatever `labelOf` map resulted — whether a label
+  is new or carried over from an earlier turn is invisible to it.
+- **Conversation context — retrieval-query blending + prompt history (Milestone 11 Phase
+  C2), two deliberately separate mechanisms:** (1) **Retrieval-query blending**
+  (`src/lib/conversation.ts`'s `buildRetrievalQuery()`) folds the immediately preceding
+  question — and only that one (`RETRIEVAL_HISTORY_TURNS = 1`) — into the query text used
+  for embedding and BM25 matching (`hybridRankChunks`), so a vague follow-up like "what
+  page is that on?" still retrieves the right chunk. This never crosses the wire — the
+  literal, unblended question is still what the Worker answers, and the cross-encoder
+  reranker (Phase B) also scores against the literal question, not the blended one, since
+  reranking targets precision on what's actually being asked rather than recall. (2)
+  **Prompt history** is the opposite: a capped list of recent `{question, answer}` pairs
+  (`history` on `AnswerRequestBody`, `MAX_HISTORY_TURNS = 3`, truncated not rejected —
+  this is content the app itself already produced/received, not attacker-controlled
+  payload) that *does* cross the wire and gets interpolated into `buildPrompt()`'s
+  "Conversation so far" section, shown to the model for context with an explicit "do not
+  cite from this" instruction. Client-side, `QueryPanel.tsx` stores a capped
+  (`MAX_STORED_TURNS = 10`) conversation-turn array; only the most recent
+  `SENT_HISTORY_TURNS` (3) are sent on each request — the Worker independently re-caps to
+  `MAX_HISTORY_TURNS` regardless. A "Clear conversation" control resets the turn list, the
+  frozen `docLabels` map, and the current answer — restarting `Doc N` numbering — without
+  touching document selection/scope, which are library state, not conversation state.
+  **Grounding risk, documented as a known limitation rather than built around:** because
+  the prompt now shows a prior answer's own citations, a model could echo one it recalled
+  from history instead of from this turn's actual passages — `checkGrounding()` correctly
+  flags this as `hasUnknownCitation` regardless, since `providedPairs` is always built
+  fresh from *this turn's* chunks (see the doc-comment in `grounding.ts`).
 - **Citation-level groundedness check (`checkGrounding`), not semantic verification:**
   from the Milestone 4 grill-me discussion — flags an answer if it cites a `(Doc N, page M)`
   pair that wasn't in the input passages (which now also catches citing a valid document but

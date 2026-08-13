@@ -4,7 +4,14 @@ import { getAllChunks, getChunksForDocument, type ChunkRecord } from '../lib/db'
 import { hybridRankChunks, type ScoredChunk } from '../lib/retrieval'
 import { applyRerank, type RerankScore } from '../lib/reranker'
 import type { RerankCandidate } from '../workers/embedding.types'
-import { attemptAnswer, fetchAnswerFromWorker, type DocLabel, type KeyConfig } from '../lib/answerRequest'
+import {
+  attemptAnswer,
+  fetchAnswerFromWorker,
+  type DocLabel,
+  type HistoryTurn,
+  type KeyConfig,
+} from '../lib/answerRequest'
+import { buildRetrievalQuery } from '../lib/conversation'
 import { canRunQuery } from '../lib/queryScope'
 import { classify, type TaxonomyResult } from '../lib/errorTaxonomy'
 import { useDocumentStore } from '../store/documentStore'
@@ -16,9 +23,24 @@ const TOP_K = 3
 // the full chunk pool down to this many first, then reranking narrows it to TOP_K.
 const RERANK_POOL_SIZE = 15
 const ANSWER_TIMEOUT_MS = 60_000
+// Client-side hygiene cap on stored conversation turns — avoids unbounded growth of
+// in-memory state over a long-lived tab, not because 10+ turns would break anything
+// today.
+const MAX_STORED_TURNS = 10
+// Only the most recent turns are sent as `history` on each request — the Worker
+// independently re-caps to the same number regardless (worker/src/validate.ts's
+// MAX_HISTORY_TURNS), so a mismatch here would just be wasteful, never unsafe.
+const SENT_HISTORY_TURNS = 3
 
 interface QueryPanelProps {
   keyConfig: KeyConfig | null
+}
+
+interface ConversationTurn {
+  question: string
+  answer: string
+  groundingWarning: boolean
+  docLabels: DocLabel[]
 }
 
 /**
@@ -56,6 +78,7 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
   const [groundingWarning, setGroundingWarning] = useState(false)
   const [answerError, setAnswerError] = useState<TaxonomyResult | null>(null)
   const [docLabels, setDocLabels] = useState<DocLabel[]>([])
+  const [conversationTurns, setConversationTurns] = useState<ConversationTurn[]>([])
   const [scope, setScope] = useState<'document' | 'all'>('document')
   const [rerankModelProgress, setRerankModelProgress] = useState<number | null>(null)
 
@@ -73,6 +96,11 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
 
   const titleFor = (id: string) => documents.find((d) => d.id === id)?.fileName ?? id
 
+  // The currently displayed answer is the last entry in conversationTurns (pushed on
+  // every successful runAnswerAttempt below); "Conversation" only ever shows what came
+  // before it, so the current answer isn't rendered twice.
+  const pastTurns = conversationTurns.slice(0, -1)
+
   const runAnswerAttempt = useCallback(
     async (question: string, chunks: ScoredChunk<ChunkRecord>[], isRetry: boolean, activeKeyConfig: KeyConfig) => {
       setAwaitingAnswer(true)
@@ -85,6 +113,12 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
         score,
         documentId: chunk.documentId,
       }))
+      // Prompt history (Milestone 11 Phase C2) is a separate, capped field from
+      // retrieval-query blending below — this crosses the wire and shapes the prompt,
+      // it never touches retrieval.
+      const history: HistoryTurn[] = conversationTurns
+        .slice(-SENT_HISTORY_TURNS)
+        .map(({ question: q, answer: a }) => ({ question: q, answer: a }))
       const result = await attemptAnswer(
         fetchAnswerFromWorker,
         question,
@@ -92,12 +126,19 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
         activeKeyConfig,
         ANSWER_TIMEOUT_MS,
         docLabels,
+        history,
       )
 
       if (result.outcome === 'success') {
         setAnswer(result.answer)
         setGroundingWarning(result.groundingWarning)
         setDocLabels(result.docLabels)
+        setConversationTurns((prev) =>
+          [
+            ...prev,
+            { question, answer: result.answer, groundingWarning: result.groundingWarning, docLabels: result.docLabels },
+          ].slice(-MAX_STORED_TURNS),
+        )
       } else if (result.outcome === 'timeout') {
         if (isRetry) {
           setAnswerError({
@@ -114,7 +155,7 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
       }
       setAwaitingAnswer(false)
     },
-    [docLabels],
+    [docLabels, conversationTurns],
   )
 
   const handleSubmit = useCallback(
@@ -125,6 +166,12 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
       const activeKeyConfig = keyConfig
 
       const question = query.trim()
+      // Retrieval-query blending (Milestone 11 Phase C2): fold the immediately
+      // preceding question — and only that one — into the query used for retrieval.
+      // The literal, unblended `question` below is still what's sent to the Worker as
+      // the actual question being answered; the blended string never crosses the wire.
+      const previousQuestion = conversationTurns.at(-1)?.question ?? null
+      const retrievalQuery = buildRetrievalQuery(previousQuestion, question)
       setBusy(true)
       setError(null)
       setResults(null)
@@ -137,7 +184,7 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
       // labels for the lifetime of the conversation, so the map from the previous
       // answer carries forward and gets echoed back to the Worker in runAnswerAttempt.
 
-      embedQuery(question, {
+      embedQuery(retrievalQuery, {
         onBackend: () => {},
         onModelProgress: () => {},
         onModelReady: () => {},
@@ -145,9 +192,12 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
           const chunkSource = useAll ? getAllChunks() : getChunksForDocument(selectedReadyId as string)
           chunkSource
             .then(async (chunks) => {
-              // Hybrid search narrows the full pool to a wider candidate set first;
-              // the cross-encoder reranker then narrows that down to the final TOP_K.
-              const candidates = hybridRankChunks(msg.embedding, question, chunks, RERANK_POOL_SIZE)
+              // Hybrid search narrows the full pool to a wider candidate set first,
+              // using the blended retrieval query for both cosine and BM25 matching;
+              // the cross-encoder reranker then narrows that down to the final TOP_K
+              // using the literal question (reranking scores relevance to what's
+              // actually being asked, not the blended recall-oriented query).
+              const candidates = hybridRankChunks(msg.embedding, retrievalQuery, chunks, RERANK_POOL_SIZE)
               let ranked = candidates.slice(0, TOP_K)
               if (candidates.length > TOP_K) {
                 try {
@@ -181,7 +231,7 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
         },
       })
     },
-    [canQuery, keyConfig, scope, selectedReadyId, query, busy, runAnswerAttempt],
+    [canQuery, keyConfig, scope, selectedReadyId, query, busy, conversationTurns, runAnswerAttempt],
   )
 
   const handleRetry = useCallback(() => {
@@ -189,6 +239,20 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
     setBusy(true)
     runAnswerAttempt(submittedQuestion, results, true, keyConfig).finally(() => setBusy(false))
   }, [submittedQuestion, results, runAnswerAttempt, keyConfig])
+
+  // Resets the conversation itself — turn history, the frozen Doc N map (so numbering
+  // restarts at Doc 1 on the next question), and the current answer/results. Document
+  // selection/scope are untouched: those are library state, not conversation state.
+  const handleClearConversation = useCallback(() => {
+    setConversationTurns([])
+    setDocLabels([])
+    setAnswer(null)
+    setGroundingWarning(false)
+    setAnswerError(null)
+    setResults(null)
+    setSubmittedQuestion(null)
+    setTimedOut(false)
+  }, [])
 
   const placeholder = canQuery
     ? scope === 'all'
@@ -203,21 +267,28 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
   return (
     <div className="text-left">
       {hasReadyDoc && (
-        <div className="mb-2 inline-flex overflow-hidden rounded border border-slate-200 text-xs dark:border-slate-700">
-          {(['document', 'all'] as const).map((option) => (
-            <button
-              key={option}
-              type="button"
-              onClick={() => setScope(option)}
-              className={`min-h-11 cursor-pointer px-3 py-1.5 transition-colors duration-150 ${
-                scope === option
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-white text-slate-600 hover:bg-slate-50 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-800'
-              }`}
-            >
-              {option === 'document' ? 'This document' : 'All documents'}
-            </button>
-          ))}
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div className="inline-flex overflow-hidden rounded border border-slate-200 text-xs dark:border-slate-700">
+            {(['document', 'all'] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                onClick={() => setScope(option)}
+                className={`min-h-11 cursor-pointer px-3 py-1.5 transition-colors duration-150 ${
+                  scope === option
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-white text-slate-600 hover:bg-slate-50 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-800'
+                }`}
+              >
+                {option === 'document' ? 'This document' : 'All documents'}
+              </button>
+            ))}
+          </div>
+          {conversationTurns.length > 0 && (
+            <Button variant="secondary" onClick={handleClearConversation}>
+              Clear conversation
+            </Button>
+          )}
         </div>
       )}
       <form onSubmit={handleSubmit} className="flex flex-col gap-2 sm:flex-row">
@@ -278,6 +349,35 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
             </p>
           )}
         </div>
+      )}
+
+      {pastTurns.length > 0 && (
+        <details className="mt-4">
+          <summary className="cursor-pointer text-sm font-medium text-slate-700 dark:text-slate-300">
+            Conversation ({pastTurns.length})
+          </summary>
+          <ul className="mt-3 space-y-3">
+            {pastTurns.map((turn, i) => (
+              <li
+                key={i}
+                className="space-y-2 rounded border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900"
+              >
+                <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{turn.question}</p>
+                <StatusBanner variant={turn.groundingWarning ? 'warning' : 'success'}>
+                  {turn.groundingWarning
+                    ? 'This answer may not be fully grounded in the source document — verify against the sources below.'
+                    : 'Grounded in your documents.'}
+                </StatusBanner>
+                <p className="text-sm text-slate-900 dark:text-slate-100">{turn.answer}</p>
+                {turn.docLabels.length > 0 && (
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {turn.docLabels.map((d) => `Doc ${d.label} = ${titleFor(d.documentId)}`).join(' · ')}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
 
       {answerError && (

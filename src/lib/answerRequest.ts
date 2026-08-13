@@ -7,6 +7,13 @@ export interface DocLabel {
   documentId: string
 }
 
+// A prior turn's {question, answer} pair, sent as conversation context (Milestone 11
+// Phase C2) — mirrors the Worker's HistoryTurn shape (worker/src/validate.ts).
+export interface HistoryTurn {
+  question: string
+  answer: string
+}
+
 export interface AnswerResponse {
   answer: string
   groundingWarning: boolean
@@ -38,6 +45,7 @@ export type FetchAnswerFn = (
   keyConfig: KeyConfig,
   signal: AbortSignal,
   docLabels: DocLabel[],
+  history: HistoryTurn[],
 ) => Promise<AnswerResponse>
 
 export type AnswerAttemptResult =
@@ -57,6 +65,7 @@ export async function attemptAnswer(
   keyConfig: KeyConfig,
   timeoutMs: number,
   docLabels: DocLabel[] = [],
+  history: HistoryTurn[] = [],
 ): Promise<AnswerAttemptResult> {
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
@@ -67,6 +76,7 @@ export async function attemptAnswer(
       keyConfig,
       controller.signal,
       docLabels,
+      history,
     )
     return { outcome: 'success', answer, groundingWarning, docLabels: responseDocLabels }
   } catch (err) {
@@ -83,14 +93,14 @@ export async function attemptAnswer(
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL
 
 /** Real implementation of FetchAnswerFn — posts to the Cloudflare Worker. */
-export const fetchAnswerFromWorker: FetchAnswerFn = async (question, chunks, keyConfig, signal, docLabels) => {
+export const fetchAnswerFromWorker: FetchAnswerFn = async (question, chunks, keyConfig, signal, docLabels, history) => {
   if (!API_BASE_URL) {
     throw new Error('Answer generation is not configured yet (VITE_API_BASE_URL is unset).')
   }
   const res = await fetch(`${API_BASE_URL}/answer`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question, chunks, ...keyConfig, docLabels }),
+    body: JSON.stringify({ question, chunks, ...keyConfig, docLabels, history }),
     signal,
   })
   if (!res.ok) {

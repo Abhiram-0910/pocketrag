@@ -12,6 +12,15 @@ export interface DocLabel {
   documentId: string
 }
 
+// A prior turn's {question, answer} pair, interpolated into the prompt as
+// conversation context only (Milestone 11 Phase C2) — never used for retrieval,
+// which is a separate client-side-only blended query string (see conversation.ts)
+// that never crosses the wire.
+export interface HistoryTurn {
+  question: string
+  answer: string
+}
+
 export type KeySource = 'shared' | 'own'
 
 export const SUPPORTED_PROVIDERS = ['gemini', 'openai', 'anthropic', 'grok', 'openrouter'] as const
@@ -32,10 +41,21 @@ export interface AnswerRequestBody {
   // instead of recomputing it fresh every request. Missing/absent means a fresh
   // conversation (or an older client that predates this field).
   docLabels?: DocLabel[]
+  // Capped list of recent {question, answer} pairs from this conversation
+  // (Milestone 11 Phase C2), interpolated into the prompt as context only. Missing/
+  // absent means a fresh conversation or an older client that predates this field.
+  history?: HistoryTurn[]
 }
 
 export type ValidationResult =
-  | { ok: true; question: string; chunks: InputChunk[]; keySource: 'shared'; docLabels: DocLabel[] }
+  | {
+      ok: true
+      question: string
+      chunks: InputChunk[]
+      keySource: 'shared'
+      docLabels: DocLabel[]
+      history: HistoryTurn[]
+    }
   | {
       ok: true
       question: string
@@ -45,6 +65,7 @@ export type ValidationResult =
       provider: SupportedProvider
       model: string
       docLabels: DocLabel[]
+      history: HistoryTurn[]
     }
   | { ok: false; error: string }
 
@@ -65,6 +86,12 @@ export const MAX_MODEL_LENGTH = 128
 // A conversation realistically cites a handful of distinct documents, not dozens —
 // generous enough for real multi-doc use, small enough to bound the label lookup.
 export const MAX_DOC_LABELS = 20
+// A handful of recent turns is enough for follow-up context without letting the
+// prompt grow unbounded over a long-lived conversation.
+export const MAX_HISTORY_TURNS = 3
+// Reuses MAX_QUESTION_LENGTH for the history question field (same shape as a live
+// question); a generated answer tends to run longer, so it gets its own cap.
+export const MAX_HISTORY_ANSWER_LENGTH = 1000
 
 function isValidChunk(value: unknown): value is InputChunk {
   if (typeof value !== 'object' || value === null) return false
@@ -93,6 +120,12 @@ function isValidDocLabel(value: unknown): value is DocLabel {
   )
 }
 
+function isValidHistoryTurn(value: unknown): value is HistoryTurn {
+  if (typeof value !== 'object' || value === null) return false
+  const turn = value as Record<string, unknown>
+  return typeof turn.question === 'string' && typeof turn.answer === 'string'
+}
+
 // A legitimate client only ever echoes back a docLabels map exactly as this same
 // Worker last returned it — well-formed by construction. A duplicate documentId or
 // label number means the map was corrupted (bug, tampering, or a stale/mixed-up
@@ -107,7 +140,7 @@ export function validateAnswerRequest(body: unknown): ValidationResult {
   if (typeof body !== 'object' || body === null) {
     return { ok: false, error: 'Request body must be a JSON object.' }
   }
-  const { question, chunks, keySource, apiKey, provider, model, docLabels } = body as Record<string, unknown>
+  const { question, chunks, keySource, apiKey, provider, model, docLabels, history } = body as Record<string, unknown>
 
   if (typeof question !== 'string' || question.trim().length === 0) {
     return { ok: false, error: 'question must be a non-empty string.' }
@@ -148,6 +181,27 @@ export function validateAnswerRequest(body: unknown): ValidationResult {
     }
   }
 
+  // history is content the app itself already produced/received (a prior question the
+  // user asked and the answer this same Worker returned) rather than fresh attacker-
+  // controlled payload, so oversized fields are truncated, not rejected — same reasoning
+  // as chunk text.
+  const validatedHistory: HistoryTurn[] = []
+  if (history !== undefined) {
+    if (!Array.isArray(history)) {
+      return { ok: false, error: 'history must be an array.' }
+    }
+    const cappedHistory = history.slice(0, MAX_HISTORY_TURNS)
+    for (const turn of cappedHistory) {
+      if (!isValidHistoryTurn(turn)) {
+        return { ok: false, error: 'Each history entry must have question (string) and answer (string).' }
+      }
+      validatedHistory.push({
+        question: turn.question.slice(0, MAX_QUESTION_LENGTH),
+        answer: turn.answer.slice(0, MAX_HISTORY_ANSWER_LENGTH),
+      })
+    }
+  }
+
   const trimmedQuestion = question.trim()
   const resolvedKeySource = keySource ?? 'shared'
   if (resolvedKeySource !== 'shared' && resolvedKeySource !== 'own') {
@@ -161,6 +215,7 @@ export function validateAnswerRequest(body: unknown): ValidationResult {
       chunks: validatedChunks,
       keySource: 'shared',
       docLabels: validatedDocLabels,
+      history: validatedHistory,
     }
   }
 
@@ -183,6 +238,7 @@ export function validateAnswerRequest(body: unknown): ValidationResult {
     provider: provider as SupportedProvider,
     model,
     docLabels: validatedDocLabels,
+    history: validatedHistory,
   }
 }
 

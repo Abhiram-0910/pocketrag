@@ -24,7 +24,11 @@ const CITATION_PATTERN = /Doc\s+(\d+)[\s,]*page\s+(\d+)/gi
  * document but the wrong page, or a document that wasn't provided at all — or citing
  * nothing without admitting the gap. Does NOT catch a model citing a real (doc, page)
  * but misattributing content to it — that needs a second verification pass (not built;
- * see ARCHITECTURE.md).
+ * see ARCHITECTURE.md). Also does NOT catch — nor does it need to — a model echoing a
+ * citation it recalled from a prior turn's answer shown in the prompt's conversation
+ * history (Milestone 11 Phase C2): `providedPairs` is always built fresh from *this
+ * turn's* chunks, so an echoed citation that isn't actually in this turn's passages
+ * still correctly trips `hasUnknownCitation`, same as any other unsupported citation.
  *
  * `providedPairs` are the (label, page) pairs the prompt actually contained. Bare
  * "page M" mentions with no Doc label are intentionally not treated as citations for

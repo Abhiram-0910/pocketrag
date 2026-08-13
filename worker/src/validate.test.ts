@@ -4,6 +4,8 @@ import {
   MAX_CHUNKS,
   MAX_CHUNK_TEXT_LENGTH,
   MAX_DOC_LABELS,
+  MAX_HISTORY_ANSWER_LENGTH,
+  MAX_HISTORY_TURNS,
   MAX_MODEL_LENGTH,
   MAX_QUESTION_LENGTH,
   validateAnswerRequest,
@@ -333,6 +335,61 @@ describe('validateAnswerRequest', () => {
       { label: 1, documentId: 'doc-b' },
     ]
     expect(validateAnswerRequest({ question: 'q', chunks: [validChunk], docLabels }).ok).toBe(false)
+  })
+
+  it('defaults history to an empty array when omitted', () => {
+    const result = validateAnswerRequest({ question: 'q', chunks: [validChunk] })
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.history).toEqual([])
+  })
+
+  it('accepts a well-formed history array and returns it', () => {
+    const history = [
+      { question: 'What is the mitochondrion?', answer: 'The powerhouse of the cell (Doc 1, page 1).' },
+    ]
+    const result = validateAnswerRequest({ question: 'q', chunks: [validChunk], history })
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.history).toEqual(history)
+  })
+
+  it('rejects a non-array history', () => {
+    const result = validateAnswerRequest({ question: 'q', chunks: [validChunk], history: 'not an array' })
+    expect(result.ok).toBe(false)
+  })
+
+  it('caps an oversized history array server-side', () => {
+    const history = Array.from({ length: MAX_HISTORY_TURNS + 5 }, (_, i) => ({
+      question: `question ${i}`,
+      answer: `answer ${i}`,
+    }))
+    const result = validateAnswerRequest({ question: 'q', chunks: [validChunk], history })
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.history).toHaveLength(MAX_HISTORY_TURNS)
+  })
+
+  it('truncates (not rejects) an oversized history question or answer', () => {
+    const history = [
+      { question: 'x'.repeat(MAX_QUESTION_LENGTH + 100), answer: 'y'.repeat(MAX_HISTORY_ANSWER_LENGTH + 100) },
+    ]
+    const result = validateAnswerRequest({ question: 'q', chunks: [validChunk], history })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.history[0].question).toHaveLength(MAX_QUESTION_LENGTH)
+      expect(result.history[0].answer).toHaveLength(MAX_HISTORY_ANSWER_LENGTH)
+    }
+  })
+
+  it('rejects a malformed history entry', () => {
+    expect(
+      validateAnswerRequest({ question: 'q', chunks: [validChunk], history: [{ question: 'q only' }] }).ok,
+    ).toBe(false)
+    expect(
+      validateAnswerRequest({
+        question: 'q',
+        chunks: [validChunk],
+        history: [{ question: 1, answer: 'a' }],
+      }).ok,
+    ).toBe(false)
   })
 })
 

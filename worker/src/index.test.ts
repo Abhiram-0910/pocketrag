@@ -127,6 +127,47 @@ describe('worker fetch handler — /answer, shared key', () => {
     ])
   })
 
+  it('interpolates a history array into the prompt sent to the provider', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: 'answer' }] } }] }),
+      text: async () => '',
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    const body = {
+      ...validBody,
+      history: [{ question: 'What is the mitochondrion?', answer: 'The powerhouse of the cell (Doc 1, page 1).' }],
+    }
+    await worker.fetch(answerRequest(body), makeEnv(), makeCtx())
+
+    const [, init] = fetchSpy.mock.calls[0]
+    const requestBody = JSON.parse((init as RequestInit).body as string) as {
+      contents: { parts: { text: string }[] }[]
+    }
+    const prompt = requestBody.contents[0].parts[0].text
+    expect(prompt).toContain('Conversation so far')
+    expect(prompt).toContain('Q: What is the mitochondrion?')
+    expect(prompt).toContain('A: The powerhouse of the cell (Doc 1, page 1).')
+  })
+
+  it('omits the conversation section from the prompt when no history is given', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: 'answer' }] } }] }),
+      text: async () => '',
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    await worker.fetch(answerRequest(validBody), makeEnv(), makeCtx())
+
+    const [, init] = fetchSpy.mock.calls[0]
+    const requestBody = JSON.parse((init as RequestInit).body as string) as {
+      contents: { parts: { text: string }[] }[]
+    }
+    expect(requestBody.contents[0].parts[0].text).not.toContain('Conversation so far')
+  })
+
   it('calls Gemini with the env secret key when keySource is omitted (backward compatible)', async () => {
     const fetchSpy = vi.fn().mockResolvedValue({
       ok: true,

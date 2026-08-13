@@ -108,7 +108,7 @@ async function handleAnswer(
   // for documents not already in it, keeping "Doc N" frozen across turns.
   const docLabels = assignDocLabels(validation.chunks, validation.docLabels)
   const labelOf = new Map(docLabels.map((doc) => [doc.documentId, doc.label]))
-  const prompt = buildPrompt(validation.question, validation.chunks, labelOf)
+  const prompt = buildPrompt(validation.question, validation.chunks, labelOf, validation.history)
 
   // BYOK: the key lives only in this local, request-scoped variable — passed straight
   // into the provider call and never assigned anywhere else (no env, no KV, no logging).

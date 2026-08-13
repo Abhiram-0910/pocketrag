@@ -109,25 +109,49 @@ whether reranking ran (bounded RRF value vs. unbounded raw logit) — noted for 
 future UI polish pass, not a correctness issue. Frontend: 81/81 tests. Both phases
 deployed frontend-only (neither touches Worker code).
 
-**Milestone 11 Phase C — split into C1 (done, Session 17) and C2 (queued next).** C1:
-frozen `Doc N` labels across a conversation — the client now echoes back the
-`docLabels` map from its last answer, and `assignDocLabels()` (`worker/src/labels.ts`)
-only appends labels for newly-seen documents, never reassigning an existing one. New
-`docLabels` field on `AnswerRequestBody`, capped at `MAX_DOC_LABELS` (20) and rejected
-on malformed/duplicate entries. `checkGrounding()` needed no logic change — see
-AGENTS.md Session 17 for why. Live-verified: direct-curl proof that an earlier
-document's label survives a turn where it isn't retrieved, and a real 3-turn browser
-run with zero console errors. ARCHITECTURE.md's "NOT stable across queries" note is
-superseded — see the updated citation-labels bullet there.
+**Milestone 11 Phase C — split into C1 (Session 17) and C2 (Session 18), both done.
+Milestone 11 is now fully complete (Phases A, B, C1, C2 all live).** C1: frozen `Doc N`
+labels across a conversation — the client now echoes back the `docLabels` map from its
+last answer, and `assignDocLabels()` (`worker/src/labels.ts`) only appends labels for
+newly-seen documents, never reassigning an existing one. New `docLabels` field on
+`AnswerRequestBody`, capped at `MAX_DOC_LABELS` (20) and rejected on malformed/duplicate
+entries. `checkGrounding()` needed no logic change — see AGENTS.md Session 17 for why.
+Live-verified: direct-curl proof that an earlier document's label survives a turn where
+it isn't retrieved, and a real 3-turn browser run with zero console errors.
+ARCHITECTURE.md's "NOT stable across queries" note is superseded — see the updated
+citation-labels bullet there.
 
-Full roadmap (Milestones 7-16) in 🟢 below. **Next queued: Milestone 11 Phase C2**
-(client-side retrieval-query blending, prompt history, conversation UI — "Clear
-conversation" control) — fully scoped already, do not bundle with anything else.
-Remaining BYOK work: live-verify Anthropic/Grok/OpenRouter's *success* path (a real
-grounded answer, not just the failure path) whenever real test keys become available —
-flip each from Experimental to fully proven at that point, no code change needed beyond
-removing it from `EXPERIMENTAL_PROVIDERS`. Milestone 14's landing-page half (deliberately
-out of scope, Session 14) and milestones 9-10/12-13/15-16 remain open otherwise.
+**C2 (Session 18): client-side retrieval-query blending, prompt history, and the
+conversation UI.** Two deliberately separate mechanisms per the locked Session 17
+design: (1) `src/lib/conversation.ts`'s `buildRetrievalQuery()` folds only the
+immediately preceding question (`RETRIEVAL_HISTORY_TURNS = 1`) into the query text used
+for embedding + BM25 (`hybridRankChunks`) — never sent to the Worker as-is, and the
+cross-encoder reranker still scores against the literal question. (2) A new capped
+`history` field (`MAX_HISTORY_TURNS = 3`, `worker/src/validate.ts`) crosses the wire and
+is interpolated into `buildPrompt()`'s "Conversation so far" section with an explicit
+"don't cite from this" instruction — `checkGrounding()` needed no logic change (a
+citation echoed from history that isn't in *this* turn's passages still correctly trips
+`hasUnknownCitation`, documented in `grounding.ts`). `QueryPanel.tsx` stores a capped
+(`MAX_STORED_TURNS = 10`) conversation-turn array, renders past turns in a collapsible
+"Conversation" block (same box styling as the live answer, native `<details>` pattern
+reused from "Sources"), and a new "Clear conversation" button resets turns + the frozen
+`docLabels` map + the current answer, restarting `Doc N` numbering — without touching
+document selection/scope. Worker: 177/177 tests (+13). Frontend: 87/87 (+5, including
+new `src/lib/conversation.ts` + `conversation.test.ts`). Live-verified with a real
+4-turn conversation across two hand-written PDFs (6 chunks total, so `TOP_K=3`
+retrieval genuinely filters): a vague pronoun follow-up ("What page is that on?") still
+surfaced the correct chunk in Sources via blending alone, the Doc N legend stayed
+consistent across turns, and "Clear conversation" verifiably restarted numbering at
+`Doc 1`. Deployed and bundle-hash-verified live on both `pocketrag-answer.abhiram-dev.workers.dev`
+and `pocketrag.pages.dev` (`index-DS5Pe43A.js` / `index-C5Ba68Le.css` match exactly
+between the local build and the live site). Two minor non-blocking follow-ups noted,
+not fixed — see 🐛 Known Bugs below. See AGENTS.md Session 18 for full detail.
+
+Full roadmap (Milestones 7-16) in 🟢 below. **No task queued next — ask the user.**
+Standing candidates: BYOK success-path verification for Anthropic/Grok/OpenRouter
+(live-verify a real grounded answer once test keys are available — flip out of
+`EXPERIMENTAL_PROVIDERS`, no other code change needed), Milestone 14's landing-page half
+(deliberately out of scope since Session 14), and milestones 9-10/12-13/15-16.
 
 ---
 
@@ -223,7 +247,7 @@ out of scope, Session 14) and milestones 9-10/12-13/15-16 remain open otherwise.
   chunk likely has a diagram
 - Fits the existing trust model: only relevant content leaves the browser
 
-### 11. Better retrieval
+### 11. Better retrieval ✅ COMPLETE — Session 18
 - [x] **Phase A — Hybrid keyword+embedding search — Session 15.** `src/lib/bm25.ts` +
       `hybridRankChunks` in `retrieval.ts`, Reciprocal Rank Fusion (k=60). Live-verified.
 - [x] **Phase B — Reranking — Session 16.** Client-side cross-encoder
@@ -232,8 +256,12 @@ out of scope, Session 14) and milestones 9-10/12-13/15-16 remain open otherwise.
       display uses two inconsistent scales (RRF vs. raw logit) — future UI polish.
 - [x] **Phase C1 — Frozen Doc N labels across a conversation — Session 17.**
       `assignDocLabels()` takes an `existing` param; client echoes back `docLabels`.
-- [ ] Phase C2 — Client-side retrieval-query blending, prompt history, conversation UI
-      (decisions/full design locked in Session 17's plan — not started)
+- [x] **Phase C2 — Client-side retrieval-query blending, prompt history, conversation
+      UI — Session 18.** `src/lib/conversation.ts`'s `buildRetrievalQuery()`
+      (`RETRIEVAL_HISTORY_TURNS = 1`), a new `history` field on the Worker
+      (`MAX_HISTORY_TURNS = 3`), `buildPrompt()`'s "Conversation so far" section, and
+      `QueryPanel.tsx`'s Conversation UI + "Clear conversation" control. Live-verified
+      and deployed.
 
 ### 12. Hybrid web search toggle
 - Modes: notes-only / web-only / hybrid
@@ -364,7 +392,16 @@ out of scope, Session 14) and milestones 9-10/12-13/15-16 remain open otherwise.
 ---
 
 ## 🐛 Known Bugs
-(none currently tracked)
+- [ ] "Clear conversation" (`QueryPanel.tsx`) resets conversation turns, the frozen
+      `docLabels` map, and the current answer/results, but does NOT reset the separate
+      `error` state (set when chunk retrieval itself fails, not an answer-generation
+      failure) — a stale retrieval-error banner could remain visible after clearing.
+      Minor, non-blocking; noted Session 18, not fixed.
+- [ ] The past-turns list in the "Conversation" collapsible (`QueryPanel.tsx`) uses the
+      array index as the React `key` rather than a stable id. Currently safe in
+      practice (the list is append-only, only ever bulk-cleared via "Clear
+      conversation," never reordered or partially removed), but is a latent
+      anti-pattern if that usage ever changes. Noted Session 18, not fixed.
 
 ---
 
