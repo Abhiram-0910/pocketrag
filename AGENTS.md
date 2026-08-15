@@ -6,13 +6,14 @@ Claude reads this at the START of every new session to understand what happened 
 ---
 
 ## Project State
-**Last updated:** 2026-08-11
-**Current branch:** master (through `305ef4a` — Grok/OpenRouter Experimental BYOK
-providers + uniform error sanitization, deployed and pushed — see below)
+**Last updated:** 2026-08-15
+**Current branch:** master (through `97a28d2` — Milestone 13, PDF conversation
+export, deployed and pushed — see Session 19 below)
 **Remote:** `github.com/Abhiram-0910/pocketrag` (private) — pushed and up to date
-(confirmed `origin/master` == `305ef4a` as of this push, 2026-08-11).
-**Overall status:** MVP **+ Milestone 6 (multi-document)** + **Milestone 7a+7b (BYOK,
-all 5 providers)** feature-complete and **fully deployed in production**. Frontend:
+(confirmed `origin/master` == `97a28d2` as of this push, 2026-08-15).
+**Overall status:** MVP **+ Milestones 6-8, 11, 13** feature-complete and **fully
+deployed in production** (Milestones 7b's Anthropic/Grok/OpenRouter success path and
+Milestone 14's landing page remain open — see below and TODO.md). Frontend:
 `https://pocketrag.pages.dev` (Cloudflare Pages). API:
 `https://pocketrag-answer.abhiram-dev.workers.dev` (Cloudflare Worker). Supports a
 multi-document library, bulk drag-and-drop, a this-document/all-documents retrieval
@@ -1966,6 +1967,137 @@ C2) is now fully complete, live-verified, and deployed to production end to end.
 **Next session should start with:** no queued task — ask the user. Standing
 candidates: BYOK success-path verification for Anthropic/Grok/OpenRouter, Milestone
 14's landing-page half, and milestones 9-10/12-13/15-16.
+
+---
+
+### Session 19 — 2026-08-14 / 2026-08-15
+**Goal:** Milestone 13 — export a conversation as PDF. Unusual start: the previous
+session's terminal closed mid-work, leaving `src/lib/pdfExport.ts`,
+`src/lib/pdfExport.test.ts`, the `QueryPanel.tsx` wiring, and `jspdf` in
+`package.json` all uncommitted and undocumented — no AGENTS.md entry existed for any
+of it. This session's first half was pure state recovery (git log/status, file
+existence checks, running the existing test suite) before the user had seen any of
+the code; the code was pasted back to the user in full for review (twice — the first
+report summarized instead of literally pasting file contents, which the user
+correctly rejected) before any further work proceeded.
+
+**What was already built (inherited, not written this session):**
+- `src/lib/pdfExport.ts` — `buildConversationPdf(turns, currentSources, titleFor, now)`
+  renders every turn in `conversationTurns` (not just the current one) to a jsPDF
+  document, in order, each with its question, grounded/ungrounded banner text, answer,
+  and `Doc N = filename` legend. The current (last) turn's retrieved chunks are
+  appended as a "Sources (current answer only)" section — **deliberately scoped to the
+  current turn only**, since `QueryPanel`'s state never retained past turns' retrieved
+  chunks (only `{question, answer, groundingWarning, docLabels}` per turn, per Session
+  18's `ConversationTurn` shape) — there is nothing to show sources *for* on older
+  turns without a much larger state-retention change that wasn't asked for.
+- **jsPDF chosen over pdf-lib**: smaller footprint, and — the deciding factor —
+  built-in text flow. `doc.splitTextToSize()` handles line-wrapping to a content width
+  for free; pdf-lib has no equivalent and would have needed a hand-rolled wrapper
+  before any pagination logic could even be written. jsPDF was already added to
+  `package.json`, not evaluated fresh this session.
+- **Manual page-break logic — real, not automatic.** jsPDF does not paginate text on
+  its own. `ensureSpace(height)` (`pdfExport.ts:56-61`) checks `cursor.y + height >
+  pageHeight - PAGE_MARGIN` before every wrapped line inside `writeWrapped()`, calling
+  `doc.addPage()` and resetting `cursor.y` when a line wouldn't fit. Confirmed by
+  reading the code line-by-line with the user (not taken on faith), and directly
+  exercised by the last of 6 unit tests, which forces a long answer past one page and
+  asserts a marker string placed at the very end of that answer lands on the actual
+  last page, not page 1 — proving the break happens mid-answer, not that pagination is
+  a no-op.
+- Tests round-trip every generated PDF back through `pdf.js` (`extractPages()` in
+  `pdfExport.test.ts`) to assert on real per-page rendered text, not on internal
+  method calls.
+
+**This session's work:**
+- Reviewed both files and the `QueryPanel.tsx` diff with the user, confirmed the
+  page-break claim against the actual code.
+- The inherited `verify-pdf-export.mjs` was stale (Playwright installed but the
+  script itself was never actually run to completion — no output artifacts existed,
+  and it hardcoded a scratchpad path from a *different, prior* session that no longer
+  exists) — rewrote it rather than trying to patch a script that was never proven to
+  run.
+- Regenerated the two hand-written test PDFs (`biology.pdf`, `cooking.pdf`, 2 pages
+  each — the Session 6/7-style minimal hand-rolled PDF generator, no library),
+  text-extraction-verified via pdf.js before driving a browser, per project
+  convention.
+- Started `wrangler dev` + Vite dev locally (real `GEMINI_API_KEY` already in
+  `worker/.dev.vars`), drove a real 8-question, 2-document conversation through
+  Playwright, clicked "Export as PDF", downloaded the real generated file.
+- **Live verification method — new standing environment note, same category as the
+  `wrangler tail` limitation:** Playwright's bundled Chromium ships **without a PDF
+  viewer** (deliberately — so PDF navigation triggers Playwright's download
+  interception instead of rendering, keeping download-related tests deterministic).
+  Confirmed by three failed approaches, in order: (1) `<embed
+  type="application/pdf">` → "Couldn't load plugin" (headless Chromium has no
+  PDF-plugin path wired up), (2) `<iframe src="file://...pdf">` → renders blank, same
+  underlying cause, (3) direct top-frame `page.goto('file://...pdf')`, even with
+  `acceptDownloads:false` on the context → throws `"Download is starting"` outright.
+  **Working method:** reuse `pdf.js` (already a project dependency, already used for
+  text-extraction assertions) *inside a real page context* by loading it through
+  Vite's dev server `/@fs/<absolute-path>` route, which serves any on-disk file under
+  a real `http://localhost:5173` origin the page can `import()` from — no new
+  dependency needed, no `pdftoppm`/`canvas` package. Rendered each page to a `<canvas>`
+  at 2x scale and screenshotted the canvas element directly. **Record this for any
+  future session needing to visually verify a generated PDF in this project** — don't
+  re-attempt `<embed>`/`<iframe>`/direct navigation expecting a different result, per
+  the same "don't re-attempt and expect a different result" discipline as the
+  `wrangler tail` note.
+- Visually inspected the rendered pages directly (not just text-extraction
+  assertions): confirmed, across two separate live runs (one broke into 2 pages, one
+  into 3, since real Gemini answer length varies run to run) — all 8 turns present in
+  order, no truncated or overlapping text at any page break, the break lands correctly
+  mid-answer with content continuing cleanly on the next page, `Doc N = filename`
+  legend correct after every turn, the deliberately-ungrounded turn (a
+  no-mention-in-passages question) correctly rendered the caveat banner text instead
+  of "Grounded in your documents.", and the Sources section appeared exactly once, for
+  the current turn only, with correct filename/page/score/text — even when it landed
+  on its own trailing page.
+- **One real bug found in the *verification script* during this pass (not in
+  `pdfExport.ts`):** the inherited script's "the last page must contain a question"
+  assertion was simply wrong whenever Sources pushes onto its own trailing page — that
+  page legitimately has no question text on it, by design. Relaxed to "any page after
+  page 1 contains a question," which is what the assertion actually meant to check.
+- Cleanup: `wrangler dev`/Vite dev processes stopped, Playwright uninstalled
+  (`npm uninstall playwright` — package.json/lockfile confirmed clean; the only
+  remaining lockfile string match is `@vitest/browser-playwright`, Vitest's own
+  optional-peer-dep metadata, same benign pattern noted back in Session 1), the
+  temporary `verify-pdf-export.mjs` deleted from the repo root, `git status` confirmed
+  clean of temp artifacts before commit.
+- Committed (`97a28d2`), pushed, and deployed **frontend only** — this feature touches
+  no Worker code, confirmed via `git show --stat` on the commit (zero `worker/` files).
+  `wrangler pages deploy dist --project-name=pocketrag --branch=main`;
+  `wrangler pages deployment list` confirms it landed as **Production**, branch
+  `main`, source `97a28d2` (not just a Preview — checked directly, not assumed from
+  exit code, per the Session 5 habit). Bundle-hash-verified against the live site:
+  local build produced `index-HIl8Lm8-.js` / `index-C5Ba68Le.css`; curling
+  `https://pocketrag.pages.dev/` directly afterward shows the live `index.html`
+  referencing those exact same two filenames — CSS hash unchanged from Session 18
+  (this feature added no styles), JS hash changed as expected.
+
+**Minor non-blocking lint finding, not fixed this session** (added to TODO.md's Known
+Bugs, same class as the two Session 18 follow-ups): `oxlint`'s
+`react-hooks(exhaustive-deps)` warns that `handleExportPdf`'s `useCallback` depends on
+`titleFor` (`QueryPanel.tsx:98`), which is redefined every render (not memoized) —
+pre-existing, unmemoized helper also used directly in JSX elsewhere in the same file
+(lines 367, 393, 420). Warning only, exit code 0, doesn't fail lint or build — the
+callback still behaves correctly, it's just recreated every render rather than being
+stable. Out of scope for this session's approved work; flagged rather than
+opportunistically fixed.
+
+**Tests:** unchanged from what was inherited — Frontend 93/93 (was 87, +6, all in
+`pdfExport.test.ts`). `tsc -b --noEmit` clean. `oxlint` clean except the one
+pre-existing-pattern warning noted above. `npm run build` clean, bundle-size guard
+passes. Worker untouched — no files under `worker/` changed, its own suite wasn't
+re-run.
+
+**Left incomplete:** nothing from Milestone 13's scope. Deployed and live-verified
+end to end.
+
+**Next session should start with:** no queued task — ask the user. Standing
+candidates unchanged from Session 18's list minus Milestone 13 (now done): BYOK
+success-path verification for Anthropic/Grok/OpenRouter, Milestone 14's landing-page
+half, and milestones 9-10/12/15-16.
 
 ---
 

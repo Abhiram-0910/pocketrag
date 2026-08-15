@@ -147,11 +147,28 @@ and `pocketrag.pages.dev` (`index-DS5Pe43A.js` / `index-C5Ba68Le.css` match exac
 between the local build and the live site). Two minor non-blocking follow-ups noted,
 not fixed — see 🐛 Known Bugs below. See AGENTS.md Session 18 for full detail.
 
+**Milestone 13 — Export conversation as PDF ✅ COMPLETE (Session 19).**
+`buildConversationPdf()` (`src/lib/pdfExport.ts`) renders every turn in the current
+conversation, in order, plus the current turn's retrieved chunks as a Sources section
+(deliberately scoped to the current turn only — past turns' chunks were never retained
+in `QueryPanel` state per Session 18's `ConversationTurn` shape). jsPDF chosen over
+pdf-lib for its built-in `splitTextToSize()` text-flow — pdf-lib has no equivalent and
+would have needed a hand-rolled line-wrapper first. jsPDF does not paginate on its own;
+`ensureSpace()` is real manual page-break logic (checks remaining vertical space before
+every wrapped line, calls `addPage()` and resets the cursor), directly exercised by a
+test that forces a break and asserts content actually continues on the next page.
+Live-verified with a real 8-turn, 2-document conversation (`wrangler dev` + Vite dev,
+real Gemini): across two separate runs (2 pages and 3 pages, since real answer length
+varies), all turns present in order, no truncated/overlapping text at any break, correct
+`Doc N` legend on every turn, correct ungrounded-warning rendering, Sources appearing
+exactly once for the current turn only. See AGENTS.md Session 19 for the full story,
+including the new standing environment note on verifying PDFs in this project (below).
+
 Full roadmap (Milestones 7-16) in 🟢 below. **No task queued next — ask the user.**
 Standing candidates: BYOK success-path verification for Anthropic/Grok/OpenRouter
 (live-verify a real grounded answer once test keys are available — flip out of
 `EXPERIMENTAL_PROVIDERS`, no other code change needed), Milestone 14's landing-page half
-(deliberately out of scope since Session 14), and milestones 9-10/12-13/15-16.
+(deliberately out of scope since Session 14), and milestones 9-10/12/15-16.
 
 ---
 
@@ -267,7 +284,10 @@ Standing candidates: BYOK success-path verification for Anthropic/Grok/OpenRoute
 - Modes: notes-only / web-only / hybrid
 - Brave Search API
 
-### 13. Export answer/chat as PDF
+### 13. Export answer/chat as PDF ✅ COMPLETE — Session 19
+- [x] `src/lib/pdfExport.ts` (jsPDF, manual page-break via `ensureSpace()`) + "Export
+      as PDF" button in `QueryPanel.tsx`. Full conversation exported in order; Sources
+      section scoped to the current turn only. Live-verified, deployed.
 
 ### 14. Landing page + full UI/UX pass
 - [x] **Full UI/UX pass — Session 14.** Design system (Minimalist Swiss, light+dark,
@@ -402,6 +422,12 @@ Standing candidates: BYOK success-path verification for Anthropic/Grok/OpenRoute
       practice (the list is append-only, only ever bulk-cleared via "Clear
       conversation," never reordered or partially removed), but is a latent
       anti-pattern if that usage ever changes. Noted Session 18, not fixed.
+- [ ] `oxlint`'s `react-hooks(exhaustive-deps)` warns that `handleExportPdf`'s
+      `useCallback` (`QueryPanel.tsx`) depends on `titleFor`, which is redefined every
+      render rather than memoized. Pre-existing unmemoized helper, also used directly
+      elsewhere in the same file. Warning only (exit 0), doesn't fail lint/build, no
+      behavioral bug — the callback still works, just isn't referentially stable.
+      Noted Session 19, not fixed.
 
 ---
 
@@ -470,6 +496,20 @@ Standing candidates: BYOK success-path verification for Anthropic/Grok/OpenRoute
   Claude fires the live request via `curl` at the user's signal; the user reads
   their own terminal's output and reports back. Don't re-attempt `wrangler tail`
   from within the session expecting a different result.
+- **Playwright's bundled Chromium ships without a PDF viewer** (Session 19 finding) —
+  navigating to a local PDF, whether via `<embed type="application/pdf">`, an
+  `<iframe src="file://...">`, or direct top-frame `page.goto('file://...pdf')` (even
+  with `acceptDownloads:false` on the context), never renders it: the `<embed>` shows
+  "Couldn't load plugin," the `<iframe>` comes up blank, and direct navigation throws
+  `"Download is starting"` outright. This is deliberate on Playwright's part, not a
+  bug — keeps download-triggering tests deterministic. **Workaround for visually
+  verifying any generated PDF in this project:** reuse `pdf.js` (already a dependency)
+  inside a real page context by importing it through Vite dev server's
+  `/@fs/<absolute-path>` route (serves any on-disk file under a real `http://` origin
+  the page can `import()` from), render each page to a `<canvas>`, screenshot the
+  canvas. No new dependency needed. Don't re-attempt `<embed>`/`<iframe>`/direct
+  navigation expecting a different result — same discipline as the `wrangler tail`
+  note below.
 - CORRECTION to a Session 4/5 note: the earlier "this sandbox cannot reach
   `*.workers.dev`" finding was **DNS propagation delay for a brand-new subdomain**,
   not a persistent egress restriction — confirmed in Session 5 by re-testing after
