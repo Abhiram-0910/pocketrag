@@ -12,6 +12,7 @@ import {
   type KeyConfig,
 } from '../lib/answerRequest'
 import { buildRetrievalQuery } from '../lib/conversation'
+import { buildConversationPdf, type ExportSource } from '../lib/pdfExport'
 import { canRunQuery } from '../lib/queryScope'
 import { classify, type TaxonomyResult } from '../lib/errorTaxonomy'
 import { useDocumentStore } from '../store/documentStore'
@@ -254,6 +255,19 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
     setTimedOut(false)
   }, [])
 
+  // Exports every turn currently in conversationTurns (past + current, in order) plus
+  // the current turn's retrieved chunks as Sources — past turns' chunks aren't retained
+  // in state, so only the current turn can carry a Sources section (see pdfExport.ts).
+  const handleExportPdf = useCallback(() => {
+    const sources: ExportSource[] = (results ?? []).map(({ chunk, score }) => ({
+      documentId: chunk.documentId,
+      page: chunk.page,
+      score,
+      text: chunk.text,
+    }))
+    buildConversationPdf(conversationTurns, sources, titleFor).save('pocketrag-conversation.pdf')
+  }, [conversationTurns, results, titleFor])
+
   const placeholder = canQuery
     ? scope === 'all'
       ? 'Ask a question across all documents…'
@@ -285,9 +299,14 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
             ))}
           </div>
           {conversationTurns.length > 0 && (
-            <Button variant="secondary" onClick={handleClearConversation}>
-              Clear conversation
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={handleExportPdf}>
+                Export as PDF
+              </Button>
+              <Button variant="secondary" onClick={handleClearConversation}>
+                Clear conversation
+              </Button>
+            </div>
           )}
         </div>
       )}
