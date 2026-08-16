@@ -17,6 +17,7 @@ function makeChunk(documentId: string, index: number, overrides: Partial<ChunkRe
     tokenCount: 5,
     page: 1,
     embedding: [0.1, 0.2, 0.3],
+    hasImage: false,
     ...overrides,
   }
 }

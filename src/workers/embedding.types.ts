@@ -6,11 +6,13 @@ export interface EmbeddedChunk {
   tokenCount: number
   page: number
   embedding: number[]
+  hasImage: boolean
 }
 
 export interface PageInput {
   page: number
   text: string
+  hasImage: boolean
 }
 
 export interface RerankCandidate {

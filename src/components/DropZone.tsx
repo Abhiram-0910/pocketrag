@@ -45,6 +45,7 @@ export function DropZone() {
                   tokenCount: chunk.tokenCount,
                   page: chunk.page,
                   embedding: chunk.embedding,
+                  hasImage: chunk.hasImage,
                 }))
                 saveDocument({ id, fileName: file.name, uploadedAt: Date.now(), chunkCount: msg.chunks.length }, chunkRecords)
                   .then(() => {

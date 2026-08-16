@@ -15,6 +15,11 @@ export interface ChunkRecord {
   tokenCount: number
   page: number
   embedding: number[]
+  // Whether this chunk's page paints a raster image (Milestone 10's structural
+  // diagram-likely signal — see diagramHeuristic.ts). IndexedDB stores are
+  // schemaless, so a chunk saved before this field existed simply won't have it —
+  // callers must treat a missing value as `false`, never assume it's present.
+  hasImage: boolean
 }
 
 interface PocketRagDB extends DBSchema {

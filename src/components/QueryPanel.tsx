@@ -12,6 +12,7 @@ import {
   type KeyConfig,
 } from '../lib/answerRequest'
 import { buildRetrievalQuery } from '../lib/conversation'
+import { isDiagramLikely } from '../lib/diagramHeuristic'
 import { buildConversationPdf, type ExportSource } from '../lib/pdfExport'
 import { canRunQuery } from '../lib/queryScope'
 import { classify, type TaxonomyResult } from '../lib/errorTaxonomy'
@@ -419,6 +420,9 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
                 <p className="mb-1 text-xs text-slate-500 dark:text-slate-400">
                   <span className="font-medium text-slate-700 dark:text-slate-300">{titleFor(chunk.documentId)}</span> ·
                   page {chunk.page} · score {score.toFixed(3)}
+                  {isDiagramLikely(chunk) && (
+                    <span title="This page may contain a diagram, chart, or figure"> · 📊 may contain a diagram</span>
+                  )}
                 </p>
                 {chunk.text}
               </li>

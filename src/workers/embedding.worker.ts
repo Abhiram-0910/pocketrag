@@ -125,9 +125,9 @@ ctx.onmessage = async (event) => {
       // Chunk each page independently: a chunk's page is then unambiguous —
       // no chunk ever spans a page boundary.
       const chunks: Omit<EmbeddedChunk, 'embedding'>[] = []
-      for (const { page, text } of msg.pages) {
+      for (const { page, text, hasImage } of msg.pages) {
         for (const chunk of chunkText(text, tokenizer)) {
-          chunks.push({ ...chunk, index: chunks.length, page })
+          chunks.push({ ...chunk, index: chunks.length, page, hasImage })
         }
       }
       post({ type: 'chunked', chunkCount: chunks.length })
