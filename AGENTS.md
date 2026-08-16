@@ -2101,4 +2101,164 @@ half, and milestones 9-10/12/15-16.
 
 ---
 
+### Session 20 — 2026-08-16
+**Goal:** Milestone 10 — diagram-aware Q&A. Per the roadmap sequencing
+(11 → 13 → 10 → 9 → 12 → 14 → 15 → 16), this was next. Explicitly treated with
+BYOK-level scrutiny from the start, at the user's direction: this is the first
+feature in the project where anything other than a small retrieved text snippet
+could leave the browser (a page image), so before any code, a full plan was written
+covering the ingestion pipeline, real per-provider multimodal support (verified
+against live docs, not memory), the trust-model question, and staging — saved at
+`/home/abhi/.claude/plans/gentle-honking-lemon.md`.
+
+**Three architectural forks resolved with the user during planning, before any code:**
+1. **No new persistent storage** — page images will be rendered on demand from the
+   raw `File` kept in memory for the current tab session only, never written to
+   IndexedDB. Chosen over persisting raw PDF bytes because IndexedDB today holds only
+   small derived data (a few KB/document of text + embeddings) — persisting source
+   bytes would be a real, unjustified precedent break against that discipline and
+   reopens the Milestone 6 quota research under a scale it never covered. Accepted
+   consequence: a document *restored* via Milestone 6's restore-on-reload (text/
+   embeddings survive, the file itself doesn't) can't produce a page image until
+   re-uploaded — must never be silent, a requirement carried into the Phase B plan.
+2. **Opt-in, global toggle, default OFF, persisted across reloads** — not a per-turn
+   confirmation dialog. Every answer that actually included an image will show an
+   always-visible inline indicator (same `StatusBanner` pattern as the grounding
+   warning) — visibility does the consent-integrity work, not friction.
+3. **Phase B (when built) ships shared-tier Gemini only** — one provider, one
+   live-verified request shape, zero BYOK-key exposure to a new payload type yet,
+   same "prove one provider, then extend" discipline as BYOK's own 7a → 7b staging.
+
+**Provider research (live docs, not training data):** confirmed `gemini-3.5-flash-lite`
+(the pinned shared-tier model) is natively multimodal via the same `generateContent`
+endpoint already in use (`inlineData: {mimeType, data}` added to the existing `parts`
+array — additive, not a new request shape). Anthropic's vision support is broad and
+well-documented but not yet live-verified against a real key. OpenAI's exact
+content-part shape returned conflicting signals between two fetched sources — flagged
+as genuinely unresolved rather than guessed either way. xAI's own docs qualify Grok's
+vision support as model-specific and only demonstrate it on `grok-4.6`, not `grok-4`
+(the model this project's BYOK testing has used) — and `listGrokModels` has no
+capability field to detect this. OpenRouter's support depends entirely on which of
+hundreds of underlying models a user picks, with no filtering in `listOpenRouterModels`
+today. This table is the concrete basis for staging Grok/OpenRouter out of scope
+indefinitely, not just "later" — there's no capability-detection mechanism today for
+any BYOK provider that would make sending them an image safe.
+
+**Phase A — the only phase built and shipped this session — is local-only detection,
+no image ever sent, no Worker code touched:**
+- `src/lib/pdf.ts`: `extractPdfText()` now also calls `page.getOperatorList()` per
+  page (pdf.js already loads/parses the page for text extraction, so this is one more
+  cheap call on an already-open page) and runs it through a new pure function,
+  `pageHasImage()`, checking for `OPS.paintImageXObject` /
+  `paintImageXObjectRepeat` / `paintInlineImageXObject` — confirmed these three exist
+  in the actually-installed `pdfjs-dist` types before relying on them, not assumed
+  from memory. Deliberately excludes `paintImageMaskXObject`: a mask alone carries no
+  image data. `pageHasImage()` was kept as a pure function taking `{fnArray}` so it's
+  unit-testable without a real PDF — `extractPdfText()`'s pdf.js I/O around it has no
+  unit test (consistent with this file's existing convention: it never had one, since
+  pdf.js's worker-based main build doesn't run cleanly in this project's Node test
+  environment — see the `pdfExport.test.ts` precedent for why the legacy Node-build
+  workaround exists for other files that need it).
+- `src/lib/db.ts`: `ChunkRecord` gained `hasImage: boolean`.
+- `src/lib/diagramHeuristic.ts` (new): `isDiagramLikely()` ORs the structural signal
+  with a lexical one — a word-boundary, case-insensitive regex for
+  figure/fig./diagram/chart/graph/table/illustration. The "fig." alternative is
+  deliberately split out of the shared trailing `\b`: a literal `.` is itself a
+  non-word character, so a trailing `\b` after it would silently never match "Fig. 2"
+  (no word/non-word transition exists between a period and the following space) — this
+  was caught and fixed while writing the unit tests, not left as a latent bug. 7 new
+  tests cover both signals independently, their OR, the mid-word-substring
+  non-match (`"prefigures"` doesn't false-positive), and the `Fig.` case specifically.
+  Documented in the code as an honest heuristic, not a classifier — both
+  false-positive and false-negative directions are real and are named in the
+  docstring rather than glossed over.
+- `src/workers/embedding.worker.ts` / `embedding.types.ts` / `DropZone.tsx`:
+  `hasImage` threaded from `PageText` → `PageInput` → `EmbeddedChunk` → the saved
+  `ChunkRecord`, mechanical plumbing with no new logic.
+- `src/components/QueryPanel.tsx`: a "📊 may contain a diagram" hint added to each
+  Sources-list entry where `isDiagramLikely(chunk)` is true. No toggle, no image
+  sending — purely informational, ships independent of everything else planned for
+  this milestone.
+
+**DB_VERSION — plan called for a bump, it doesn't exist, and that's correct, not an
+oversight.** The plan's Phase A section said to bump `DB_VERSION` and extend `idb`'s
+`upgrade()` migration path; once `db.ts` was actually open for editing, that turned
+out to be wrong. `upgrade()` only calls `db.createObjectStore(...)`/`.createIndex(...)`
+— that's *structural* schema (which object stores and indexes exist), and IndexedDB
+itself enforces nothing about what properties a stored record has beyond its
+`keyPath`. Adding `hasImage: boolean` to the `ChunkRecord` TypeScript interface changes
+what the type checker requires going forward; it doesn't change anything IndexedDB
+needs to be told about, so there is no version bump to make — a bump with no
+corresponding `upgrade()` change would just be a version number with nothing behind
+it. `DB_VERSION` in `src/lib/db.ts` is still `1`, confirmed directly, not assumed. The
+real, and only, consequence is that a chunk record saved by a pre-Session-20 build
+comes back from `getChunksForDocument`/`getAllChunks` with no `hasImage` property at
+runtime despite the type now claiming it's always present — `isDiagramLikely()`'s
+plain `||` treats that `undefined` as falsy, degrading safely to lexical-only for that
+chunk, which is a deliberate behavior decision (documented directly on the field in
+`db.ts`), not a schema migration.
+
+**Verification, before this was presented for review:** `tsc -b`/`tsc --noEmit`
+clean, `oxlint` clean (one pre-existing, unrelated `titleFor`/`useCallback` warning
+carried over from Session 19's Known Bugs entry, confirmed unchanged by diffing
+against a `git stash` of this session's work). Frontend: 107/107 tests (was 100,
++7, all in the new `diagramHeuristic.test.ts`) — `db.test.ts`/`db.getall.test.ts`'s
+shared `makeChunk()` helpers updated with `hasImage: false` so the type checker's new
+requirement didn't just get silently satisfied by test fixtures going stale.
+
+**Real-browser live verification, not just unit tests** — the part a pure-function
+test can't cover: does `pdfjsLib.getOperatorList()` actually return an image-paint
+operator for a real embedded image, and does the UI indicator actually render
+correctly end to end. Generated three throwaway PDFs with jsPDF (`image-only.pdf`:
+embedded 1x1 PNG, no keyword text; `keyword-only.pdf`: "Figure 3" in the text, no
+image; `plain.pdf`: neither) in a temporary `scratchpad/`, first confirmed detection
+directly against `pdfjs-dist/legacy/build/pdf.mjs` (same Node-compatible build
+`pdfExport.test.ts` already uses) — `image-only.pdf` → `hasImage: true`,
+`keyword-only.pdf`/`plain.pdf` → `hasImage: false`, correct in all three cases — then
+drove the actual app end to end with Playwright (installed via `npm install --no-save
+playwright` + `node_modules/.bin/playwright install chromium` directly, since `npx
+playwright` was unusable in this session's shell — some interception layer produced
+`[RTK:PASSTHROUGH] ... parser: All parsing tiers failed` on playwright's own CLI
+output specifically; calling the installed binary directly sidestepped it entirely,
+worth remembering if a future session hits the same thing). One real test-script bug
+caught and fixed during this pass: only the *first* uploaded document auto-selects
+(`DropZone.tsx`'s existing behavior, `selectedId == null` check) — the verification
+script's first draft queried three uploaded documents without ever changing selection
+after the first, so all three queries silently ran against `image-only.pdf` regardless
+of which file was "just uploaded." Fixed by clicking each document's row explicitly
+before querying it. After the fix: `image-only.pdf` → indicator shown (structural),
+`keyword-only.pdf` → indicator shown (lexical), `plain.pdf` → indicator correctly
+absent — all three cases live-verified in a real headless browser, upload → embed →
+retrieve → Sources render, not just asserted against the pure function in isolation.
+Cleanup: dev server killed, `playwright` uninstalled (`npm uninstall playwright`),
+`scratchpad/` removed, `git status` confirmed clean of temp artifacts before commit.
+
+**Committed and deployed frontend only**, after the user reviewed the complete literal
+content of the three new/most-substantively-changed files (`pdf.ts`,
+`diagramHeuristic.ts`, `diagramHeuristic.test.ts`) plus diffs for the rest, and
+approved — this phase touches no Worker code, confirmed via the diff's file list
+(zero `worker/` paths). `npm run build` clean, bundle-size guard
+passes. `wrangler pages deploy dist --project-name=pocketrag --branch=main`;
+`wrangler pages deployment list` confirms it landed as **Production**, branch `main`.
+Bundle-hash-verified against the live site: local build produced
+`index-DkFN55rG.js` / `index-C5Ba68Le.css`; curling `https://pocketrag.pages.dev/`
+directly afterward shows the live `index.html` referencing those exact same two
+filenames — CSS hash unchanged from Session 18/19 (this phase added no new styles),
+JS hash changed as expected.
+
+**Left incomplete, deliberately:** Phase B (on-demand rendering, the opt-in toggle,
+shared-Gemini-only image sending) and Phase C (BYOK extension) are fully planned
+(see the plan file path above) but **explicitly not started, at the user's direct
+instruction** — this session was scoped to Phase A only, with Phase B/C requiring the
+user's review of this close-out and an explicit separate go-ahead before any further
+work begins.
+
+**Next session should start with:** Milestone 10 Phase B — but only once the user has
+explicitly confirmed to proceed after reviewing this session's close-out. Until then,
+the same standing candidates from prior sessions remain open: BYOK success-path
+verification for Anthropic/Grok/OpenRouter, Milestone 14's landing-page half, and
+milestones 9/12/15-16.
+
+---
+
 <!-- Copy the block above for each new session -->

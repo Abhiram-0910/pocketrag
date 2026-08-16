@@ -164,11 +164,34 @@ varies), all turns present in order, no truncated/overlapping text at any break,
 exactly once for the current turn only. See AGENTS.md Session 19 for the full story,
 including the new standing environment note on verifying PDFs in this project (below).
 
+**Milestone 10 — Diagram-aware Q&A, Phase A of 3 ✅ COMPLETE (Session 20).**
+Local-only diagram-likely detection, deliberately staged as the first of three phases
+given this feature's trust-model weight (the first feature where a raster image, not
+just a text snippet, could ever leave the browser — see the full staged plan at
+`/home/abhi/.claude/plans/gentle-honking-lemon.md` for the provider-support research
+and the three architectural forks resolved with the user before any code was written).
+Phase A ships two independent, honestly-imperfect signals ORed together: a structural
+one (`src/lib/pdf.ts`'s `pageHasImage()`, a real `pdfjsLib.getOperatorList()` check for
+image-paint operators — misses vector-drawn diagrams, false-positives on decorative
+images) and a lexical one (`src/lib/diagramHeuristic.ts`'s `isDiagramLikely()`,
+word-boundary figure/fig./diagram/chart/graph/table/illustration match — misses
+uncaptioned diagrams, false-positives on incidental mentions). Surfaces as a "📊 may
+contain a diagram" hint in `QueryPanel.tsx`'s Sources list. No image is sent anywhere
+in this phase, no Worker code touched. The structural signal was live-verified against
+real generated PDFs (image-only, keyword-only, neither) in an actual browser, not just
+unit-tested in isolation — confirms `getOperatorList()` really does return the expected
+operators for a real embedded image, not just that the pure boolean-combination logic
+is correct. See AGENTS.md Session 20 for the full story, including the DB_VERSION
+clarification (no bump needed — IndexedDB has no field-level schema to migrate).
+**Phase B and C are planned but explicitly on hold — do not start without the user's
+direct go-ahead**, given upon review of this session's close-out.
+
 Full roadmap (Milestones 7-16) in 🟢 below. **No task queued next — ask the user.**
-Standing candidates: BYOK success-path verification for Anthropic/Grok/OpenRouter
-(live-verify a real grounded answer once test keys are available — flip out of
-`EXPERIMENTAL_PROVIDERS`, no other code change needed), Milestone 14's landing-page half
-(deliberately out of scope since Session 14), and milestones 9-10/12/15-16.
+Standing candidates: Milestone 10 Phase B (blocked on explicit go-ahead, see above),
+BYOK success-path verification for Anthropic/Grok/OpenRouter (live-verify a real
+grounded answer once test keys are available — flip out of `EXPERIMENTAL_PROVIDERS`,
+no other code change needed), Milestone 14's landing-page half (deliberately out of
+scope since Session 14), and milestones 9/12/15-16.
 
 ---
 
@@ -259,9 +282,24 @@ Standing candidates: BYOK success-path verification for Anthropic/Grok/OpenRoute
   model note
 
 ### 10. Diagram-aware Q&A
-- Extract embedded page images at ingestion
-- Send the one relevant page image to the multimodal answer call when a matched
-  chunk likely has a diagram
+- [x] **Phase A — Local-only diagram-likely detection — Session 20.** Structural
+      signal (`pdf.ts`'s `pageHasImage()`, real `pdfjsLib.getOperatorList()` check
+      against `OPS.paintImageXObject`/`paintImageXObjectRepeat`/`paintInlineImageXObject`)
+      OR lexical signal (`diagramHeuristic.ts`'s `isDiagramLikely()`, word-boundary
+      figure/fig./diagram/chart/graph/table/illustration match) → "📊 may contain a
+      diagram" hint in `QueryPanel.tsx`'s Sources list. No image ever sent, no Worker
+      change. Live-verified against real generated PDFs, not just the pure function.
+      Frontend only, deployed. See AGENTS.md Session 20.
+- [ ] **Phase B (planned, not started)** — on-demand page rendering (in-memory only,
+      no new IndexedDB storage) + opt-in toggle (default OFF, localStorage-persisted,
+      visible only for shared-Gemini) + shared-Gemini-only multimodal answer path.
+      Full staged plan (Phases A-C, provider-support table, the three resolved
+      architectural forks) at `/home/abhi/.claude/plans/gentle-honking-lemon.md`.
+      **Do not start without explicit user go-ahead — held at the user's request after
+      Session 20's Phase A close-out.**
+- [ ] **Phase C (deferred)** — BYOK extension (Anthropic first, then OpenAI once its
+      request shape is live-verified). Grok/OpenRouter excluded indefinitely — no
+      per-model vision-capability signal exists for either today.
 - Fits the existing trust model: only relevant content leaves the browser
 
 ### 11. Better retrieval ✅ COMPLETE — Session 18
