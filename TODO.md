@@ -290,13 +290,15 @@ scope since Session 14), and milestones 9/12/15-16.
       diagram" hint in `QueryPanel.tsx`'s Sources list. No image ever sent, no Worker
       change. Live-verified against real generated PDFs, not just the pure function.
       Frontend only, deployed. See AGENTS.md Session 20.
-- [ ] **Phase B (planned, not started)** — on-demand page rendering (in-memory only,
-      no new IndexedDB storage) + opt-in toggle (default OFF, localStorage-persisted,
-      visible only for shared-Gemini) + shared-Gemini-only multimodal answer path.
-      Full staged plan (Phases A-C, provider-support table, the three resolved
-      architectural forks) at `/home/abhi/.claude/plans/gentle-honking-lemon.md`.
-      **Do not start without explicit user go-ahead — held at the user's request after
-      Session 20's Phase A close-out.**
+- [x] **Phase B — On-demand page rendering + opt-in toggle + shared-Gemini-only
+      multimodal answer path — Session 21.** `sessionFiles.ts` (in-memory File map,
+      never persisted) + `pageRender.ts` (on-demand JPEG render, 1024px/q0.8) +
+      `diagramImageSetting.ts` (toggle, default OFF, localStorage). Worker:
+      `validate.ts`'s `ImageAttachment`/`isValidImage()` (shared-tier only, BYOK
+      rejected outright), `prompt.ts`'s `hasImage`-branched instructions,
+      `providers/gemini.ts`'s additive `inlineData` part. Live-verified: real Gemini
+      request with an attached image before the `hasImage` prompt flag existed showed
+      the model ignoring it; fixed and confirmed. See AGENTS.md Session 21.
 - [ ] **Phase C (deferred)** — BYOK extension (Anthropic first, then OpenAI once its
       request shape is live-verified). Grok/OpenRouter excluded indefinitely — no
       per-model vision-capability signal exists for either today.

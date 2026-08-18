@@ -6,14 +6,16 @@ Claude reads this at the START of every new session to understand what happened 
 ---
 
 ## Project State
-**Last updated:** 2026-08-15
-**Current branch:** master (through `97a28d2` — Milestone 13, PDF conversation
-export, deployed and pushed — see Session 19 below)
-**Remote:** `github.com/Abhiram-0910/pocketrag` (private) — pushed and up to date
-(confirmed `origin/master` == `97a28d2` as of this push, 2026-08-15).
-**Overall status:** MVP **+ Milestones 6-8, 11, 13** feature-complete and **fully
-deployed in production** (Milestones 7b's Anthropic/Grok/OpenRouter success path and
-Milestone 14's landing page remain open — see below and TODO.md). Frontend:
+**Last updated:** 2026-08-18
+**Current branch:** master (through `4f922b2` — Milestone 10 Phase B, diagram-aware
+image sending, deployed both sides — see Session 21 below)
+**Remote:** `github.com/Abhiram-0910/pocketrag` (private) — **not yet pushed**;
+`origin/master` still at `97a28d2` as of 2026-08-15, local is 3 commits ahead
+(`65475b7`, `5d886df`, `4f922b2`) as of this session. Push on explicit request only.
+**Overall status:** MVP **+ Milestones 6-8, 10 (Phases A-B), 11, 13** feature-complete
+and **fully deployed in production** (Milestone 10 Phase C, Milestones 7b's
+Anthropic/Grok/OpenRouter success path, and Milestone 14's landing page remain open
+— see below and TODO.md). Frontend:
 `https://pocketrag.pages.dev` (Cloudflare Pages). API:
 `https://pocketrag-answer.abhiram-dev.workers.dev` (Cloudflare Worker). Supports a
 multi-document library, bulk drag-and-drop, a this-document/all-documents retrieval
@@ -2258,6 +2260,118 @@ explicitly confirmed to proceed after reviewing this session's close-out. Until 
 the same standing candidates from prior sessions remain open: BYOK success-path
 verification for Anthropic/Grok/OpenRouter, Milestone 14's landing-page half, and
 milestones 9/12/15-16.
+
+### Session 21 — 2026-08-18
+**Goal:** Milestone 10 Phase B — on-demand page rendering, the opt-in toggle, and
+shared-Gemini-only image sending, per the plan from Session 20
+(`/home/abhi/.claude/plans/gentle-honking-lemon.md`). This session's terminal closed
+mid-work with the diff already written but uncommitted; resumed cold in a follow-up
+session that first re-verified the entire working tree rather than assuming anything
+survived intact — see the process note below for why that caution mattered.
+
+**What Phase B built, confirmed against the diff:**
+- `src/lib/sessionFiles.ts` (new): an in-memory `Map<documentId, File>`, populated by
+  `DropZone.tsx` on upload and cleared by `DocumentList.tsx` on delete. Deliberately
+  never persisted — a document restored via Milestone 6's restore-on-reload has no
+  entry, which callers must treat as "unavailable," per Session 20's Phase A plan.
+- `src/lib/pageRender.ts` (new): renders one PDF page on demand to a bounded
+  1024px-long-edge, quality-0.8 JPEG via pdf.js + canvas, base64-encoded. Never cached
+  — re-opens and re-renders on every call. No unit test, consistent with `pdf.ts`'s
+  existing convention that pdf.js-worker-dependent code isn't Node-testable here.
+- `src/lib/diagramImageSetting.ts` (new): the opt-in toggle's localStorage
+  read/write, default OFF, unset/malformed always reads as disabled.
+- `worker/src/validate.ts`: new `ImageAttachment` type and `isValidImage()` — exact
+  `image/jpeg` mimeType match (not a generic allowlist), non-empty base64 capped at
+  `MAX_IMAGE_BASE64_LENGTH = 400_000`, a constant derived from real measured JPEG
+  output at `pageRender.ts`'s exact resolution/quality (see the inline comment for the
+  full derivation chain — changing either side without re-measuring invalidates it).
+  Only the `'shared'`-keySource branch of `ValidationResult` carries an `image` field;
+  a BYOK request that includes one is rejected outright (`ok: false`), not silently
+  dropped — same fail-closed pattern as the existing duplicate-docLabel check.
+- `worker/src/index.ts`: derives `image` from `validation.image` only when
+  `validation.keySource === 'shared'`, so a BYOK request selecting Gemini as its own
+  provider still can't carry one through, even though `ValidationResult`'s `'own'`
+  branch has no such field to read in the first place (type-level enforcement, not
+  just the runtime check in validate.ts).
+- `worker/src/prompt.ts`: new `hasImage` parameter branches three sentences (the
+  intro, the "answer using only" rule, the "insufficient information" rule) to
+  acknowledge an attached image instead of contradicting its presence. The doc
+  comment records this was found as a **real** live-verification failure against
+  actual Gemini before the flag existed — the model said outright it was reasoning
+  from text only, image correctly attached — not a hypothetical worth hedging against.
+- `worker/src/providers/gemini.ts`: `callGemini()` gained an optional `image` param,
+  appended as an additional `inlineData` part alongside the existing `text` part —
+  additive to the request shape already in use, not new.
+- `src/lib/answerRequest.ts` / `QueryPanel.tsx`: wires the toggle, the
+  shared-tier + `isDiagramLikely()` gate, `pendingImage` (retained across a retry so a
+  retry resends the same image rather than re-rendering), the `diagramFallbackNote`
+  StatusBanner for the "file not in memory" case, and the always-visible 🖼️ indicator
+  on both the current answer and past conversation turns.
+
+**Process incident — recovered, and now a standing reminder for future sessions:**
+partway through this Phase B work, `worker/src/prompt.test.ts` was overwritten with
+`Write` instead of extended with `Edit`, silently dropping the file's original 8
+Session-18 tests (Doc-number labelling, citation/insufficient-info instructions, the
+byte-identical-with-empty-history regression, history interpolation and ordering) and
+leaving only the new `hasImage` tests. Caught and recovered before commit. **Standing
+rule going forward:** before using `Write` on any file, check whether it already
+exists (`git status`, or a quick `Read`) — `Write` unconditionally replaces the full
+file content, so pointing it at an existing file with only the new content in mind is
+how this happens. Same category of standing reminder as the `wrangler tail`
+environment limitation (Session 9) and the Playwright-bundled-Chromium-has-no-PDF-
+viewer note (Session 19) — both filed for the same reason: cheap to write down once,
+expensive to rediscover.
+
+**Fixed this session, closing a plan gap from the original Phase B pass:** the
+approved plan called for the "Generating an answer…" loading copy to mention that an
+attached image takes longer to process — never implemented in the original pass.
+Added: `QueryPanel.tsx`'s `awaitingAnswer` paragraph now branches on
+`pendingImage !== undefined` (already tracked, set synchronously before
+`runAnswerAttempt` is awaited, so it's valid for the whole duration of the loading
+state) to insert one extra sentence, reusing the same paragraph and pulse-animation
+pattern rather than a new loading state or component.
+
+**Verification, this session:** frontend 114/114 tests (was 107 at Session 20's
+close; +7 across `diagramImageSetting.test.ts` and `sessionFiles.test.ts`), worker
+194/194 tests. `tsc -b` (frontend) / `tsc --noEmit` (worker) both clean. `oxlint`
+clean on both sides except the same pre-existing `titleFor`/`useCallback` warning
+carried over unchanged since Session 19/20. `npm run build` (frontend) clean, bundle-
+size guard passes. Worker has no separate build script (Wrangler bundles at deploy
+time) — `wrangler deploy --dry-run` clean instead, confirming the bundle builds and
+KV/env bindings resolve.
+
+**Left incomplete, deliberately:** Phase C (BYOK extension) remains fully planned but
+not started — Session 20's plan staged it out indefinitely pending a real
+capability-detection mechanism for BYOK providers, not just "later."
+
+**Committed and deployed both sides**, after the user reviewed the diff and approved.
+Code committed as `4f922b2` ("Add on-demand diagram image sending for Q&A"). Worker
+deployed first (`wrangler deploy`, Version ID `26c31154-0a56-4704-adcb-77a7b991bd2b`),
+then frontend built (`index-DALoOJ-0.js` / `index-C7YR59Mk.css`) and deployed via
+`wrangler pages deploy dist --project-name=pocketrag --branch=main`;
+`wrangler pages deployment list` confirms it landed as **Production**, branch `main`,
+tagged to commit `4f922b2`. Bundle-hash-verified against the live site: the
+production alias initially served a stale cached response (old Session-20 hashes)
+immediately after deploy — resolved by curling the deployment's own unique subdomain
+directly (`3113e668.pocketrag.pages.dev`, which showed the correct new hashes
+immediately) and then re-curling the production alias with cache-busting headers,
+which then matched. Not a deploy failure, just CDN propagation lag — worth remembering
+if a future session sees a stale-looking hash check right after a Pages deploy.
+
+**Live post-deploy check, per the standing `wrangler tail` environment limitation
+(Session 9 — this session's Bash environment still can't hold that connection, not
+re-attempted):** used a direct `curl` against the deployed Worker instead, sending a
+`keySource: "own"` (BYOK) request with an `image` attached and an obviously-fake API
+key. Response: `400`, `{"error":"image is only supported for the shared tier in this
+phase."}` — rejected before any provider call was even attempted (confirmed by
+reading `validate.ts`'s check ordering: the image/keySource guard runs before the
+`'own'`-branch's own field validation, so this result doesn't depend on the fake key
+being well-formed). The one thing that must never regress silently — confirmed live,
+not just in local tests.
+
+**Next session should start with:** Phase C, or the standing backlog — BYOK
+success-path verification for Anthropic/Grok/OpenRouter, Milestone 14's landing-page
+half, milestones 9/12/15-16.
 
 ---
 
