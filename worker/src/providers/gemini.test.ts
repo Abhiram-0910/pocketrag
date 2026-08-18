@@ -50,6 +50,38 @@ describe('callGemini', () => {
       expect((err as Error).message).not.toContain(secretKey)
     }
   })
+
+  describe('image (Milestone 10 Phase B)', () => {
+    it('appends an inlineData part alongside the text part when an image is passed', async () => {
+      const fetchImpl = mockFetch({
+        jsonBody: { candidates: [{ content: { parts: [{ text: 'This chart shows rising values.' }] } }] },
+      })
+
+      await callGemini(fetchImpl, 'test-key', 'gemini-3.5-flash-lite', 'What does the chart show?', {
+        mimeType: 'image/jpeg',
+        base64: 'aGVsbG8=',
+      })
+
+      const [, init] = fetchImpl.mock.calls[0]
+      const body = JSON.parse((init as RequestInit).body as string)
+      expect(body.contents[0].parts).toEqual([
+        { text: 'What does the chart show?' },
+        { inlineData: { mimeType: 'image/jpeg', data: 'aGVsbG8=' } },
+      ])
+    })
+
+    it('sends only the text part when no image is passed', async () => {
+      const fetchImpl = mockFetch({
+        jsonBody: { candidates: [{ content: { parts: [{ text: 'answer' }] } }] },
+      })
+
+      await callGemini(fetchImpl, 'test-key', 'gemini-3.5-flash-lite', 'q')
+
+      const [, init] = fetchImpl.mock.calls[0]
+      const body = JSON.parse((init as RequestInit).body as string)
+      expect(body.contents[0].parts).toEqual([{ text: 'q' }])
+    })
+  })
 })
 
 describe('listGeminiModels', () => {

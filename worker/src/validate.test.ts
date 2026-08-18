@@ -6,6 +6,7 @@ import {
   MAX_DOC_LABELS,
   MAX_HISTORY_ANSWER_LENGTH,
   MAX_HISTORY_TURNS,
+  MAX_IMAGE_BASE64_LENGTH,
   MAX_MODEL_LENGTH,
   MAX_QUESTION_LENGTH,
   validateAnswerRequest,
@@ -390,6 +391,87 @@ describe('validateAnswerRequest', () => {
         history: [{ question: 1, answer: 'a' }],
       }).ok,
     ).toBe(false)
+  })
+
+  describe('image (Milestone 10 Phase B)', () => {
+    const validImage = { mimeType: 'image/jpeg', base64: 'aGVsbG8=' }
+
+    it('accepts a well-formed image on a shared-tier request and returns it', () => {
+      const result = validateAnswerRequest({ question: 'q', chunks: [validChunk], image: validImage })
+      expect(result.ok).toBe(true)
+      if (result.ok && result.keySource === 'shared') expect(result.image).toEqual(validImage)
+    })
+
+    it('defaults image to undefined when omitted', () => {
+      const result = validateAnswerRequest({ question: 'q', chunks: [validChunk] })
+      expect(result.ok).toBe(true)
+      if (result.ok && result.keySource === 'shared') expect(result.image).toBeUndefined()
+    })
+
+    it('rejects a non-object image', () => {
+      expect(validateAnswerRequest({ question: 'q', chunks: [validChunk], image: 'not an object' }).ok).toBe(false)
+    })
+
+    it('rejects an image with the wrong mimeType', () => {
+      const result = validateAnswerRequest({
+        question: 'q',
+        chunks: [validChunk],
+        image: { mimeType: 'image/png', base64: 'aGVsbG8=' },
+      })
+      expect(result.ok).toBe(false)
+    })
+
+    it('rejects an image with an empty base64 string', () => {
+      const result = validateAnswerRequest({
+        question: 'q',
+        chunks: [validChunk],
+        image: { mimeType: 'image/jpeg', base64: '' },
+      })
+      expect(result.ok).toBe(false)
+    })
+
+    it('rejects an image whose base64 payload exceeds MAX_IMAGE_BASE64_LENGTH', () => {
+      const result = validateAnswerRequest({
+        question: 'q',
+        chunks: [validChunk],
+        image: { mimeType: 'image/jpeg', base64: 'a'.repeat(MAX_IMAGE_BASE64_LENGTH + 1) },
+      })
+      expect(result.ok).toBe(false)
+    })
+
+    it('accepts an image exactly at MAX_IMAGE_BASE64_LENGTH', () => {
+      const result = validateAnswerRequest({
+        question: 'q',
+        chunks: [validChunk],
+        image: { mimeType: 'image/jpeg', base64: 'a'.repeat(MAX_IMAGE_BASE64_LENGTH) },
+      })
+      expect(result.ok).toBe(true)
+    })
+
+    it('rejects an image on a BYOK (keySource: own) request outright, even for provider "gemini"', () => {
+      const result = validateAnswerRequest({
+        question: 'q',
+        chunks: [validChunk],
+        keySource: 'own',
+        apiKey: 'my-real-key',
+        provider: 'gemini',
+        model: 'gemini-3.5-flash-lite',
+        image: validImage,
+      })
+      expect(result.ok).toBe(false)
+    })
+
+    it('still accepts a well-formed BYOK request with no image', () => {
+      const result = validateAnswerRequest({
+        question: 'q',
+        chunks: [validChunk],
+        keySource: 'own',
+        apiKey: 'my-real-key',
+        provider: 'gemini',
+        model: 'gemini-3.5-flash-lite',
+      })
+      expect(result.ok).toBe(true)
+    })
   })
 })
 

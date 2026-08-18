@@ -108,7 +108,15 @@ async function handleAnswer(
   // for documents not already in it, keeping "Doc N" frozen across turns.
   const docLabels = assignDocLabels(validation.chunks, validation.docLabels)
   const labelOf = new Map(docLabels.map((doc) => [doc.documentId, doc.label]))
-  const prompt = buildPrompt(validation.question, validation.chunks, labelOf, validation.history)
+  // Milestone 10 Phase B: only the 'shared' branch of ValidationResult even has an
+  // `image` field (see validate.ts) — a BYOK request selecting Gemini as its own
+  // provider still falls into the `default:` case below, but gets `image: undefined`
+  // unconditionally here, never validation.image, so it can never carry one through.
+  // Derived before buildPrompt so the prompt's own instructions can acknowledge the
+  // image when one is attached — without that, "answer using ONLY the passages" reads
+  // as an instruction to ignore it (see prompt.ts's doc comment for how this was found).
+  const image = validation.keySource === 'shared' ? validation.image : undefined
+  const prompt = buildPrompt(validation.question, validation.chunks, labelOf, validation.history, image !== undefined)
 
   // BYOK: the key lives only in this local, request-scoped variable — passed straight
   // into the provider call and never assigned anywhere else (no env, no KV, no logging).
@@ -132,7 +140,7 @@ async function handleAnswer(
         answer = await callOpenRouter(fetch, apiKey, model, prompt)
         break
       default:
-        answer = await callGemini(fetch, apiKey, model, prompt)
+        answer = await callGemini(fetch, apiKey, model, prompt, image)
     }
     const providedPairs = validation.chunks.map((chunk) => ({
       // Non-null assertion is safe by invariant: assignDocLabels labels every distinct

@@ -12,6 +12,14 @@ export interface DocLabel {
   documentId: string
 }
 
+// Milestone 10 Phase B: at most one page image per request, only ever produced by
+// src/lib/pageRender.ts client-side (always JPEG, always base64) — never per-chunk,
+// since only one page is ever rendered per query regardless of how many chunks matched.
+export interface ImageAttachment {
+  mimeType: string
+  base64: string
+}
+
 // A prior turn's {question, answer} pair, interpolated into the prompt as
 // conversation context only (Milestone 11 Phase C2) — never used for retrieval,
 // which is a separate client-side-only blended query string (see conversation.ts)
@@ -45,6 +53,11 @@ export interface AnswerRequestBody {
   // (Milestone 11 Phase C2), interpolated into the prompt as context only. Missing/
   // absent means a fresh conversation or an older client that predates this field.
   history?: HistoryTurn[]
+  // Milestone 10 Phase B: an optional page image, only ever accepted for the shared
+  // tier (keySource 'shared') — rejected outright if present alongside 'own', not
+  // silently dropped. See the plan's provider-support table for why BYOK is excluded
+  // in this phase even for a BYOK request that happens to select Gemini as its provider.
+  image?: ImageAttachment
 }
 
 export type ValidationResult =
@@ -55,6 +68,11 @@ export type ValidationResult =
       keySource: 'shared'
       docLabels: DocLabel[]
       history: HistoryTurn[]
+      // Only the 'shared' variant can carry an image (Milestone 10 Phase B) — the
+      // 'own' variant below deliberately has no such field, so a BYOK code path can
+      // never read an image off validation even by mistake; the type itself enforces
+      // the "shared-Gemini only" restriction, not just a runtime check.
+      image: ImageAttachment | undefined
     }
   | {
       ok: true
@@ -92,6 +110,18 @@ export const MAX_HISTORY_TURNS = 3
 // Reuses MAX_QUESTION_LENGTH for the history question field (same shape as a live
 // question); a generated answer tends to run longer, so it gets its own cap.
 export const MAX_HISTORY_ANSWER_LENGTH = 1000
+// Milestone 10 Phase B: caps the base64 image payload as a string length, same
+// checking pattern as MAX_CHUNK_TEXT_LENGTH. Empirically derived, not guessed — a real
+// pdf.js render → canvas → JPEG pipeline at src/lib/pageRender.ts's actual resolution
+// (1024px long edge) and quality (0.8) produced 88,092-100,887 raw JPEG bytes across a
+// representative chart-like page and a rougher photo-like page. That worst case
+// (100,887 bytes) is scaled up ~1.3x for a near-square page's larger pixel count
+// (~130,600 bytes), then doubled for content-complexity headroom beyond the two tested
+// cases (~261,200 bytes), rounded to a clean 300,000-byte raw-JPEG target — then
+// inflated by base64's ~4/3 overhead to the actual wire-format cap checked here.
+// Changing pageRender.ts's resolution/quality without re-measuring invalidates this.
+export const MAX_IMAGE_BASE64_LENGTH = 400_000
+const IMAGE_MIME_TYPE = 'image/jpeg'
 
 function isValidChunk(value: unknown): value is InputChunk {
   if (typeof value !== 'object' || value === null) return false
@@ -126,6 +156,20 @@ function isValidHistoryTurn(value: unknown): value is HistoryTurn {
   return typeof turn.question === 'string' && typeof turn.answer === 'string'
 }
 
+// mimeType is checked against an exact match, not a generic image/* allowlist —
+// pageRender.ts only ever produces 'image/jpeg', so anything else is either a bug or
+// tampering, and there's no real use case yet to support otherwise.
+function isValidImage(value: unknown): value is ImageAttachment {
+  if (typeof value !== 'object' || value === null) return false
+  const image = value as Record<string, unknown>
+  return (
+    image.mimeType === IMAGE_MIME_TYPE &&
+    typeof image.base64 === 'string' &&
+    image.base64.length > 0 &&
+    image.base64.length <= MAX_IMAGE_BASE64_LENGTH
+  )
+}
+
 // A legitimate client only ever echoes back a docLabels map exactly as this same
 // Worker last returned it — well-formed by construction. A duplicate documentId or
 // label number means the map was corrupted (bug, tampering, or a stale/mixed-up
@@ -140,7 +184,8 @@ export function validateAnswerRequest(body: unknown): ValidationResult {
   if (typeof body !== 'object' || body === null) {
     return { ok: false, error: 'Request body must be a JSON object.' }
   }
-  const { question, chunks, keySource, apiKey, provider, model, docLabels, history } = body as Record<string, unknown>
+  const { question, chunks, keySource, apiKey, provider, model, docLabels, history, image } =
+    body as Record<string, unknown>
 
   if (typeof question !== 'string' || question.trim().length === 0) {
     return { ok: false, error: 'question must be a non-empty string.' }
@@ -202,10 +247,28 @@ export function validateAnswerRequest(body: unknown): ValidationResult {
     }
   }
 
+  let validatedImage: ImageAttachment | undefined
+  if (image !== undefined) {
+    if (!isValidImage(image)) {
+      return {
+        ok: false,
+        error: `image must have mimeType "${IMAGE_MIME_TYPE}" and a non-empty base64 string of ${MAX_IMAGE_BASE64_LENGTH} characters or fewer.`,
+      }
+    }
+    validatedImage = image
+  }
+
   const trimmedQuestion = question.trim()
   const resolvedKeySource = keySource ?? 'shared'
   if (resolvedKeySource !== 'shared' && resolvedKeySource !== 'own') {
     return { ok: false, error: 'keySource must be "shared" or "own".' }
+  }
+
+  // Milestone 10 Phase B ships shared-Gemini only — fail closed rather than silently
+  // dropping an image a BYOK request happened to include, same "don't guess, reject"
+  // reasoning as hasDuplicateDocLabels above.
+  if (validatedImage && resolvedKeySource !== 'shared') {
+    return { ok: false, error: 'image is only supported for the shared tier in this phase.' }
   }
 
   if (resolvedKeySource === 'shared') {
@@ -216,6 +279,7 @@ export function validateAnswerRequest(body: unknown): ValidationResult {
       keySource: 'shared',
       docLabels: validatedDocLabels,
       history: validatedHistory,
+      image: validatedImage,
     }
   }
 

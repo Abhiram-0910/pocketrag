@@ -3,6 +3,7 @@ import { UploadSimple } from '@phosphor-icons/react'
 import { extractPdfText } from '../lib/pdf'
 import { embedDocument } from '../lib/embeddingClient'
 import { saveDocument, type ChunkRecord } from '../lib/db'
+import { rememberSessionFile } from '../lib/sessionFiles'
 import { useDocumentStore } from '../store/documentStore'
 import { StatusBanner } from './ui/StatusBanner'
 
@@ -26,6 +27,7 @@ export function DropZone() {
     (file: File, id: string): Promise<void> =>
       new Promise<void>((resolve) => {
         updateDocument(id, { status: 'extracting-text' })
+        rememberSessionFile(id, file)
         extractPdfText(file)
           .then((pages) => {
             updateDocument(id, { status: 'loading-model' })

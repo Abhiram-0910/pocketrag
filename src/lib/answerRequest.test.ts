@@ -47,7 +47,7 @@ describe('attemptAnswer', () => {
 
     await attemptAnswer(fetchAnswer, 'q', CHUNKS, byokConfig, 60_000)
 
-    expect(fetchAnswer).toHaveBeenCalledWith('q', CHUNKS, byokConfig, expect.any(AbortSignal), [], [])
+    expect(fetchAnswer).toHaveBeenCalledWith('q', CHUNKS, byokConfig, expect.any(AbortSignal), [], [], undefined)
   })
 
   it('passes the prior-turn docLabels through to fetchAnswer unchanged, and defaults to []', async () => {
@@ -56,10 +56,26 @@ describe('attemptAnswer', () => {
       .mockResolvedValue({ answer: 'answer', groundingWarning: false, docLabels: DOC_LABELS })
 
     await attemptAnswer(fetchAnswer, 'q', CHUNKS, SHARED_CONFIG, 60_000, DOC_LABELS)
-    expect(fetchAnswer).toHaveBeenCalledWith('q', CHUNKS, SHARED_CONFIG, expect.any(AbortSignal), DOC_LABELS, [])
+    expect(fetchAnswer).toHaveBeenCalledWith(
+      'q',
+      CHUNKS,
+      SHARED_CONFIG,
+      expect.any(AbortSignal),
+      DOC_LABELS,
+      [],
+      undefined,
+    )
 
     await attemptAnswer(fetchAnswer, 'q', CHUNKS, SHARED_CONFIG, 60_000)
-    expect(fetchAnswer).toHaveBeenLastCalledWith('q', CHUNKS, SHARED_CONFIG, expect.any(AbortSignal), [], [])
+    expect(fetchAnswer).toHaveBeenLastCalledWith(
+      'q',
+      CHUNKS,
+      SHARED_CONFIG,
+      expect.any(AbortSignal),
+      [],
+      [],
+      undefined,
+    )
   })
 
   it('passes the prior-turn history through to fetchAnswer unchanged, and defaults to []', async () => {
@@ -69,10 +85,47 @@ describe('attemptAnswer', () => {
       .mockResolvedValue({ answer: 'answer', groundingWarning: false, docLabels: DOC_LABELS })
 
     await attemptAnswer(fetchAnswer, 'q', CHUNKS, SHARED_CONFIG, 60_000, DOC_LABELS, history)
-    expect(fetchAnswer).toHaveBeenCalledWith('q', CHUNKS, SHARED_CONFIG, expect.any(AbortSignal), DOC_LABELS, history)
+    expect(fetchAnswer).toHaveBeenCalledWith(
+      'q',
+      CHUNKS,
+      SHARED_CONFIG,
+      expect.any(AbortSignal),
+      DOC_LABELS,
+      history,
+      undefined,
+    )
 
     await attemptAnswer(fetchAnswer, 'q', CHUNKS, SHARED_CONFIG, 60_000)
-    expect(fetchAnswer).toHaveBeenLastCalledWith('q', CHUNKS, SHARED_CONFIG, expect.any(AbortSignal), [], [])
+    expect(fetchAnswer).toHaveBeenLastCalledWith(
+      'q',
+      CHUNKS,
+      SHARED_CONFIG,
+      expect.any(AbortSignal),
+      [],
+      [],
+      undefined,
+    )
+  })
+
+  it('passes an image through to fetchAnswer unchanged, and defaults to undefined (Milestone 10 Phase B)', async () => {
+    const image = { mimeType: 'image/jpeg', base64: 'aGVsbG8=' }
+    const fetchAnswer: FetchAnswerFn = vi
+      .fn()
+      .mockResolvedValue({ answer: 'answer', groundingWarning: false, docLabels: DOC_LABELS })
+
+    await attemptAnswer(fetchAnswer, 'q', CHUNKS, SHARED_CONFIG, 60_000, DOC_LABELS, [], image)
+    expect(fetchAnswer).toHaveBeenCalledWith('q', CHUNKS, SHARED_CONFIG, expect.any(AbortSignal), DOC_LABELS, [], image)
+
+    await attemptAnswer(fetchAnswer, 'q', CHUNKS, SHARED_CONFIG, 60_000)
+    expect(fetchAnswer).toHaveBeenLastCalledWith(
+      'q',
+      CHUNKS,
+      SHARED_CONFIG,
+      expect.any(AbortSignal),
+      [],
+      [],
+      undefined,
+    )
   })
 
   it('times out and aborts the signal when fetchAnswer hangs past the timeout', async () => {

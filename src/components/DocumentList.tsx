@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Trash } from '@phosphor-icons/react'
 import { deleteDocument } from '../lib/db'
+import { forgetSessionFile } from '../lib/sessionFiles'
 import { useDocumentStore, type DocEntry } from '../store/documentStore'
 import { classifyWebgpuFallback } from '../lib/errorTaxonomy'
 import { StatusBanner } from './ui/StatusBanner'
@@ -52,6 +53,7 @@ export function DocumentList() {
       setConfirmingId(null)
       setDeleteError(null)
       removeDocument(id)
+      forgetSessionFile(id)
     } catch (err) {
       setConfirmingId(null)
       setDeleteError({ id, message: err instanceof Error ? err.message : 'Failed to delete.' })

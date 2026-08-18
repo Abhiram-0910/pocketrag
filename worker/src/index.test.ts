@@ -168,6 +168,27 @@ describe('worker fetch handler — /answer, shared key', () => {
     expect(requestBody.contents[0].parts[0].text).not.toContain('Conversation so far')
   })
 
+  it('forwards a shared-tier image as an inlineData part alongside the prompt (Milestone 10 Phase B)', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: 'The chart shows rising values.' }] } }] }),
+      text: async () => '',
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    const body = { ...validBody, image: { mimeType: 'image/jpeg', base64: 'aGVsbG8=' } }
+    const res = await worker.fetch(answerRequest(body), makeEnv(), makeCtx())
+
+    expect(res.status).toBe(200)
+    const [, init] = fetchSpy.mock.calls[0]
+    const requestBody = JSON.parse((init as RequestInit).body as string) as {
+      contents: { parts: ({ text: string } | { inlineData: { mimeType: string; data: string } })[] }[]
+    }
+    expect(requestBody.contents[0].parts).toContainEqual({
+      inlineData: { mimeType: 'image/jpeg', data: 'aGVsbG8=' },
+    })
+  })
+
   it('calls Gemini with the env secret key when keySource is omitted (backward compatible)', async () => {
     const fetchSpy = vi.fn().mockResolvedValue({
       ok: true,
@@ -269,6 +290,16 @@ describe('worker fetch handler — /answer, BYOK', () => {
     expect(url).toContain('gemini-3.5-pro')
     expect((init as RequestInit).headers).toMatchObject({ 'x-goog-api-key': 'user-supplied-key' })
     expect((init as RequestInit).headers).not.toMatchObject({ 'x-goog-api-key': 'env-secret-key' })
+  })
+
+  it('rejects a BYOK request end-to-end when it includes an image, even for provider "gemini" (Milestone 10 Phase B)', async () => {
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+    const body = { ...byokBody, image: { mimeType: 'image/jpeg', base64: 'aGVsbG8=' } }
+    const res = await worker.fetch(answerRequest(body), makeEnv(), makeCtx())
+
+    expect(res.status).toBe(400)
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 
   it('dispatches to OpenAI, not Gemini, when the BYOK request specifies provider "openai"', async () => {

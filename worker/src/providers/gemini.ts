@@ -9,23 +9,37 @@ interface GeminiGenerateResponse {
   candidates?: { content?: { parts?: { text?: string }[] } }[]
 }
 
+export interface GeminiImageInput {
+  mimeType: string
+  base64: string
+}
+
 /**
  * Calls Gemini's generateContent endpoint for the given model. `fetchImpl` is injected
  * so tests can mock it. The key goes in the `x-goog-api-key` header, never the URL —
  * URLs are far more likely to end up in some layer's access logs than headers are, and
  * this key may be a user's own (BYOK), not just ours.
+ *
+ * `image` (Milestone 10 Phase B) is optional and additive to the existing `parts`
+ * array — `contents[].parts` already supported mixing `inlineData` alongside `text`,
+ * so this isn't a new request shape. Only ever passed by index.ts for a validated
+ * shared-tier request; never for BYOK, even when the BYOK provider is also Gemini.
  */
 export async function callGemini(
   fetchImpl: typeof fetch,
   apiKey: string,
   model: string,
   prompt: string,
+  image?: GeminiImageInput,
 ): Promise<string> {
+  const parts: ({ text: string } | { inlineData: { mimeType: string; data: string } })[] = [{ text: prompt }]
+  if (image) parts.push({ inlineData: { mimeType: image.mimeType, data: image.base64 } })
+
   const response = await fetchImpl(`${API_BASE}/models/${model}:generateContent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
     body: JSON.stringify({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      contents: [{ role: 'user', parts }],
     }),
   })
 

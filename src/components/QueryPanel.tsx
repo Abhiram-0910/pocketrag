@@ -9,13 +9,17 @@ import {
   fetchAnswerFromWorker,
   type DocLabel,
   type HistoryTurn,
+  type ImageAttachment,
   type KeyConfig,
 } from '../lib/answerRequest'
 import { buildRetrievalQuery } from '../lib/conversation'
 import { isDiagramLikely } from '../lib/diagramHeuristic'
+import { getDiagramImagesEnabled, setDiagramImagesEnabled } from '../lib/diagramImageSetting'
+import { renderPageToImage } from '../lib/pageRender'
 import { buildConversationPdf, type ExportSource } from '../lib/pdfExport'
 import { canRunQuery } from '../lib/queryScope'
 import { classify, type TaxonomyResult } from '../lib/errorTaxonomy'
+import { getSessionFile } from '../lib/sessionFiles'
 import { useDocumentStore } from '../store/documentStore'
 import { StatusBanner } from './ui/StatusBanner'
 import { Button } from './ui/Button'
@@ -43,6 +47,10 @@ interface ConversationTurn {
   answer: string
   groundingWarning: boolean
   docLabels: DocLabel[]
+  // Milestone 10 Phase B: whether a page image was included in this specific turn's
+  // request — tracked per turn, not just for the current answer, so the always-visible
+  // indicator stays accurate when scrolling back through "Conversation."
+  imageIncluded: boolean
 }
 
 /**
@@ -83,6 +91,17 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
   const [conversationTurns, setConversationTurns] = useState<ConversationTurn[]>([])
   const [scope, setScope] = useState<'document' | 'all'>('document')
   const [rerankModelProgress, setRerankModelProgress] = useState<number | null>(null)
+  // Milestone 10 Phase B state. diagramImagesEnabled reads localStorage once at mount;
+  // the toggle handler keeps it and localStorage in sync on every change.
+  const [diagramImagesEnabled, setDiagramImagesEnabledState] = useState(() => getDiagramImagesEnabled())
+  const [imageIncluded, setImageIncluded] = useState(false)
+  // The image actually resolved for the *current* submitted question (or undefined) —
+  // stored so a retry resends the same image rather than re-rendering the page again.
+  const [pendingImage, setPendingImage] = useState<ImageAttachment | undefined>(undefined)
+  // Non-blocking, always-visible note for the one failure mode that must never be
+  // silent: a diagram-likely chunk matched, but the file isn't in memory to render it
+  // (most commonly a document restored from a prior session — see sessionFiles.ts).
+  const [diagramFallbackNote, setDiagramFallbackNote] = useState<string | null>(null)
 
   const documents = useDocumentStore((s) => s.documents)
   const selectedId = useDocumentStore((s) => s.selectedId)
@@ -98,13 +117,27 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
 
   const titleFor = (id: string) => documents.find((d) => d.id === id)?.fileName ?? id
 
+  // Milestone 10 Phase B: default OFF, persisted to localStorage on every change so
+  // the choice survives a reload. Only ever rendered in JSX when keyConfig is
+  // shared-Gemini — not just disabled for BYOK, entirely absent from the DOM.
+  const handleToggleDiagramImages = useCallback((enabled: boolean) => {
+    setDiagramImagesEnabledState(enabled)
+    setDiagramImagesEnabled(enabled)
+  }, [])
+
   // The currently displayed answer is the last entry in conversationTurns (pushed on
   // every successful runAnswerAttempt below); "Conversation" only ever shows what came
   // before it, so the current answer isn't rendered twice.
   const pastTurns = conversationTurns.slice(0, -1)
 
   const runAnswerAttempt = useCallback(
-    async (question: string, chunks: ScoredChunk<ChunkRecord>[], isRetry: boolean, activeKeyConfig: KeyConfig) => {
+    async (
+      question: string,
+      chunks: ScoredChunk<ChunkRecord>[],
+      isRetry: boolean,
+      activeKeyConfig: KeyConfig,
+      image?: ImageAttachment,
+    ) => {
       setAwaitingAnswer(true)
       setTimedOut(false)
       if (!isRetry) setAnswerError(null)
@@ -129,16 +162,24 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
         ANSWER_TIMEOUT_MS,
         docLabels,
         history,
+        image,
       )
 
       if (result.outcome === 'success') {
         setAnswer(result.answer)
         setGroundingWarning(result.groundingWarning)
         setDocLabels(result.docLabels)
+        setImageIncluded(image !== undefined)
         setConversationTurns((prev) =>
           [
             ...prev,
-            { question, answer: result.answer, groundingWarning: result.groundingWarning, docLabels: result.docLabels },
+            {
+              question,
+              answer: result.answer,
+              groundingWarning: result.groundingWarning,
+              docLabels: result.docLabels,
+              imageIncluded: image !== undefined,
+            },
           ].slice(-MAX_STORED_TURNS),
         )
       } else if (result.outcome === 'timeout') {
@@ -182,6 +223,7 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
       setAnswerError(null)
       setTimedOut(false)
       setGroundingWarning(false)
+      setDiagramFallbackNote(null)
       // docLabels is intentionally NOT reset here — Milestone 11 Phase C freezes "Doc N"
       // labels for the lifetime of the conversation, so the map from the previous
       // answer carries forward and gets echoed back to the Worker in runAnswerAttempt.
@@ -222,7 +264,40 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
                 }
               }
               setResults(ranked)
-              await runAnswerAttempt(question, ranked, false, activeKeyConfig)
+
+              // Milestone 10 Phase B: at most one image, for the single top-ranked
+              // chunk, only when the opt-in toggle is on and the active key config is
+              // literally shared-Gemini (re-checked here, not just gated by the
+              // toggle's own conditional rendering — the Worker independently enforces
+              // this too, but this avoids even attempting a pointless render/request).
+              let image: ImageAttachment | undefined
+              if (diagramImagesEnabled && activeKeyConfig.keySource === 'shared' && ranked.length > 0) {
+                const topChunk = ranked[0].chunk
+                if (isDiagramLikely(topChunk)) {
+                  const file = getSessionFile(topChunk.documentId)
+                  if (file) {
+                    try {
+                      image = await renderPageToImage(file, topChunk.page)
+                    } catch {
+                      // Rendering failed (e.g. a corrupt/oversized page) — proceed
+                      // text-only rather than failing the whole query, but say so.
+                      setDiagramFallbackNote(
+                        "Couldn't render this page as an image — continuing with text only.",
+                      )
+                    }
+                  } else {
+                    // Most commonly: this document was restored from a prior session
+                    // (Milestone 6's restore-on-reload keeps text/embeddings, never
+                    // the file itself — see sessionFiles.ts). Must never be silent.
+                    setDiagramFallbackNote(
+                      "This document's page image isn't available after a reload — re-upload it to enable image answers for it.",
+                    )
+                  }
+                }
+              }
+              setPendingImage(image)
+
+              await runAnswerAttempt(question, ranked, false, activeKeyConfig, image)
             })
             .catch((err) => setError(err instanceof Error ? err.message : 'Failed to retrieve chunks.'))
             .finally(() => setBusy(false))
@@ -233,14 +308,14 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
         },
       })
     },
-    [canQuery, keyConfig, scope, selectedReadyId, query, busy, conversationTurns, runAnswerAttempt],
+    [canQuery, keyConfig, scope, selectedReadyId, query, busy, conversationTurns, runAnswerAttempt, diagramImagesEnabled],
   )
 
   const handleRetry = useCallback(() => {
     if (!submittedQuestion || !results || keyConfig === null) return
     setBusy(true)
-    runAnswerAttempt(submittedQuestion, results, true, keyConfig).finally(() => setBusy(false))
-  }, [submittedQuestion, results, runAnswerAttempt, keyConfig])
+    runAnswerAttempt(submittedQuestion, results, true, keyConfig, pendingImage).finally(() => setBusy(false))
+  }, [submittedQuestion, results, runAnswerAttempt, keyConfig, pendingImage])
 
   // Resets the conversation itself — turn history, the frozen Doc N map (so numbering
   // restarts at Doc 1 on the next question), and the current answer/results. Document
@@ -254,6 +329,9 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
     setResults(null)
     setSubmittedQuestion(null)
     setTimedOut(false)
+    setImageIncluded(false)
+    setPendingImage(undefined)
+    setDiagramFallbackNote(null)
   }, [])
 
   // Exports every turn currently in conversationTurns (past + current, in order) plus
@@ -311,6 +389,17 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
           )}
         </div>
       )}
+      {hasReadyDoc && keyConfig?.keySource === 'shared' && (
+        <label className="mb-2 flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+          <input
+            type="checkbox"
+            checked={diagramImagesEnabled}
+            onChange={(e) => handleToggleDiagramImages(e.target.checked)}
+            className="h-4 w-4 cursor-pointer"
+          />
+          Send a page image when a matched chunk looks like it has a diagram
+        </label>
+      )}
       <form onSubmit={handleSubmit} className="flex flex-col gap-2 sm:flex-row">
         <input
           type="text"
@@ -331,6 +420,12 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
         </StatusBanner>
       )}
 
+      {diagramFallbackNote && (
+        <StatusBanner variant="warning" className="mt-2">
+          {diagramFallbackNote}
+        </StatusBanner>
+      )}
+
       {rerankModelProgress != null && (
         <p className="mt-4 text-sm text-slate-500 motion-safe:animate-pulse dark:text-slate-400">
           Downloading reranking model — {rerankModelProgress}%… (one-time, cached after this)
@@ -340,7 +435,9 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
       {awaitingAnswer && !timedOut && (
         <p className="mt-4 text-sm text-slate-500 motion-safe:animate-pulse dark:text-slate-400">
           Generating an answer… this usually takes a few seconds, but can occasionally take up to a few
-          minutes on the free tier. Please don't close this tab.
+          minutes on the free tier.
+          {pendingImage !== undefined && ' A page image was included, which can take a bit longer.'} Please
+          don't close this tab.
         </p>
       )}
 
@@ -362,6 +459,11 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
               ? 'This answer may not be fully grounded in the source document — verify against the sources below.'
               : 'Grounded in your documents.'}
           </StatusBanner>
+          {imageIncluded && (
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              🖼️ A page image was included in this request.
+            </p>
+          )}
           <p className="text-sm text-slate-900 dark:text-slate-100">{answer}</p>
           {docLabels.length > 0 && (
             <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -388,6 +490,11 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
                     ? 'This answer may not be fully grounded in the source document — verify against the sources below.'
                     : 'Grounded in your documents.'}
                 </StatusBanner>
+                {turn.imageIncluded && (
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    🖼️ A page image was included in this request.
+                  </p>
+                )}
                 <p className="text-sm text-slate-900 dark:text-slate-100">{turn.answer}</p>
                 {turn.docLabels.length > 0 && (
                   <p className="text-xs text-slate-500 dark:text-slate-400">
