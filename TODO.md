@@ -183,15 +183,27 @@ unit-tested in isolation — confirms `getOperatorList()` really does return the
 operators for a real embedded image, not just that the pure boolean-combination logic
 is correct. See AGENTS.md Session 20 for the full story, including the DB_VERSION
 clarification (no bump needed — IndexedDB has no field-level schema to migrate).
-**Phase B and C are planned but explicitly on hold — do not start without the user's
-direct go-ahead**, given upon review of this session's close-out.
+**Milestone 10 Phase B (on-demand page rendering, opt-in toggle, shared-Gemini-only
+image sending) shipped and deployed in Session 21** — see TODO.md's Milestone 10
+entry below and AGENTS.md Session 21. Phase C (BYOK extension) stays parked pending
+a real per-provider vision-capability-detection mechanism.
+
+**Milestone 9 Phase A (Handwritten/Scanned Notes, images only) shipped and deployed
+in Session 22** — a structurally separate Notes tab, per-file OCR consent (no
+"remember my choice" shortcut), Gemini-reuse transcription (no new provider/trust
+surface), combined retrieval pool with a 📝/📄 provenance badge. Live-verified end
+to end, including against a real, genuinely messy handwritten page — see AGENTS.md
+Session 22 for the full story and the honestly-reported transcription imperfections.
+Phase B (PDF support) stays parked pending explicit go-ahead. See TODO.md's
+Milestone 9 entry below.
 
 Full roadmap (Milestones 7-16) in 🟢 below. **No task queued next — ask the user.**
-Standing candidates: Milestone 10 Phase B (blocked on explicit go-ahead, see above),
-BYOK success-path verification for Anthropic/Grok/OpenRouter (live-verify a real
-grounded answer once test keys are available — flip out of `EXPERIMENTAL_PROVIDERS`,
-no other code change needed), Milestone 14's landing-page half (deliberately out of
-scope since Session 14), and milestones 9/12/15-16.
+Standing candidates: Milestone 9 Phase B (PDF support, parked, see above), Milestone
+10 Phase C (BYOK extension, parked, see above), BYOK success-path verification for
+Anthropic/Grok/OpenRouter (live-verify a real grounded answer once test keys are
+available — flip out of `EXPERIMENTAL_PROVIDERS`, no other code change needed),
+Milestone 14's landing-page half (deliberately out of scope since Session 14), and
+milestones 12/15-16.
 
 ---
 
@@ -276,8 +288,30 @@ scope since Session 14), and milestones 9/12/15-16.
       not `error` — it's a working automatic fallback).
 
 ### 9. Handwritten/Scanned Notes
-- Separate tab from Documents
-- Explicit "this file will be uploaded for cloud OCR" consent before anything happens
+- [x] **Phase A — Images only, shared-Gemini OCR — Session 22.** Separate Notes tab
+      (`App.tsx` tab state), structurally distinct from Documents so its local-only
+      guarantee holds by construction, not just by current behavior. Strict per-file
+      consent (`NotesDropZone.tsx`, built from `Button`/`StatusBanner` only, no new
+      modal primitive) — no "remember my choice" shortcut, since a whole file leaving
+      the browser is a bigger exception than Milestone 10's per-query toggle. OCR
+      reuses Gemini's vision capability (`worker/src/providers/gemini.ts`'s
+      `transcribeImage`) rather than a dedicated OCR provider — no new trust surface,
+      no new API key. `OcrRequestBody` (`validate.ts`) has no `keySource`/`apiKey`
+      field at all, so the endpoint is structurally shared-tier-only. Dedicated `ocr`
+      rate-limit bucket (20/day) and a failure-logging path
+      (`logOcrFailure`/`notifyDiscordOfOcrFailure`) that has no `message` parameter to
+      forward at all — /ocr sends real note content, not a snippet, so nothing here
+      can log or Discord raw provider error text the way `/answer` safely does today.
+      Transcribed text flows into the same chunker/embedder pipeline as typed PDFs
+      unchanged; `DocumentRecord`/`DocEntry` gain a `source` field, retrieval pools
+      both sources together with a 📝/📄 badge in Sources. Live-verified end to end,
+      including against a genuinely messy real handwritten page — see AGENTS.md
+      Session 22 for the full story and the honestly-reported transcription
+      imperfections (this is Gemini's general vision OCR, not a specialized
+      handwriting-recognition benchmark — good-but-imperfect is the expected outcome).
+- [ ] **Phase B (parked)** — PDF support (multi-page scans), including re-verifying
+      the 15MB/20-page caps against a real large scan. Not started; needs explicit
+      go-ahead.
 - Documents tab stays 100% local, unchanged — see ARCHITECTURE.md's two-tab privacy
   model note
 

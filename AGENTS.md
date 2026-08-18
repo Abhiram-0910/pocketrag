@@ -7,15 +7,16 @@ Claude reads this at the START of every new session to understand what happened 
 
 ## Project State
 **Last updated:** 2026-08-18
-**Current branch:** master (through `4f922b2` — Milestone 10 Phase B, diagram-aware
-image sending, deployed both sides — see Session 21 below)
+**Current branch:** master (through `552757a` — Milestone 9 Phase A, handwritten/
+scanned notes OCR (images only), deployed both sides — see Session 22 below)
 **Remote:** `github.com/Abhiram-0910/pocketrag` (private) — **not yet pushed**;
-`origin/master` still at `97a28d2` as of 2026-08-15, local is 3 commits ahead
-(`65475b7`, `5d886df`, `4f922b2`) as of this session. Push on explicit request only.
-**Overall status:** MVP **+ Milestones 6-8, 10 (Phases A-B), 11, 13** feature-complete
-and **fully deployed in production** (Milestone 10 Phase C, Milestones 7b's
-Anthropic/Grok/OpenRouter success path, and Milestone 14's landing page remain open
-— see below and TODO.md). Frontend:
+`origin/master` still at `97a28d2` as of 2026-08-15, local is 5 commits ahead
+(`65475b7`, `5d886df`, `4f922b2`, `c8ad518`, `552757a`) as of this session. Push on
+explicit request only.
+**Overall status:** MVP **+ Milestones 6-8, 9 (Phase A), 10 (Phases A-B), 11, 13**
+feature-complete and **fully deployed in production** (Milestone 9 Phase B, Milestone
+10 Phase C, Milestones 7b's Anthropic/Grok/OpenRouter success path, and Milestone 14's
+landing page remain open — see below and TODO.md). Frontend:
 `https://pocketrag.pages.dev` (Cloudflare Pages). API:
 `https://pocketrag-answer.abhiram-dev.workers.dev` (Cloudflare Worker). Supports a
 multi-document library, bulk drag-and-drop, a this-document/all-documents retrieval
@@ -2372,6 +2373,162 @@ not just in local tests.
 **Next session should start with:** Phase C, or the standing backlog — BYOK
 success-path verification for Anthropic/Grok/OpenRouter, Milestone 14's landing-page
 half, milestones 9/12/15-16.
+
+---
+
+### Session 22 — 2026-08-18
+**Goal:** Milestone 9 Phase A — Handwritten/Scanned Notes, images only. Planned in
+detail before any code (structure survey, OCR-mechanism research, consent-flow
+design, retrieval-scope decision, provider/cost scope, phase staging), then four
+user-requested additions incorporated into the plan before implementation began: a
+type-level BYOK exclusion on the OCR request body, a real timeout + two honest
+loading states, a dedicated OCR-content-non-leak implementation and test, and
+confirmation the consent UI reuses existing primitives only.
+
+**What Phase A built:**
+- `src/App.tsx`: a Documents/Notes tab switcher (`useState`, no router — this is the
+  first feature needing any multi-view structure at all). `QueryPanel`/`ByokPanel`
+  stay outside the tab gate — retrieval pools both sources together regardless of
+  which tab is active, since the trust-sensitive step already happened at
+  OCR-consent time, not at query time.
+- `src/components/NotesDropZone.tsx` (new): structurally separate from
+  `DropZone.tsx`, not a shared "sometimes uploads" branch. Strict **per-file**
+  consent — no "remember my choice this session" shortcut — shown before any network
+  call: *"[filename] will be uploaded to Google's Gemini API to extract its text
+  (OCR). Unlike the Documents tab, this file's actual content leaves your browser —
+  not just a snippet. PocketRAG's server never stores it."* Built entirely from the
+  existing `Button`/`StatusBanner` primitives — no new modal/dialog component, same
+  in-place-confirmation pattern `DocumentList.tsx`'s delete-confirm already uses.
+  Drives two real, honestly-distinguishable loading states — `'ocr-uploading'` (the
+  client-side `FileReader`→base64 encode) and `'ocr-processing'` (the `/ocr` fetch in
+  flight, i.e. Gemini actually transcribing, the genuinely slow one) — new
+  `DocStatus` values used only by Notes-tab documents; Documents-tab's
+  `'extracting-text'` is untouched. Deliberately did not try to split "uploading" vs.
+  "server processing" via raw `XHR.upload.onprogress` — `fetch()` doesn't expose that,
+  and these two states are the real, observable boundary plain `fetch()` gives us.
+- **OCR reuses Gemini's own vision capability, not a dedicated OCR provider.**
+  Researched current API facts before writing anything: Gemini 3.5 Flash-Lite
+  (already the pinned shared model) is multimodal, PDF inline limit raised to 100MB
+  in Jan 2026, Cloudflare Workers' request body limit is 100MB on this project's
+  plan. A dedicated OCR API (Cloud Vision/Document AI) would have meant a new API
+  key, new Worker secret, new provider file, new failure/log/Discord path — reuse won
+  outright over introducing a new trust surface for a project that already has a
+  working, tested, vision-capable call. `worker/src/providers/gemini.ts`'s
+  `callGemini` and new `transcribeImage` now share a `generateContent` helper (real
+  duplication was there before this refactor — DRY, not speculative). The OCR prompt
+  explicitly instructs verbatim transcription — no spelling/grammar correction, no
+  summarizing/paraphrasing, `[illegible]` for unreadable text — because an LLM-based
+  OCR path can otherwise "fix" or paraphrase in a way a real OCR engine wouldn't.
+- **`OcrRequestBody` (`worker/src/validate.ts`) has no `keySource` or `apiKey` field
+  at all** — not just an unused one. There is nothing for a dispatch `switch` to ever
+  branch BYOK on; `handleOcr` in `index.ts` calls Gemini directly with
+  `env.GEMINI_API_KEY`/`DEFAULT_SHARED_MODEL`, no provider switch. Stricter than
+  Milestone 10 Phase B's BYOK exclusion (which kept a `keySource` field and excluded
+  the `'own'` branch) — here the field doesn't exist to begin with. `OCR_ALLOWED_MIME_TYPES`
+  (images only this phase — `application/pdf` explicitly rejected, tested).
+  `MAX_OCR_BASE64_LENGTH = 21_000_000`, derived from a 15MB raw-file cap (comment in
+  `validate.ts` has the full chain: under Gemini's 20MB inline-recommended threshold,
+  avoiding the File API's separate upload+poll+reference flow; well under Cloudflare's
+  100MB Worker body limit) — **explicitly flagged for re-verification against a real
+  large scan when Phase B (PDF) is built**, not treated as final. Dedicated `'ocr'`
+  rate-limit bucket, `OCR_DAILY_LIMIT = 20` (lower than the 50/day shared Q&A bucket
+  — one OCR call is materially heavier, up to a full image's worth of Gemini input
+  tokens vs. one prompt).
+- **Dedicated, narrower failure-logging path for `/ocr`** — this is the first feature
+  where real private content (a full image, not a retrieved snippet) transits the
+  Worker, so it needed its own proof, not inherited from the existing key-leak-test
+  pattern. `logProviderError`/`notifyDiscordOfFailure` (used by `/answer`/`/models`)
+  log `err.message` verbatim — safe there because nothing sent to a provider for
+  those endpoints is private in that way, but some providers' error bodies can echo
+  request content back on a 400. So `/ocr` got its own `logOcrFailure` and
+  `notifyDiscordOfOcrFailure`, neither of which has an `err`/`message` parameter to
+  forward **at all** — only `status`, plus a fixed generic Discord message ("OCR
+  request failed."). The dedicated test (`worker/src/index.test.ts`) mocks a Gemini
+  failure whose body echoes a realistic fake-note-content fragment back and proves
+  it reaches neither `console.error` nor the Discord payload.
+- `src/lib/ocrRequest.ts` (new): `AbortController` + `OCR_TIMEOUT_MS = 120_000`
+  (longer than `/answer`'s 60s — OCR has real per-image work to do), mirrors
+  `answerRequest.ts`'s `attemptAnswer` pattern exactly.
+- `src/lib/db.ts` / `src/store/documentStore.ts`: additive `source: 'document' |
+  'note'` field (no `DB_VERSION` bump — same precedent as Milestone 10's `hasImage`,
+  IndexedDB has no field-level schema to migrate; `App.tsx`'s restore path defaults a
+  missing value to `'document'`). Transcribed text flows into the *exact same*
+  `embedDocument`/`chunker`/`saveDocument` pipeline `DropZone.tsx` already uses — zero
+  changes to chunking or embedding, confirmed before writing any code that
+  `PageText`/`PageInput` are structurally identical shapes. `hasImage` is hardcoded
+  `false` for OCR'd pages — Milestone 10's diagram-likely hint is about charts/
+  diagrams in typed PDFs, reusing it for handwriting would be a category error.
+- `QueryPanel.tsx`: combined retrieval pool (approved over a fully separate one — the
+  trust-sensitive step already happened at OCR-consent time, so segregating chunks at
+  query time would only lose the feature's actual value, cross-referencing a note
+  against a related document, with no privacy benefit). New `sourceFor()` helper
+  drives a 📝/📄 badge per chunk in the Sources list, next to the existing 📊
+  diagram-likely hint.
+
+**Live verification — real, not simulated, including a genuinely hard test case:**
+Copied the user's real handwritten DAA-unit PDF into the scratchpad, rendered all 23
+pages via a headless-browser pdf.js harness (Playwright installed → used →
+uninstalled, per this project's standing convention — not a dependency in
+package.json), visually picked page 9 as the messiest available page (dense cursive,
+overlapping hand-drawn graph diagrams, slanted margin annotations, visible
+bleed-through from the reverse side) as a harder stress test than an easy page,
+re-rendered it at full resolution. Ran the entire flow through real `wrangler dev` +
+Vite dev, no mocks:
+- Real per-file consent shown verbatim, confirmed via a real click.
+- Real `/ocr` call to Gemini (confirmed via `wrangler dev`'s request log). Transcribed
+  the dense, slanted cursive almost verbatim, correctly used `[illegible]` once
+  instead of guessing, did not paraphrase or "correct" anything, and reasonably chose
+  not to enumerate the embedded hand-drawn graph's numeric edge labels (not really
+  running "text"). **One run also produced a garbled fragment** ("jog торо" — stray
+  Cyrillic-looking characters) that doesn't correspond to anything on the page. This
+  is reported honestly, not smoothed over: **this is Gemini's general vision-model
+  OCR capability, not a specialized handwriting-recognition system tuned for this**
+  — good-but-imperfect transcription on a genuinely hard page is the correctly
+  expected outcome here, not a defect for a future session to chase to zero.
+- The transcribed text reached `ready` (1 chunk) through the real, unmodified
+  chunking/embedding pipeline.
+- A real question ("What is Kruskal's algorithm and how does it work?") against it
+  came back **"Grounded in your documents"**, with the 📝 badge correctly shown next
+  to the note's Sources entry — confirms the combined-pool retrieval and provenance
+  badge both work end to end, not just in isolation.
+- A real failing OCR call (garbage-but-well-formed base64 claiming to be a JPEG) got
+  a genuine `400` from Gemini. The Worker's own terminal log showed exactly
+  `{"event":"ocr_call_failed","status":"400"}` — no message field, no content —
+  matching the automated non-leak test precisely, not just passing it in isolation.
+  The Discord alert fired (fire-and-forget, so delivery itself wasn't self-verified
+  from this session — worth the user checking their channel).
+
+**Verification, this session:** frontend 120/120 tests (was 114 at Session 21's
+close; +6 in `ocrRequest.test.ts`), worker 211/211 tests (was 194; +17 across
+`gemini.test.ts`, `validate.test.ts`, `index.test.ts` — including the dedicated
+content-non-leak test). `tsc -b` (frontend) / `tsc --noEmit` (worker) both clean.
+`oxlint` clean on both sides except the same pre-existing `titleFor`/`useCallback`
+warning carried over unchanged since Session 19-21. `npm run build` clean, bundle-
+size guard passes. `wrangler deploy --dry-run` clean pre-deploy.
+
+**Left incomplete, deliberately:** Phase B (PDF/multi-page scan support) remains
+fully planned but not started — parked pending explicit go-ahead, including
+re-verifying the 15MB/20-page caps against a real large scan once it begins.
+
+**Committed and deployed both sides**, after the user reviewed the diff and approved.
+Code committed as `552757a` ("Add handwritten/scanned notes OCR, images only").
+Worker deployed first (`wrangler deploy`, Version ID
+`409d69fa-0efd-414e-be04-d93f78e01331`) and live-verified with a real `/ocr` call
+directly against the production Worker URL before touching the frontend. Frontend
+built (`index-DZ73ApdD.js` / `index-C7YR59Mk.css`, CSS hash unchanged from Session
+21 — no new Tailwind class combinations were introduced beyond what the app already
+uses) and deployed via `wrangler pages deploy dist --project-name=pocketrag
+--branch=main`; `wrangler pages deployment list` confirms it landed as **Production**,
+branch `main`, tagged to commit `552757a`. Bundle-hash-verified against the live
+site: same CDN propagation lag noted in Session 21 (production alias briefly served
+the prior deployment's hash immediately after deploy) — resolved by curling the
+deployment's own unique subdomain directly, which showed the correct new hash
+immediately, then re-curling the production alias with a cache-busting query param,
+which then matched.
+
+**Next session should start with:** Phase B (PDF support, on explicit go-ahead only),
+or the standing backlog — Milestone 10 Phase C, BYOK success-path verification for
+Anthropic/Grok/OpenRouter, Milestone 14's landing-page half, milestones 12/15-16.
 
 ---
 
