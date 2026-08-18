@@ -3,7 +3,7 @@ import type { DocEntry } from '../store/documentStore'
 import { canRunQuery } from './queryScope'
 
 function doc(id: string, status: DocEntry['status']): DocEntry {
-  return { id, fileName: `${id}.pdf`, status, error: null, embedProgress: null, chunkCount: 1 }
+  return { id, fileName: `${id}.pdf`, status, error: null, embedProgress: null, chunkCount: 1, source: 'document' }
 }
 
 describe('canRunQuery', () => {

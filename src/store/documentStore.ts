@@ -6,6 +6,12 @@ import type { BackendState } from '../workers/embedding.types'
 export type DocStatus =
   | 'queued'
   | 'extracting-text'
+  // Milestone 9 Phase A: Notes-tab-only phases, distinct from 'extracting-text' (which
+  // stays exclusive to the Documents tab's local pdf.js extraction). 'ocr-uploading' is
+  // the client-side FileReader->base64 encode step; 'ocr-processing' is the /ocr fetch
+  // in flight, i.e. Gemini actually transcribing — the genuinely slow one.
+  | 'ocr-uploading'
+  | 'ocr-processing'
   | 'loading-model'
   | 'embedding'
   | 'ready'
@@ -18,6 +24,9 @@ export interface DocEntry {
   error: string | null
   embedProgress: { done: number; total: number } | null
   chunkCount: number | null
+  // Milestone 9: which tab/pipeline this document came from — see db.ts's
+  // DocumentRecord.source for the persisted counterpart.
+  source: 'document' | 'note'
 }
 
 interface DocumentState {
@@ -29,7 +38,7 @@ interface DocumentState {
   backend: BackendState | null
   backendDetail: string | null
   modelProgress: number | null
-  addDocument: (id: string, fileName: string) => void
+  addDocument: (id: string, fileName: string, source: DocEntry['source']) => void
   updateDocument: (id: string, patch: Partial<Omit<DocEntry, 'id'>>) => void
   removeDocument: (id: string) => void
   restoreDocuments: (entries: DocEntry[]) => void
@@ -44,11 +53,11 @@ export const useDocumentStore = create<DocumentState>((set) => ({
   backend: null,
   backendDetail: null,
   modelProgress: null,
-  addDocument: (id, fileName) =>
+  addDocument: (id, fileName, source) =>
     set((s) => ({
       documents: [
         ...s.documents,
-        { id, fileName, status: 'queued', error: null, embedProgress: null, chunkCount: null },
+        { id, fileName, status: 'queued', error: null, embedProgress: null, chunkCount: null, source },
       ],
     })),
   updateDocument: (id, patch) =>

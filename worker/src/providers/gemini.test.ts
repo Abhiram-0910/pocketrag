@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { callGemini, listGeminiModels } from './gemini'
+import { callGemini, listGeminiModels, transcribeImage } from './gemini'
 
 function mockFetch(response: Partial<Response> & { jsonBody?: unknown; textBody?: string }) {
   return vi.fn().mockResolvedValue({
@@ -137,6 +137,58 @@ describe('listGeminiModels', () => {
     try {
       await listGeminiModels(fetchImpl, secretKey)
       expect.unreachable('listGeminiModels should have thrown')
+    } catch (err) {
+      expect(err).toBeInstanceOf(Error)
+      expect((err as Error).message).not.toContain(secretKey)
+    }
+  })
+})
+
+describe('transcribeImage', () => {
+  it('sends the API key as a header, the OCR prompt and inlineData image in the body', async () => {
+    const fetchImpl = mockFetch({
+      jsonBody: { candidates: [{ content: { parts: [{ text: 'Meeting notes: buy milk.' }] } }] },
+    })
+
+    const text = await transcribeImage(fetchImpl, 'test-key', 'gemini-3.5-flash-lite', {
+      mimeType: 'image/jpeg',
+      base64: 'aGVsbG8=',
+    })
+
+    expect(text).toBe('Meeting notes: buy milk.')
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toContain('gemini-3.5-flash-lite')
+    expect(url).not.toContain('test-key')
+    expect((init as RequestInit).headers).toMatchObject({ 'x-goog-api-key': 'test-key' })
+    const body = JSON.parse((init as RequestInit).body as string)
+    expect(body.contents[0].parts[0].text).toMatch(/transcribe/i)
+    expect(body.contents[0].parts[0].text).toMatch(/exactly as written/i)
+    expect(body.contents[0].parts[1]).toEqual({ inlineData: { mimeType: 'image/jpeg', data: 'aGVsbG8=' } })
+  })
+
+  it('throws with the status and body when Gemini returns a non-2xx response', async () => {
+    const fetchImpl = mockFetch({ ok: false, status: 500, textBody: 'internal error' })
+    await expect(
+      transcribeImage(fetchImpl, 'key', 'gemini-3.5-flash-lite', { mimeType: 'image/jpeg', base64: 'aGVsbG8=' }),
+    ).rejects.toThrow(/500/)
+  })
+
+  it('throws when the response has no candidate text', async () => {
+    const fetchImpl = mockFetch({ jsonBody: { candidates: [] } })
+    await expect(
+      transcribeImage(fetchImpl, 'key', 'gemini-3.5-flash-lite', { mimeType: 'image/jpeg', base64: 'aGVsbG8=' }),
+    ).rejects.toThrow(/did not contain any transcribed text/)
+  })
+
+  it('never includes the raw API key in a thrown error message', async () => {
+    const fetchImpl = mockFetch({ ok: false, status: 401, textBody: 'invalid API key' })
+    const secretKey = 'sk-ocr-secret-value-should-never-leak-24680'
+    try {
+      await transcribeImage(fetchImpl, secretKey, 'gemini-3.5-flash-lite', {
+        mimeType: 'image/jpeg',
+        base64: 'aGVsbG8=',
+      })
+      expect.unreachable('transcribeImage should have thrown')
     } catch (err) {
       expect(err).toBeInstanceOf(Error)
       expect((err as Error).message).not.toContain(secretKey)

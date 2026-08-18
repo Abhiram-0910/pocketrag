@@ -116,6 +116,10 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
   const canQuery = docsReady && keyConfig !== null
 
   const titleFor = (id: string) => documents.find((d) => d.id === id)?.fileName ?? id
+  // Milestone 9: combined retrieval pool means a single answer can draw on both
+  // Documents-tab (local-only) and Notes-tab (OCR'd) chunks — this badge keeps which
+  // trust model applied to which source always visible, not just knowable from the tab.
+  const sourceFor = (id: string) => documents.find((d) => d.id === id)?.source ?? 'document'
 
   // Milestone 10 Phase B: default OFF, persisted to localStorage on every change so
   // the choice survives a reload. Only ever rendered in JSX when keyConfig is
@@ -525,6 +529,11 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
                 className="rounded border border-slate-200 p-3 text-sm text-slate-700 dark:border-slate-700 dark:text-slate-300"
               >
                 <p className="mb-1 text-xs text-slate-500 dark:text-slate-400">
+                  <span
+                    title={sourceFor(chunk.documentId) === 'note' ? 'From the Notes tab — OCR extracted' : 'From the Documents tab — local only'}
+                  >
+                    {sourceFor(chunk.documentId) === 'note' ? '📝' : '📄'}
+                  </span>{' '}
                   <span className="font-medium text-slate-700 dark:text-slate-300">{titleFor(chunk.documentId)}</span> ·
                   page {chunk.page} · score {score.toFixed(3)}
                   {isDiagramLikely(chunk) && (

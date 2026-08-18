@@ -89,6 +89,12 @@ function answerRequest(body: unknown, init: RequestInit = {}): IncomingRequest {
   return request('/answer', body, init)
 }
 
+function ocrRequest(body: unknown, init: RequestInit = {}): IncomingRequest {
+  return request('/ocr', body, init)
+}
+
+const validOcrBody = { mimeType: 'image/jpeg', base64: 'aGVsbG8=' }
+
 afterEach(() => {
   vi.unstubAllGlobals()
 })
@@ -753,5 +759,123 @@ describe('worker fetch handler — /models', () => {
     // A BYOK /answer request from the same IP must also be blocked — same bucket.
     const answerBlocked = await worker.fetch(answerRequest(byokBody), env, makeCtx())
     expect(answerBlocked.status).toBe(429)
+  })
+})
+
+describe('worker fetch handler — /ocr (Milestone 9 Phase A)', () => {
+  it('returns transcribed text and CORS headers for a valid request', async () => {
+    mockGeminiSuccess('Meeting notes: buy milk, call Alex, project deadline Friday.')
+    const res = await worker.fetch(ocrRequest(validOcrBody), makeEnv(), makeCtx())
+
+    expect(res.status).toBe(200)
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('http://localhost:5173')
+    const data = (await res.json()) as { text: string }
+    expect(data.text).toBe('Meeting notes: buy milk, call Alex, project deadline Friday.')
+  })
+
+  it('rejects a request with an unsupported mimeType without calling Gemini', async () => {
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+    const res = await worker.fetch(ocrRequest({ mimeType: 'application/pdf', base64: 'aGVsbG8=' }), makeEnv(), makeCtx())
+    expect(res.status).toBe(400)
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('rejects a request carrying keySource/apiKey — OcrRequestBody has no such field, so it is simply ignored, never routed to a BYOK provider', async () => {
+    mockGeminiSuccess('transcribed text')
+    const fetchSpy = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes('generativelanguage.googleapis.com')) {
+        return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: 'ok' }] } }] }) }
+      }
+      throw new Error(`unexpected fetch to ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+
+    const res = await worker.fetch(
+      ocrRequest({ ...validOcrBody, keySource: 'own', apiKey: 'sk-should-be-ignored', provider: 'openai' }),
+      makeEnv(),
+      makeCtx(),
+    )
+
+    expect(res.status).toBe(200)
+    // Only Gemini's own generateContent endpoint was ever hit — proves the ignored
+    // apiKey/provider fields never reached a dispatch switch.
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    expect((fetchSpy.mock.calls[0][0] as string)).toContain('generativelanguage.googleapis.com')
+  })
+
+  it('has its own rate-limit bucket, independent of the shared /answer bucket', async () => {
+    mockGeminiSuccess('answer (page 1).')
+    const env = makeEnv()
+    // Exhaust the OCR bucket (limit 20).
+    for (let i = 0; i < 20; i++) {
+      await worker.fetch(ocrRequest(validOcrBody), env, makeCtx())
+    }
+    const ocrBlocked = await worker.fetch(ocrRequest(validOcrBody), env, makeCtx())
+    expect(ocrBlocked.status).toBe(429)
+
+    // The shared /answer bucket (limit 50) must be untouched by the 20 OCR calls above.
+    const answerStillAllowed = await worker.fetch(answerRequest(validBody), env, makeCtx())
+    expect(answerStillAllowed.status).toBe(200)
+  })
+
+  // Milestone 9 Phase A: /ocr sends real note content (a full image), not a retrieved
+  // snippet — unlike /answer's logProviderError, which logs err.message verbatim and
+  // is safe only because nothing sent to a provider there is private in the same way.
+  // This proves the dedicated, narrower /ocr failure path never forwards the raw
+  // provider error body — which could in principle echo back request content on a
+  // 400 — into either Workers Logs or the Discord alert. Only status/generic text.
+  it('never logs or Discords real content from a failed OCR call — only status and a generic message', async () => {
+    const noteContent = 'Patient chart: diagnosis confidential, SSN 555-12-3456, do not disclose'
+    const discordWebhookUrl = 'https://discord.com/api/webhooks/1/token'
+    const fetchSpy = vi.fn().mockImplementation(async (url: string) => {
+      if (url === discordWebhookUrl) return { ok: true, status: 204, text: async () => '' }
+      // A realistic-shaped failure whose body happens to echo request content back —
+      // the exact scenario this test exists to guard against.
+      return { ok: false, status: 400, text: async () => `Bad request, received: "${noteContent}"` }
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const res = await worker.fetch(
+      ocrRequest(validOcrBody),
+      makeEnv({ DISCORD_WEBHOOK_URL: discordWebhookUrl }),
+      makeCtx(),
+    )
+    expect(res.status).toBe(502)
+    const data = (await res.json()) as { error: string }
+    expect(data.error).not.toContain(noteContent)
+    await flushWaitUntil()
+
+    expect(consoleErrorSpy).toHaveBeenCalledTimes(1)
+    const logged = consoleErrorSpy.mock.calls[0][0] as string
+    expect(logged).not.toContain(noteContent)
+    const parsedLog = JSON.parse(logged) as { event: string; status: string }
+    expect(parsedLog).toEqual({ event: 'ocr_call_failed', status: '400' })
+
+    const discordCall = fetchSpy.mock.calls.find(([url]) => url === discordWebhookUrl)
+    expect(discordCall).toBeDefined()
+    const [, init] = discordCall!
+    const discordBody = (init as RequestInit).body as string
+    expect(discordBody).not.toContain(noteContent)
+    const parsedDiscord = JSON.parse(discordBody) as { embeds: Array<{ fields: Array<{ name: string; value: string }> }> }
+    const fields = Object.fromEntries(parsedDiscord.embeds[0].fields.map((f) => [f.name, f.value]))
+    expect(fields.Status).toBe('400')
+    expect(fields.Message).toBe('OCR request failed.')
+
+    consoleErrorSpy.mockRestore()
+  })
+
+  it('does not attempt a Discord alert when DISCORD_WEBHOOK_URL is not set (default env)', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({ ok: false, status: 500, text: async () => 'server error' })
+    vi.stubGlobal('fetch', fetchSpy)
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await worker.fetch(ocrRequest(validOcrBody), makeEnv(), makeCtx())
+    await flushWaitUntil()
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1) // only the Gemini call, no Discord call attempted
+
+    consoleErrorSpy.mockRestore()
   })
 })

@@ -20,6 +20,10 @@ function statusText(doc: DocEntry): string {
       return 'Queued…'
     case 'extracting-text':
       return 'Extracting text…'
+    case 'ocr-uploading':
+      return 'Preparing…'
+    case 'ocr-processing':
+      return 'Extracting text via OCR — larger scans can take a minute…'
     case 'loading-model':
       return 'Loading model…'
     case 'embedding':
@@ -31,8 +35,13 @@ function statusText(doc: DocEntry): string {
   }
 }
 
-export function DocumentList() {
-  const documents = useDocumentStore((s) => s.documents)
+interface DocumentListProps {
+  source: 'document' | 'note'
+}
+
+export function DocumentList({ source }: DocumentListProps) {
+  const allDocuments = useDocumentStore((s) => s.documents)
+  const documents = allDocuments.filter((d) => d.source === source)
   const selectedId = useDocumentStore((s) => s.selectedId)
   const selectDocument = useDocumentStore((s) => s.selectDocument)
   const removeDocument = useDocumentStore((s) => s.removeDocument)

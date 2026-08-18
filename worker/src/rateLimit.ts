@@ -15,6 +15,11 @@ export const DEFAULT_DAILY_LIMIT = 50
 // it's a coarse guard against someone using our Worker as an anonymizing relay for
 // unrelated traffic. Deliberately much higher than the shared-key limit.
 export const BYOK_DAILY_LIMIT = 500
+// Milestone 9 Phase A: a single OCR request is materially heavier than a /answer call
+// (up to a full image's worth of Gemini input tokens vs. one prompt) — set lower than
+// DEFAULT_DAILY_LIMIT so one Notes-tab burst can't consume a disproportionate share of
+// the shared-tier abuse budget on an anonymous endpoint.
+export const OCR_DAILY_LIMIT = 20
 const SECONDS_PER_DAY = 86400
 
 // The bucket's day boundary (UTC) doubles as the reset time shown to the user — same

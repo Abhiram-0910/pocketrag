@@ -1,9 +1,9 @@
-import { validateAnswerRequest, validateModelsRequest } from './validate'
+import { validateAnswerRequest, validateModelsRequest, validateOcrRequest } from './validate'
 import { buildPrompt } from './prompt'
 import { checkGrounding } from './grounding'
 import { assignDocLabels } from './labels'
-import { checkRateLimit, BYOK_DAILY_LIMIT } from './rateLimit'
-import { callGemini, listGeminiModels, DEFAULT_SHARED_MODEL } from './providers/gemini'
+import { checkRateLimit, BYOK_DAILY_LIMIT, OCR_DAILY_LIMIT } from './rateLimit'
+import { callGemini, listGeminiModels, transcribeImage, DEFAULT_SHARED_MODEL } from './providers/gemini'
 import { callOpenAI, listOpenAIModels } from './providers/openai'
 import { callAnthropic, listAnthropicModels } from './providers/anthropic'
 import { callGrok, listGrokModels } from './providers/grok'
@@ -19,6 +19,7 @@ const ANSWER_UNAVAILABLE_MESSAGE =
   "This provider isn't fully supported yet. Please try Gemini or OpenAI for now — we're working on it."
 const MODELS_UNAVAILABLE_MESSAGE =
   "This provider's model list isn't available yet. Please try Gemini or OpenAI for now — we're working on it."
+const OCR_UNAVAILABLE_MESSAGE = "OCR isn't available right now. Please try again in a moment."
 
 // `status` is pulled from the "<Provider> API error <status>: <body>" shape every
 // provider file already throws, rather than adding a custom error class. Shared by
@@ -60,6 +61,38 @@ function notifyDiscordOfFailure(
   ctx.waitUntil(
     shouldNotify(env.RATE_LIMIT_KV, provider, endpoint).then((notify) =>
       notify ? sendDiscordAlert(fetch, env.DISCORD_WEBHOOK_URL, { provider, model, status, message }) : undefined,
+    ),
+  )
+}
+
+/**
+ * Milestone 9 Phase A: a deliberately narrower failure logger for /ocr, separate from
+ * logProviderError above. logProviderError logs err.message verbatim — safe for
+ * /answer and /models, where nothing sent to a provider is content the user would
+ * consider private, but /ocr sends real note content (a full image, not a snippet),
+ * and some providers' error bodies echo back fragments of the request on a 400. This
+ * function has no `err`/`message` parameter to forward at all, so there's no field
+ * a future edit could accidentally start logging — only `status`, extracted the same
+ * way extractFailureDetails does.
+ */
+function logOcrFailure(status: string | null): void {
+  console.error(JSON.stringify({ event: 'ocr_call_failed', status }))
+}
+
+// Same "no raw message field to forward" restriction as logOcrFailure above, applied
+// to the Discord alert — a fixed generic message, never extractFailureDetails(err).message.
+function notifyDiscordOfOcrFailure(ctx: ExecutionContext, env: Env, status: string | null): void {
+  if (!env.DISCORD_WEBHOOK_URL) return
+  ctx.waitUntil(
+    shouldNotify(env.RATE_LIMIT_KV, 'gemini', 'ocr').then((notify) =>
+      notify
+        ? sendDiscordAlert(fetch, env.DISCORD_WEBHOOK_URL, {
+            provider: 'gemini',
+            model: DEFAULT_SHARED_MODEL,
+            status,
+            message: 'OCR request failed.',
+          })
+        : undefined,
     ),
   )
 }
@@ -211,6 +244,46 @@ async function handleModels(
   }
 }
 
+async function handleOcr(
+  request: Request,
+  env: Env,
+  origin: string | null,
+  ip: string,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  let body: unknown
+  try {
+    body = await request.json()
+  } catch {
+    return json({ error: 'Invalid JSON body.' }, 400, origin)
+  }
+
+  const validation = validateOcrRequest(body)
+  if (!validation.ok) {
+    return json({ error: validation.error }, 400, origin)
+  }
+
+  // OCR has its own bucket (separate from 'shared' and 'byok') — a materially heavier
+  // request than /answer, so it gets its own, lower daily limit (see rateLimit.ts).
+  const rateLimit = await checkRateLimit(env.RATE_LIMIT_KV, ip, 'ocr', OCR_DAILY_LIMIT)
+  if (!rateLimit.allowed) {
+    return json({ error: RATE_LIMIT_MESSAGE, resetAt: rateLimit.resetAt }, 429, origin)
+  }
+
+  try {
+    const text = await transcribeImage(fetch, env.GEMINI_API_KEY, DEFAULT_SHARED_MODEL, {
+      mimeType: validation.mimeType,
+      base64: validation.base64,
+    })
+    return json({ text }, 200, origin)
+  } catch (err) {
+    const { status } = extractFailureDetails(err)
+    logOcrFailure(status)
+    notifyDiscordOfOcrFailure(ctx, env, status)
+    return json({ error: OCR_UNAVAILABLE_MESSAGE }, 502, origin)
+  }
+}
+
 export default {
   async fetch(request, env, ctx): Promise<Response> {
     const origin = resolveCorsOrigin(request.headers.get('Origin'), env.PAGES_ORIGIN)
@@ -227,6 +300,9 @@ export default {
     }
     if (request.method === 'POST' && url.pathname === '/models') {
       return handleModels(request, env, origin, ip, ctx)
+    }
+    if (request.method === 'POST' && url.pathname === '/ocr') {
+      return handleOcr(request, env, origin, ip, ctx)
     }
     return json({ error: 'Not found.' }, 404, origin)
   },

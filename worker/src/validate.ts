@@ -306,6 +306,54 @@ export function validateAnswerRequest(body: unknown): ValidationResult {
   }
 }
 
+// Milestone 9 Phase A: the Notes tab's OCR request. Deliberately has NO keySource or
+// apiKey field at all — not just an unused one — so there is nothing for a dispatch
+// switch to ever branch BYOK on. This endpoint is structurally shared-tier-only: the
+// type itself enforces it, the same "type + validation + dispatch, not just a policy
+// note" rigor Milestone 10 Phase B used for excluding BYOK from the image attachment.
+export interface OcrRequestBody {
+  mimeType: string
+  base64: string
+}
+
+export type OcrValidationResult =
+  | { ok: true; mimeType: string; base64: string }
+  | { ok: false; error: string }
+
+// Phase A: images only, exact mimeType allowlist (not a generic image/* match) — same
+// "no real use case yet to support otherwise" reasoning as isValidImage above. PDF
+// (application/pdf) is Phase B, deliberately not included here yet.
+export const OCR_ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'] as const
+
+// Derived, not guessed: 15MB raw-file cap (see NotesDropZone.tsx / AGENTS.md's Phase A
+// session for the full reasoning — keeps every request under Gemini's 20MB inline-
+// recommended threshold, avoiding the File API's separate upload+poll+reference flow,
+// and well under Cloudflare Workers' 100MB request body limit on this project's plan).
+// Base64 inflates raw bytes by 4/3 (15,728,640 * 4/3 = 20,971,520); rounded up for
+// padding/JSON-escaping overhead. Flagged for live re-verification against a real
+// photo upload before Phase A is considered done.
+export const MAX_OCR_BASE64_LENGTH = 21_000_000
+
+function isValidOcrMimeType(value: unknown): value is (typeof OCR_ALLOWED_MIME_TYPES)[number] {
+  return typeof value === 'string' && (OCR_ALLOWED_MIME_TYPES as readonly string[]).includes(value)
+}
+
+export function validateOcrRequest(body: unknown): OcrValidationResult {
+  if (typeof body !== 'object' || body === null) {
+    return { ok: false, error: 'Request body must be a JSON object.' }
+  }
+  const { mimeType, base64 } = body as Record<string, unknown>
+
+  if (!isValidOcrMimeType(mimeType)) {
+    return { ok: false, error: `mimeType must be one of: ${OCR_ALLOWED_MIME_TYPES.join(', ')}.` }
+  }
+  if (typeof base64 !== 'string' || base64.length === 0 || base64.length > MAX_OCR_BASE64_LENGTH) {
+    return { ok: false, error: `base64 must be a non-empty string of ${MAX_OCR_BASE64_LENGTH} characters or fewer.` }
+  }
+
+  return { ok: true, mimeType, base64 }
+}
+
 export interface ModelsRequestBody {
   provider: SupportedProvider
   apiKey: string

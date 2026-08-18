@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { DropZone } from './components/DropZone'
+import { NotesDropZone } from './components/NotesDropZone'
 import { DocumentList } from './components/DocumentList'
 import { QueryPanel } from './components/QueryPanel'
 import { ByokPanel } from './components/ByokPanel'
@@ -7,12 +8,18 @@ import { getAllDocuments } from './lib/db'
 import type { KeyConfig } from './lib/answerRequest'
 import { useDocumentStore } from './store/documentStore'
 
+type Tab = 'documents' | 'notes'
+
 function App() {
   const restoreDocuments = useDocumentStore((s) => s.restoreDocuments)
   const restored = useRef(false)
   // Matches ByokPanel's default (unchecked) state — the shared key until the user
   // opts into BYOK and completes key entry.
   const [keyConfig, setKeyConfig] = useState<KeyConfig | null>({ keySource: 'shared' })
+  // Milestone 9: the tab only gates which upload/list UI is shown — QueryPanel below
+  // stays visible and searches the combined pool regardless of the active tab (the
+  // trust-sensitive step already happened at OCR-consent time, not at query time).
+  const [tab, setTab] = useState<Tab>('documents')
 
   // Restore the document list from IndexedDB on load — persisted docs are fully embedded,
   // so they come back as `ready`. We land on the list and select nothing (multi-document
@@ -32,6 +39,8 @@ function App() {
             error: null,
             embedProgress: null,
             chunkCount: doc.chunkCount,
+            // Older records predate this field — see db.ts's DocumentRecord.source.
+            source: doc.source ?? 'document',
           })),
         ),
       )
@@ -41,10 +50,37 @@ function App() {
   return (
     <main className="mx-auto max-w-2xl px-4 py-8 sm:px-8">
       <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-50">PocketRAG</h1>
-      <p className="mt-1 text-slate-500 dark:text-slate-400">Drop a PDF, then ask a question about it.</p>
+      <p className="mt-1 text-slate-500 dark:text-slate-400">
+        {tab === 'documents' ? 'Drop a PDF, then ask a question about it.' : 'Upload a photo of handwritten or scanned notes.'}
+      </p>
+      <div className="mt-6 inline-flex overflow-hidden rounded border border-slate-200 text-sm dark:border-slate-700">
+        {(['documents', 'notes'] as const).map((option) => (
+          <button
+            key={option}
+            type="button"
+            onClick={() => setTab(option)}
+            className={`min-h-11 cursor-pointer px-4 transition-colors duration-150 ${
+              tab === option
+                ? 'bg-blue-600 text-white'
+                : 'bg-white text-slate-600 hover:bg-slate-50 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-800'
+            }`}
+          >
+            {option === 'documents' ? 'Documents' : 'Notes'}
+          </button>
+        ))}
+      </div>
       <div className="mt-6 space-y-6">
-        <DropZone />
-        <DocumentList />
+        {tab === 'documents' ? (
+          <>
+            <DropZone />
+            <DocumentList source="document" />
+          </>
+        ) : (
+          <>
+            <NotesDropZone />
+            <DocumentList source="note" />
+          </>
+        )}
         <ByokPanel onChange={setKeyConfig} />
         <QueryPanel keyConfig={keyConfig} />
       </div>

@@ -49,7 +49,10 @@ export function DropZone() {
                   embedding: chunk.embedding,
                   hasImage: chunk.hasImage,
                 }))
-                saveDocument({ id, fileName: file.name, uploadedAt: Date.now(), chunkCount: msg.chunks.length }, chunkRecords)
+                saveDocument(
+                  { id, fileName: file.name, uploadedAt: Date.now(), chunkCount: msg.chunks.length, source: 'document' },
+                  chunkRecords,
+                )
                   .then(() => {
                     updateDocument(id, { status: 'ready', chunkCount: msg.chunks.length, embedProgress: null })
                     // Auto-select the first ready document so a single upload is immediately
@@ -91,7 +94,7 @@ export function DropZone() {
       // one document can embed at once (and concurrency wouldn't be faster anyway).
       const jobs = pdfs.map((file) => {
         const id = crypto.randomUUID()
-        addDocument(id, file.name)
+        addDocument(id, file.name, 'document')
         return { file, id }
       })
       for (const { file, id } of jobs) {

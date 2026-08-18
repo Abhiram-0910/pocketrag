@@ -5,6 +5,11 @@ export interface DocumentRecord {
   fileName: string
   uploadedAt: number
   chunkCount: number
+  // Milestone 9: 'document' (local-only PDF pipeline) or 'note' (OCR'd via the Notes
+  // tab's explicit per-file consent flow). IndexedDB is schemaless, so a record saved
+  // before this field existed simply won't have it — App.tsx's restore path defaults
+  // a missing value to 'document', never assume it's present.
+  source: 'document' | 'note'
 }
 
 export interface ChunkRecord {

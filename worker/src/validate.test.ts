@@ -8,9 +8,11 @@ import {
   MAX_HISTORY_TURNS,
   MAX_IMAGE_BASE64_LENGTH,
   MAX_MODEL_LENGTH,
+  MAX_OCR_BASE64_LENGTH,
   MAX_QUESTION_LENGTH,
   validateAnswerRequest,
   validateModelsRequest,
+  validateOcrRequest,
 } from './validate'
 
 const validChunk = { text: 'The mitochondrion is the powerhouse of the cell.', page: 1, score: 0.9, documentId: 'doc-1' }
@@ -530,5 +532,61 @@ describe('validateModelsRequest', () => {
     const result = validateModelsRequest({ provider: 'gemini', apiKey: secretKey.repeat(3) })
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.error).not.toContain(secretKey)
+  })
+})
+
+describe('validateOcrRequest', () => {
+  it('accepts a well-formed request', () => {
+    const result = validateOcrRequest({ mimeType: 'image/jpeg', base64: 'aGVsbG8=' })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.mimeType).toBe('image/jpeg')
+      expect(result.base64).toBe('aGVsbG8=')
+    }
+  })
+
+  it('accepts every Phase A allowed mimeType', () => {
+    for (const mimeType of ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']) {
+      expect(validateOcrRequest({ mimeType, base64: 'aGVsbG8=' }).ok).toBe(true)
+    }
+  })
+
+  it('rejects an unsupported mimeType, including application/pdf (Phase B, not yet supported)', () => {
+    expect(validateOcrRequest({ mimeType: 'application/pdf', base64: 'aGVsbG8=' }).ok).toBe(false)
+    expect(validateOcrRequest({ mimeType: 'text/plain', base64: 'aGVsbG8=' }).ok).toBe(false)
+    expect(validateOcrRequest({ base64: 'aGVsbG8=' }).ok).toBe(false)
+  })
+
+  it('rejects a missing, empty, or oversized base64', () => {
+    expect(validateOcrRequest({ mimeType: 'image/jpeg' }).ok).toBe(false)
+    expect(validateOcrRequest({ mimeType: 'image/jpeg', base64: '' }).ok).toBe(false)
+    expect(validateOcrRequest({ mimeType: 'image/jpeg', base64: 'x'.repeat(MAX_OCR_BASE64_LENGTH + 1) }).ok).toBe(
+      false,
+    )
+  })
+
+  it('accepts a base64 payload right at the cap', () => {
+    const result = validateOcrRequest({ mimeType: 'image/jpeg', base64: 'x'.repeat(MAX_OCR_BASE64_LENGTH) })
+    expect(result.ok).toBe(true)
+  })
+
+  it('rejects a non-object body', () => {
+    expect(validateOcrRequest(null).ok).toBe(false)
+    expect(validateOcrRequest('not an object').ok).toBe(false)
+  })
+
+  it('ignores an unexpected keySource/apiKey field rather than routing on it — the type has no such field', () => {
+    // OcrRequestBody has no keySource/apiKey field at all; a client (or attacker)
+    // sending one has no effect since validateOcrRequest never reads it.
+    const result = validateOcrRequest({
+      mimeType: 'image/jpeg',
+      base64: 'aGVsbG8=',
+      keySource: 'own',
+      apiKey: 'sk-should-be-ignored',
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(Object.keys(result)).toEqual(['ok', 'mimeType', 'base64'])
+    }
   })
 })

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { useDocumentStore, type DocEntry } from './documentStore'
 
 function entry(id: string): DocEntry {
-  return { id, fileName: `${id}.pdf`, status: 'ready', error: null, embedProgress: null, chunkCount: 1 }
+  return { id, fileName: `${id}.pdf`, status: 'ready', error: null, embedProgress: null, chunkCount: 1, source: 'document' }
 }
 
 describe('restoreDocuments', () => {
@@ -22,7 +22,7 @@ describe('restoreDocuments', () => {
   })
 
   it('keeps a live in-memory document over a restored one with the same id', () => {
-    useDocumentStore.getState().addDocument('a', 'a.pdf') // live, status 'queued'
+    useDocumentStore.getState().addDocument('a', 'a.pdf', 'document') // live, status 'queued'
     useDocumentStore.getState().restoreDocuments([entry('a')]) // restored, status 'ready'
     // The live document must not be clobbered by the restore.
     expect(useDocumentStore.getState().documents.find((d) => d.id === 'a')?.status).toBe('queued')

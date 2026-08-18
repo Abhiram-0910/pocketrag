@@ -28,7 +28,7 @@ function makeChunk(documentId: string, index: number, overrides: Partial<ChunkRe
 describe('db', () => {
   it('saves and retrieves chunks for a document', async () => {
     const documentId = 'doc-a'
-    const document: DocumentRecord = { id: documentId, fileName: 'a.pdf', uploadedAt: Date.now(), chunkCount: 2 }
+    const document: DocumentRecord = { id: documentId, fileName: 'a.pdf', uploadedAt: Date.now(), chunkCount: 2, source: 'document' }
     const chunks = [makeChunk(documentId, 0), makeChunk(documentId, 1)]
 
     await saveDocument(document, chunks)
@@ -41,8 +41,8 @@ describe('db', () => {
   it('scopes retrieval to the requested document only', async () => {
     const docA = 'doc-b'
     const docB = 'doc-c'
-    await saveDocument({ id: docA, fileName: 'b.pdf', uploadedAt: Date.now(), chunkCount: 1 }, [makeChunk(docA, 0)])
-    await saveDocument({ id: docB, fileName: 'c.pdf', uploadedAt: Date.now(), chunkCount: 1 }, [makeChunk(docB, 0)])
+    await saveDocument({ id: docA, fileName: 'b.pdf', uploadedAt: Date.now(), chunkCount: 1, source: 'document' }, [makeChunk(docA, 0)])
+    await saveDocument({ id: docB, fileName: 'c.pdf', uploadedAt: Date.now(), chunkCount: 1, source: 'document' }, [makeChunk(docB, 0)])
 
     const chunksA = await getChunksForDocument(docA)
     const chunksB = await getChunksForDocument(docB)
@@ -56,7 +56,7 @@ describe('db', () => {
   it('preserves embedding vectors and page numbers exactly', async () => {
     const documentId = 'doc-d'
     const chunk = makeChunk(documentId, 0, { page: 3, embedding: [0.987654321, -0.123456789, 0] })
-    await saveDocument({ id: documentId, fileName: 'd.pdf', uploadedAt: Date.now(), chunkCount: 1 }, [chunk])
+    await saveDocument({ id: documentId, fileName: 'd.pdf', uploadedAt: Date.now(), chunkCount: 1, source: 'document' }, [chunk])
 
     const [retrieved] = await getChunksForDocument(documentId)
     expect(retrieved.page).toBe(3)
@@ -71,11 +71,11 @@ describe('db', () => {
   it('pools chunks across every document for the "all documents" scope', async () => {
     const bio = 'pool-bio'
     const cook = 'pool-cook'
-    await saveDocument({ id: bio, fileName: 'biology.pdf', uploadedAt: Date.now(), chunkCount: 2 }, [
+    await saveDocument({ id: bio, fileName: 'biology.pdf', uploadedAt: Date.now(), chunkCount: 2, source: 'document' }, [
       makeChunk(bio, 0),
       makeChunk(bio, 1),
     ])
-    await saveDocument({ id: cook, fileName: 'cooking.pdf', uploadedAt: Date.now(), chunkCount: 1 }, [
+    await saveDocument({ id: cook, fileName: 'cooking.pdf', uploadedAt: Date.now(), chunkCount: 1, source: 'document' }, [
       makeChunk(cook, 0),
     ])
 
@@ -92,10 +92,10 @@ describe('db', () => {
     const bio = 'leak-bio'
     const cook = 'leak-cook'
     // cook's chunk is the globally closest to the query; bio's best match is farther.
-    await saveDocument({ id: bio, fileName: 'biology.pdf', uploadedAt: Date.now(), chunkCount: 1 }, [
+    await saveDocument({ id: bio, fileName: 'biology.pdf', uploadedAt: Date.now(), chunkCount: 1, source: 'document' }, [
       makeChunk(bio, 0, { embedding: [0.6, 0.8, 0] }),
     ])
-    await saveDocument({ id: cook, fileName: 'cooking.pdf', uploadedAt: Date.now(), chunkCount: 1 }, [
+    await saveDocument({ id: cook, fileName: 'cooking.pdf', uploadedAt: Date.now(), chunkCount: 1, source: 'document' }, [
       makeChunk(cook, 0, { embedding: [1, 0, 0] }),
     ])
 
@@ -111,10 +111,10 @@ describe('db', () => {
   it('deleteDocument removes the document record and only its own chunks', async () => {
     const keep = 'delete-keep'
     const gone = 'delete-gone'
-    await saveDocument({ id: keep, fileName: 'keep.pdf', uploadedAt: Date.now(), chunkCount: 1 }, [
+    await saveDocument({ id: keep, fileName: 'keep.pdf', uploadedAt: Date.now(), chunkCount: 1, source: 'document' }, [
       makeChunk(keep, 0),
     ])
-    await saveDocument({ id: gone, fileName: 'gone.pdf', uploadedAt: Date.now(), chunkCount: 2 }, [
+    await saveDocument({ id: gone, fileName: 'gone.pdf', uploadedAt: Date.now(), chunkCount: 2, source: 'document' }, [
       makeChunk(gone, 0),
       makeChunk(gone, 1),
     ])

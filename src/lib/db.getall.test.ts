@@ -29,8 +29,8 @@ describe('getAllDocuments / getAllChunks (isolated, exact counts)', () => {
   })
 
   it('returns exactly the saved documents and all their chunks, intact', async () => {
-    const bio: DocumentRecord = { id: 'bio', fileName: 'biology.pdf', uploadedAt: 1, chunkCount: 2 }
-    const cook: DocumentRecord = { id: 'cook', fileName: 'cooking.pdf', uploadedAt: 2, chunkCount: 1 }
+    const bio: DocumentRecord = { id: 'bio', fileName: 'biology.pdf', uploadedAt: 1, chunkCount: 2, source: 'document' }
+    const cook: DocumentRecord = { id: 'cook', fileName: 'cooking.pdf', uploadedAt: 2, chunkCount: 1, source: 'document' }
     await saveDocument(bio, [
       makeChunk('bio', 0, { page: 1, embedding: [0.9, 0.1, 0] }),
       makeChunk('bio', 1, { page: 2, embedding: [0.2, 0.8, 0] }),
