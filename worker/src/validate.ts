@@ -20,6 +20,17 @@ export interface ImageAttachment {
   base64: string
 }
 
+// Milestone 12 Phase A: a single Brave web-search result, already normalized by
+// providers/brave.ts (its raw "description" field becomes `snippet` here). The client
+// gets these from a prior POST /websearch call and echoes them back on /answer — same
+// "client fetches, then hands back what it got" shape as an image attachment, not a
+// second live search triggered by the answer call itself.
+export interface WebResult {
+  title: string
+  url: string
+  snippet: string
+}
+
 // A prior turn's {question, answer} pair, interpolated into the prompt as
 // conversation context only (Milestone 11 Phase C2) — never used for retrieval,
 // which is a separate client-side-only blended query string (see conversation.ts)
@@ -58,6 +69,11 @@ export interface AnswerRequestBody {
   // silently dropped. See the plan's provider-support table for why BYOK is excluded
   // in this phase even for a BYOK request that happens to select Gemini as its provider.
   image?: ImageAttachment
+  // Milestone 12 Phase A: web-search results the client already fetched via
+  // POST /websearch. Unlike `image`, there's no per-provider capability gap here (every
+  // provider on SUPPORTED_PROVIDERS accepts plain text) — so, unlike image, this is
+  // available on both the shared and BYOK branches below.
+  webResults?: WebResult[]
 }
 
 export type ValidationResult =
@@ -73,6 +89,9 @@ export type ValidationResult =
       // never read an image off validation even by mistake; the type itself enforces
       // the "shared-Gemini only" restriction, not just a runtime check.
       image: ImageAttachment | undefined
+      // Milestone 12 Phase A: available on both branches — see AnswerRequestBody's
+      // webResults field for why this doesn't need image's shared-only restriction.
+      webResults: WebResult[]
     }
   | {
       ok: true
@@ -84,6 +103,7 @@ export type ValidationResult =
       model: string
       docLabels: DocLabel[]
       history: HistoryTurn[]
+      webResults: WebResult[]
     }
   | { ok: false; error: string }
 
@@ -122,6 +142,20 @@ export const MAX_HISTORY_ANSWER_LENGTH = 1000
 // Changing pageRender.ts's resolution/quality without re-measuring invalidates this.
 export const MAX_IMAGE_BASE64_LENGTH = 400_000
 const IMAGE_MIME_TYPE = 'image/jpeg'
+// Milestone 12 Phase A — mirrors MAX_CHUNKS's reasoning (the honest client only ever
+// sends a handful, but the server caps independently regardless). Matches
+// providers/brave.ts's own DEFAULT_RESULT_COUNT so a well-behaved client's response
+// never actually gets truncated here in practice.
+export const MAX_WEB_RESULTS = 5
+export const MAX_WEB_RESULT_TITLE_LENGTH = 300
+// A Brave "description" snippet is comparable in size to a chunk's text, not a full
+// page — capped in the same order of magnitude as MAX_CHUNK_TEXT_LENGTH.
+export const MAX_WEB_RESULT_SNIPPET_LENGTH = 2000
+// Generous ceiling for a real-world URL, not a guess at "typical" length — long enough
+// that a legitimate URL is never truncated, short enough to reject junk payload size.
+export const MAX_WEB_RESULT_URL_LENGTH = 2000
+// Reuses MAX_QUESTION_LENGTH — a /websearch query is the same shape as a live question.
+export const MAX_WEBSEARCH_QUERY_LENGTH = MAX_QUESTION_LENGTH
 
 function isValidChunk(value: unknown): value is InputChunk {
   if (typeof value !== 'object' || value === null) return false
@@ -170,6 +204,23 @@ function isValidImage(value: unknown): value is ImageAttachment {
   )
 }
 
+// Milestone 12 Phase A: title/snippet are truncated (not rejected) below, same
+// reasoning as chunk text — this is content the client already got back from our own
+// /websearch endpoint, not fresh attacker-controlled payload. url has no natural
+// truncation (a cut URL is just a different wrong URL, same reasoning as apiKey), so
+// it's rejected outright if oversized instead.
+function isValidWebResult(value: unknown): value is WebResult {
+  if (typeof value !== 'object' || value === null) return false
+  const result = value as Record<string, unknown>
+  return (
+    typeof result.title === 'string' &&
+    typeof result.url === 'string' &&
+    result.url.length > 0 &&
+    result.url.length <= MAX_WEB_RESULT_URL_LENGTH &&
+    typeof result.snippet === 'string'
+  )
+}
+
 // A legitimate client only ever echoes back a docLabels map exactly as this same
 // Worker last returned it — well-formed by construction. A duplicate documentId or
 // label number means the map was corrupted (bug, tampering, or a stale/mixed-up
@@ -184,7 +235,7 @@ export function validateAnswerRequest(body: unknown): ValidationResult {
   if (typeof body !== 'object' || body === null) {
     return { ok: false, error: 'Request body must be a JSON object.' }
   }
-  const { question, chunks, keySource, apiKey, provider, model, docLabels, history, image } =
+  const { question, chunks, keySource, apiKey, provider, model, docLabels, history, image, webResults } =
     body as Record<string, unknown>
 
   if (typeof question !== 'string' || question.trim().length === 0) {
@@ -193,8 +244,11 @@ export function validateAnswerRequest(body: unknown): ValidationResult {
   if (question.length > MAX_QUESTION_LENGTH) {
     return { ok: false, error: `question must be ${MAX_QUESTION_LENGTH} characters or fewer.` }
   }
-  if (!Array.isArray(chunks) || chunks.length === 0) {
-    return { ok: false, error: 'chunks must be a non-empty array.' }
+  // Milestone 12 Phase A: chunks is no longer required to be non-empty on its own — a
+  // web-only query legitimately has zero local chunks. The combined "at least one of
+  // chunks or webResults" rule is enforced below, once both are validated.
+  if (!Array.isArray(chunks)) {
+    return { ok: false, error: 'chunks must be an array.' }
   }
 
   const capped = chunks.slice(0, MAX_CHUNKS)
@@ -207,6 +261,28 @@ export function validateAnswerRequest(body: unknown): ValidationResult {
       }
     }
     validatedChunks.push({ ...chunk, text: chunk.text.slice(0, MAX_CHUNK_TEXT_LENGTH) })
+  }
+
+  const validatedWebResults: WebResult[] = []
+  if (webResults !== undefined) {
+    if (!Array.isArray(webResults)) {
+      return { ok: false, error: 'webResults must be an array.' }
+    }
+    const cappedWebResults = webResults.slice(0, MAX_WEB_RESULTS)
+    for (const result of cappedWebResults) {
+      if (!isValidWebResult(result)) {
+        return { ok: false, error: 'Each webResults entry must have title (string), url (string), and snippet (string).' }
+      }
+      validatedWebResults.push({
+        title: result.title.slice(0, MAX_WEB_RESULT_TITLE_LENGTH),
+        url: result.url,
+        snippet: result.snippet.slice(0, MAX_WEB_RESULT_SNIPPET_LENGTH),
+      })
+    }
+  }
+
+  if (validatedChunks.length === 0 && validatedWebResults.length === 0) {
+    return { ok: false, error: 'At least one of chunks or webResults must be provided.' }
   }
 
   const validatedDocLabels: DocLabel[] = []
@@ -280,6 +356,7 @@ export function validateAnswerRequest(body: unknown): ValidationResult {
       docLabels: validatedDocLabels,
       history: validatedHistory,
       image: validatedImage,
+      webResults: validatedWebResults,
     }
   }
 
@@ -303,6 +380,7 @@ export function validateAnswerRequest(body: unknown): ValidationResult {
     model,
     docLabels: validatedDocLabels,
     history: validatedHistory,
+    webResults: validatedWebResults,
   }
 }
 
@@ -377,4 +455,32 @@ export function validateModelsRequest(body: unknown): ModelsValidationResult {
   }
 
   return { ok: true, provider: provider as SupportedProvider, apiKey }
+}
+
+// Milestone 12 Phase A: the Notes/Documents query text, sent to POST /websearch before
+// any answer is composed — this is the new trust surface the plan called out
+// explicitly (the live question leaving the browser to a third party, not just a
+// retrieved snippet). No keySource/apiKey field, same "structurally shared-tier-only,
+// not just policy" rigor as OcrRequestBody — BRAVE_API_KEY is a Worker secret, never
+// BYOK (see providers/brave.ts).
+export interface WebSearchRequestBody {
+  query: string
+}
+
+export type WebSearchValidationResult = { ok: true; query: string } | { ok: false; error: string }
+
+export function validateWebSearchRequest(body: unknown): WebSearchValidationResult {
+  if (typeof body !== 'object' || body === null) {
+    return { ok: false, error: 'Request body must be a JSON object.' }
+  }
+  const { query } = body as Record<string, unknown>
+
+  if (typeof query !== 'string' || query.trim().length === 0) {
+    return { ok: false, error: 'query must be a non-empty string.' }
+  }
+  if (query.length > MAX_WEBSEARCH_QUERY_LENGTH) {
+    return { ok: false, error: `query must be ${MAX_WEBSEARCH_QUERY_LENGTH} characters or fewer.` }
+  }
+
+  return { ok: true, query: query.trim() }
 }

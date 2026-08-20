@@ -35,6 +35,7 @@ function makeEnv(overrides: Partial<TestEnv> = {}): Env {
   return {
     RATE_LIMIT_KV: fakeKV() as unknown as Env['RATE_LIMIT_KV'],
     GEMINI_API_KEY: 'test-key',
+    BRAVE_API_KEY: 'test-brave-key',
     PAGES_ORIGIN: 'https://pocketrag.pages.dev',
     ...overrides,
   } as Env
@@ -47,6 +48,18 @@ function mockGeminiSuccess(text: string) {
       ok: true,
       status: 200,
       json: async () => ({ candidates: [{ content: { parts: [{ text }] } }] }),
+      text: async () => '',
+    }),
+  )
+}
+
+function mockBraveSuccess(results: { title: string; url: string; description: string }[]) {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ web: { results } }),
       text: async () => '',
     }),
   )
@@ -93,7 +106,12 @@ function ocrRequest(body: unknown, init: RequestInit = {}): IncomingRequest {
   return request('/ocr', body, init)
 }
 
+function webSearchRequest(body: unknown, init: RequestInit = {}): IncomingRequest {
+  return request('/websearch', body, init)
+}
+
 const validOcrBody = { mimeType: 'image/jpeg', base64: 'aGVsbG8=' }
+const validWebSearchBody = { query: 'what is a mitochondrion' }
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -877,5 +895,178 @@ describe('worker fetch handler — /ocr (Milestone 9 Phase A)', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1) // only the Gemini call, no Discord call attempted
 
     consoleErrorSpy.mockRestore()
+  })
+})
+
+describe('worker fetch handler — /websearch (Milestone 12 Phase A)', () => {
+  it('returns web results and CORS headers for a valid request', async () => {
+    mockBraveSuccess([{ title: 'Mitochondrion', url: 'https://example.com/mito', description: 'The powerhouse of the cell.' }])
+    const res = await worker.fetch(webSearchRequest(validWebSearchBody), makeEnv(), makeCtx())
+
+    expect(res.status).toBe(200)
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('http://localhost:5173')
+    const data = (await res.json()) as { results: { title: string; url: string; snippet: string }[] }
+    expect(data.results).toEqual([{ title: 'Mitochondrion', url: 'https://example.com/mito', snippet: 'The powerhouse of the cell.' }])
+  })
+
+  it('rejects an empty query without calling Brave', async () => {
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+    const res = await worker.fetch(webSearchRequest({ query: '' }), makeEnv(), makeCtx())
+    expect(res.status).toBe(400)
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('has its own rate-limit bucket, independent of the shared /answer and /ocr buckets', async () => {
+    mockBraveSuccess([{ title: 't', url: 'https://example.com', description: 'd' }])
+    const env = makeEnv()
+    // Exhaust the websearch bucket (limit 10).
+    for (let i = 0; i < 10; i++) {
+      await worker.fetch(webSearchRequest(validWebSearchBody), env, makeCtx())
+    }
+    const websearchBlocked = await worker.fetch(webSearchRequest(validWebSearchBody), env, makeCtx())
+    expect(websearchBlocked.status).toBe(429)
+
+    // The shared /answer bucket (limit 50) must be untouched by the 10 websearch calls above.
+    mockGeminiSuccess('answer (page 1).')
+    const answerStillAllowed = await worker.fetch(answerRequest(validBody), env, makeCtx())
+    expect(answerStillAllowed.status).toBe(200)
+  })
+
+  // Milestone 12 Phase A: /websearch sends the user's live question to a third party
+  // before any answer exists — unlike /answer's logProviderError, which logs
+  // err.message verbatim, this proves the dedicated /websearch failure path never
+  // forwards a raw provider error body (which could in principle echo the query back
+  // on a 400) into either Workers Logs or the Discord alert. Only status/generic text.
+  it('never logs or Discords the raw query/error body from a failed web search call — only status and a generic message', async () => {
+    const sensitiveQuery = 'symptoms of a rare genetic condition I might have'
+    const discordWebhookUrl = 'https://discord.com/api/webhooks/1/token'
+    const fetchSpy = vi.fn().mockImplementation(async (url: string) => {
+      if (url === discordWebhookUrl) return { ok: true, status: 204, text: async () => '' }
+      // A realistic-shaped failure whose body happens to echo the query back.
+      return { ok: false, status: 400, text: async () => `Bad request, received q: "${sensitiveQuery}"` }
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const res = await worker.fetch(
+      webSearchRequest({ query: sensitiveQuery }),
+      makeEnv({ DISCORD_WEBHOOK_URL: discordWebhookUrl }),
+      makeCtx(),
+    )
+    expect(res.status).toBe(502)
+    const data = (await res.json()) as { error: string }
+    expect(data.error).not.toContain(sensitiveQuery)
+    await flushWaitUntil()
+
+    expect(consoleErrorSpy).toHaveBeenCalledTimes(1)
+    const logged = consoleErrorSpy.mock.calls[0][0] as string
+    expect(logged).not.toContain(sensitiveQuery)
+    const parsedLog = JSON.parse(logged) as { event: string; status: string }
+    expect(parsedLog).toEqual({ event: 'websearch_call_failed', status: '400' })
+
+    const discordCall = fetchSpy.mock.calls.find(([url]) => url === discordWebhookUrl)
+    expect(discordCall).toBeDefined()
+    const [, init] = discordCall!
+    const discordBody = (init as RequestInit).body as string
+    expect(discordBody).not.toContain(sensitiveQuery)
+    const parsedDiscord = JSON.parse(discordBody) as { embeds: Array<{ fields: Array<{ name: string; value: string }> }> }
+    const fields = Object.fromEntries(parsedDiscord.embeds[0].fields.map((f) => [f.name, f.value]))
+    expect(fields.Status).toBe('400')
+    expect(fields.Message).toBe('Web search request failed.')
+
+    consoleErrorSpy.mockRestore()
+  })
+
+  it('does not attempt a Discord alert when DISCORD_WEBHOOK_URL is not set (default env)', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({ ok: false, status: 500, text: async () => 'server error' })
+    vi.stubGlobal('fetch', fetchSpy)
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await worker.fetch(webSearchRequest(validWebSearchBody), makeEnv(), makeCtx())
+    await flushWaitUntil()
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1) // only the Brave call, no Discord call attempted
+
+    consoleErrorSpy.mockRestore()
+  })
+})
+
+describe('worker fetch handler — /answer, webResults (Milestone 12 Phase A)', () => {
+  it('accepts a web-only request with no chunks, as long as webResults is non-empty', async () => {
+    mockGeminiSuccess('The mitochondrion is the powerhouse of the cell (Web 1).')
+    const res = await worker.fetch(
+      answerRequest({
+        question: 'What is the mitochondrion?',
+        chunks: [],
+        webResults: [{ title: 'Mitochondrion', url: 'https://example.com/mito', snippet: 'The powerhouse of the cell.' }],
+      }),
+      makeEnv(),
+      makeCtx(),
+    )
+    expect(res.status).toBe(200)
+    const data = (await res.json()) as { answer: string; groundingWarning: boolean }
+    expect(data.groundingWarning).toBe(false)
+  })
+
+  it('rejects a request with neither chunks nor webResults', async () => {
+    const res = await worker.fetch(answerRequest({ question: 'q', chunks: [] }), makeEnv(), makeCtx())
+    expect(res.status).toBe(400)
+  })
+
+  it('flags an answer that cites a Web N label that was not provided', async () => {
+    mockGeminiSuccess('See (Web 2) for details.')
+    const res = await worker.fetch(
+      answerRequest({
+        question: 'q',
+        chunks: [],
+        webResults: [{ title: 't', url: 'https://example.com', snippet: 's' }],
+      }),
+      makeEnv(),
+      makeCtx(),
+    )
+    const data = (await res.json()) as { groundingWarning: boolean }
+    expect(data.groundingWarning).toBe(true)
+  })
+
+  it('caps webResults to MAX_WEB_RESULTS server-side even if the client sends more', async () => {
+    mockGeminiSuccess('answer (Web 1).')
+    const manyResults = Array.from({ length: 20 }, (_, i) => ({
+      title: `Result ${i}`,
+      url: `https://example.com/${i}`,
+      snippet: 's',
+    }))
+    const res = await worker.fetch(
+      answerRequest({ question: 'q', chunks: [], webResults: manyResults }),
+      makeEnv(),
+      makeCtx(),
+    )
+    expect(res.status).toBe(200)
+    // Indirect proof of server-side capping: a citation to Web 6 (beyond the 5-result
+    // cap) is flagged as ungrounded, proving only the first 5 were ever provided.
+    mockGeminiSuccess('answer (Web 6).')
+    const overCiteRes = await worker.fetch(
+      answerRequest({ question: 'q', chunks: [], webResults: manyResults }),
+      makeEnv(),
+      makeCtx(),
+    )
+    const data = (await overCiteRes.json()) as { groundingWarning: boolean }
+    expect(data.groundingWarning).toBe(true)
+  })
+
+  it('accepts a well-formed BYOK request carrying webResults (no shared-tier restriction, unlike image)', async () => {
+    // byokBody's provider is 'gemini', which routes through callGemini — Gemini's
+    // response shape, not OpenAI's.
+    mockGeminiSuccess('answer (Web 1).')
+    const res = await worker.fetch(
+      answerRequest({
+        ...byokBody,
+        chunks: [],
+        webResults: [{ title: 't', url: 'https://example.com', snippet: 's' }],
+      }),
+      makeEnv(),
+      makeCtx(),
+    )
+    expect(res.status).toBe(200)
   })
 })

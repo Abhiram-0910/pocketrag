@@ -54,7 +54,7 @@ export async function sendDiscordAlert(
   }
 }
 
-export type DiscordEndpoint = 'answer' | 'models' | 'ocr'
+export type DiscordEndpoint = 'answer' | 'models' | 'ocr' | 'websearch'
 
 // ponytail: get-then-put isn't atomic — same accepted soft-cap tradeoff as
 // rateLimit.ts's checkRateLimit. A burst of near-simultaneous failures for the same

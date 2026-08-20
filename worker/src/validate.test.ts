@@ -10,9 +10,15 @@ import {
   MAX_MODEL_LENGTH,
   MAX_OCR_BASE64_LENGTH,
   MAX_QUESTION_LENGTH,
+  MAX_WEBSEARCH_QUERY_LENGTH,
+  MAX_WEB_RESULTS,
+  MAX_WEB_RESULT_SNIPPET_LENGTH,
+  MAX_WEB_RESULT_TITLE_LENGTH,
+  MAX_WEB_RESULT_URL_LENGTH,
   validateAnswerRequest,
   validateModelsRequest,
   validateOcrRequest,
+  validateWebSearchRequest,
 } from './validate'
 
 const validChunk = { text: 'The mitochondrion is the powerhouse of the cell.', page: 1, score: 0.9, documentId: 'doc-1' }
@@ -474,6 +480,116 @@ describe('validateAnswerRequest', () => {
       })
       expect(result.ok).toBe(true)
     })
+  })
+
+  describe('webResults (Milestone 12 Phase A)', () => {
+    const validWebResult = { title: 'Mitochondrion', url: 'https://example.com/mito', snippet: 'The powerhouse of the cell.' }
+
+    it('accepts a request with webResults and non-empty chunks', () => {
+      const result = validateAnswerRequest({ question: 'q', chunks: [validChunk], webResults: [validWebResult] })
+      expect(result.ok).toBe(true)
+      if (result.ok) expect(result.webResults).toEqual([validWebResult])
+    })
+
+    it('accepts a web-only request: empty chunks, non-empty webResults', () => {
+      const result = validateAnswerRequest({ question: 'q', chunks: [], webResults: [validWebResult] })
+      expect(result.ok).toBe(true)
+    })
+
+    it('rejects a request with empty chunks and no webResults at all', () => {
+      expect(validateAnswerRequest({ question: 'q', chunks: [] }).ok).toBe(false)
+    })
+
+    it('rejects a request with empty chunks and an empty webResults array', () => {
+      expect(validateAnswerRequest({ question: 'q', chunks: [], webResults: [] }).ok).toBe(false)
+    })
+
+    it('defaults webResults to an empty array when omitted', () => {
+      const result = validateAnswerRequest({ question: 'q', chunks: [validChunk] })
+      expect(result.ok).toBe(true)
+      if (result.ok) expect(result.webResults).toEqual([])
+    })
+
+    it('rejects a non-array webResults', () => {
+      expect(validateAnswerRequest({ question: 'q', chunks: [validChunk], webResults: 'not an array' }).ok).toBe(false)
+    })
+
+    it('rejects a malformed webResults entry', () => {
+      expect(
+        validateAnswerRequest({ question: 'q', chunks: [validChunk], webResults: [{ title: 'no url or snippet' }] }).ok,
+      ).toBe(false)
+    })
+
+    it('rejects a webResults entry whose url exceeds MAX_WEB_RESULT_URL_LENGTH', () => {
+      expect(
+        validateAnswerRequest({
+          question: 'q',
+          chunks: [validChunk],
+          webResults: [{ ...validWebResult, url: `https://example.com/${'a'.repeat(MAX_WEB_RESULT_URL_LENGTH)}` }],
+        }).ok,
+      ).toBe(false)
+    })
+
+    it('caps webResults count server-side even if the client sends more', () => {
+      const many = Array.from({ length: 20 }, (_, i) => ({ ...validWebResult, url: `https://example.com/${i}` }))
+      const result = validateAnswerRequest({ question: 'q', chunks: [validChunk], webResults: many })
+      expect(result.ok).toBe(true)
+      if (result.ok) expect(result.webResults).toHaveLength(MAX_WEB_RESULTS)
+    })
+
+    it('caps webResults title/snippet length server-side even if the client sends more', () => {
+      const result = validateAnswerRequest({
+        question: 'q',
+        chunks: [validChunk],
+        webResults: [{ ...validWebResult, title: 'x'.repeat(MAX_WEB_RESULT_TITLE_LENGTH + 50), snippet: 'y'.repeat(MAX_WEB_RESULT_SNIPPET_LENGTH + 50) }],
+      })
+      expect(result.ok).toBe(true)
+      if (result.ok) {
+        expect(result.webResults[0].title).toHaveLength(MAX_WEB_RESULT_TITLE_LENGTH)
+        expect(result.webResults[0].snippet).toHaveLength(MAX_WEB_RESULT_SNIPPET_LENGTH)
+      }
+    })
+
+    it('accepts webResults on a BYOK request too — no shared-tier restriction, unlike image', () => {
+      const result = validateAnswerRequest({
+        question: 'q',
+        chunks: [],
+        webResults: [validWebResult],
+        keySource: 'own',
+        apiKey: 'my-real-key',
+        provider: 'gemini',
+        model: 'gemini-3.5-flash-lite',
+      })
+      expect(result.ok).toBe(true)
+      if (result.ok) expect(result.webResults).toEqual([validWebResult])
+    })
+  })
+})
+
+describe('validateWebSearchRequest', () => {
+  it('accepts a well-formed request and trims the query', () => {
+    const result = validateWebSearchRequest({ query: '  what is a mitochondrion  ' })
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.query).toBe('what is a mitochondrion')
+  })
+
+  it('rejects a non-object body', () => {
+    expect(validateWebSearchRequest(null).ok).toBe(false)
+    expect(validateWebSearchRequest('a string').ok).toBe(false)
+  })
+
+  it('rejects an empty or missing query', () => {
+    expect(validateWebSearchRequest({ query: '' }).ok).toBe(false)
+    expect(validateWebSearchRequest({ query: '   ' }).ok).toBe(false)
+    expect(validateWebSearchRequest({}).ok).toBe(false)
+  })
+
+  it('rejects a query over the max length', () => {
+    expect(validateWebSearchRequest({ query: 'x'.repeat(MAX_WEBSEARCH_QUERY_LENGTH + 1) }).ok).toBe(false)
+  })
+
+  it('accepts a query exactly at the max length', () => {
+    expect(validateWebSearchRequest({ query: 'x'.repeat(MAX_WEBSEARCH_QUERY_LENGTH) }).ok).toBe(true)
   })
 })
 
