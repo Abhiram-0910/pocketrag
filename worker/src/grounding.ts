@@ -5,11 +5,7 @@ export interface CitedPair {
 
 export interface GroundingCheck {
   citedPairs: CitedPair[]
-  // Milestone 12 Phase A: (Web N) citations, tracked separately from (Doc N, page M)
-  // pairs — a web result has no page, so it can't share CitedPair's shape.
-  citedWebLabels: number[]
   hasUnknownCitation: boolean
-  hasUnknownWebCitation: boolean
   hasNoCitation: boolean
   groundingWarning: boolean
 }
@@ -21,35 +17,26 @@ const DISCLAIMER_PATTERN =
 
 // A citation is "(Doc N, page M)"; tolerate a comma and/or spaces between the two parts.
 const CITATION_PATTERN = /Doc\s+(\d+)[\s,]*page\s+(\d+)/gi
-// A web citation is "(Web N)" — no page, since a web result isn't paginated.
-const WEB_CITATION_PATTERN = /Web\s+(\d+)/gi
 
 /**
- * Citation-level groundedness check over (Doc N, page M) pairs, plus (Web N) web
- * citations (Milestone 12 Phase A). Catches a model citing a (document, page) pair
- * that wasn't in the input — which now includes citing a valid document but the wrong
- * page, or a document that wasn't provided at all — a web result label that wasn't
- * provided, or citing nothing at all without an explicit "not in the passages"
- * disclaimer. A bare "page M" or "Web N" mention with no surrounding label isn't
- * treated as a citation for the respective unknown-citation check, but either one
- * still counts as "some citation exists" so a well-cited answer isn't falsely flagged.
- * Does not catch a real (doc, page) or (Web N) being cited with content that isn't
- * actually there — that needs a second verification LLM call or human review,
- * deliberately not built (would double provider usage against the quota this rate
- * limiter exists to protect). Documented as a known limitation, not silently absent.
+ * Citation-level groundedness check over (Doc N, page M) pairs. Catches a model citing
+ * a (document, page) pair that wasn't in the input — which now includes citing a valid
+ * document but the wrong page, or a document that wasn't provided at all — or citing
+ * nothing without admitting the gap. Does NOT catch a model citing a real (doc, page)
+ * but misattributing content to it — that needs a second verification pass (not built;
+ * see ARCHITECTURE.md). Also does NOT catch — nor does it need to — a model echoing a
+ * citation it recalled from a prior turn's answer shown in the prompt's conversation
+ * history (Milestone 11 Phase C2): `providedPairs` is always built fresh from *this
+ * turn's* chunks, so an echoed citation that isn't actually in this turn's passages
+ * still correctly trips `hasUnknownCitation`, same as any other unsupported citation.
  *
- * `providedPairs` are the (label, page) pairs the prompt's Passages section actually
- * contained. `providedWebLabels` are the Web N numbers the prompt's Web results
- * section actually contained (defaults to none, so existing two-arg callers are
- * unaffected).
+ * `providedPairs` are the (label, page) pairs the prompt actually contained. Bare
+ * "page M" mentions with no Doc label are intentionally not treated as citations for
+ * the unknown-citation check, but they do count as "some citation exists" so a
+ * well-cited answer isn't falsely flagged as uncited.
  */
-export function checkGrounding(
-  answer: string,
-  providedPairs: CitedPair[],
-  providedWebLabels: number[] = [],
-): GroundingCheck {
+export function checkGrounding(answer: string, providedPairs: CitedPair[]): GroundingCheck {
   const providedSet = new Set(providedPairs.map((pair) => `${pair.label}:${pair.page}`))
-  const providedWebSet = new Set(providedWebLabels)
 
   const seen = new Set<string>()
   const citedPairs: CitedPair[] = []
@@ -62,26 +49,13 @@ export function checkGrounding(
     }
   }
 
-  const seenWeb = new Set<number>()
-  const citedWebLabels: number[] = []
-  for (const match of answer.matchAll(WEB_CITATION_PATTERN)) {
-    const label = Number(match[1])
-    if (!seenWeb.has(label)) {
-      seenWeb.add(label)
-      citedWebLabels.push(label)
-    }
-  }
-
   const hasUnknownCitation = citedPairs.some((pair) => !providedSet.has(`${pair.label}:${pair.page}`))
-  const hasUnknownWebCitation = citedWebLabels.some((label) => !providedWebSet.has(label))
-  const hasNoCitation = !/page\s+\d+/i.test(answer) && !/Web\s+\d+/i.test(answer) && !DISCLAIMER_PATTERN.test(answer)
+  const hasNoCitation = !/page\s+\d+/i.test(answer) && !DISCLAIMER_PATTERN.test(answer)
 
   return {
     citedPairs,
-    citedWebLabels,
     hasUnknownCitation,
-    hasUnknownWebCitation,
     hasNoCitation,
-    groundingWarning: hasUnknownCitation || hasUnknownWebCitation || hasNoCitation,
+    groundingWarning: hasUnknownCitation || hasNoCitation,
   }
 }

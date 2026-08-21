@@ -66,42 +66,4 @@ describe('checkGrounding', () => {
     expect(ungrounded.hasUnknownCitation).toBe(true)
     expect(ungrounded.groundingWarning).toBe(true)
   })
-
-  describe('web citations (Milestone 12 Phase A)', () => {
-    it('is not flagged when every web citation matches a provided Web N label', () => {
-      const result = checkGrounding('The powerhouse of the cell (Web 1).', [], [1, 2])
-      expect(result.citedWebLabels).toEqual([1])
-      expect(result.hasUnknownWebCitation).toBe(false)
-      expect(result.groundingWarning).toBe(false)
-    })
-
-    it('flags a citation to a Web N label that was not provided', () => {
-      const result = checkGrounding('See (Web 3) for details.', [], [1, 2])
-      expect(result.hasUnknownWebCitation).toBe(true)
-      expect(result.groundingWarning).toBe(true)
-    })
-
-    it('a bare "Web N" mention counts as "some citation exists", so hasNoCitation is not falsely flagged', () => {
-      const result = checkGrounding('The answer is here (Web 1).', [], [1])
-      expect(result.hasNoCitation).toBe(false)
-    })
-
-    it('deduplicates repeated citations to the same Web N label', () => {
-      const result = checkGrounding('(Web 1) and again (Web 1).', [], [1])
-      expect(result.citedWebLabels).toEqual([1])
-    })
-
-    it('does not confuse a Doc citation with a Web citation, or vice versa', () => {
-      const result = checkGrounding('(Doc 1, page 1) and (Web 1).', [{ label: 1, page: 1 }], [1])
-      expect(result.citedPairs).toEqual([{ label: 1, page: 1 }])
-      expect(result.citedWebLabels).toEqual([1])
-      expect(result.groundingWarning).toBe(false)
-    })
-
-    it('defaults providedWebLabels to none, so existing two-arg callers are unaffected', () => {
-      const result = checkGrounding('(Web 1)', oneDoc)
-      expect(result.hasUnknownWebCitation).toBe(true)
-      expect(result.groundingWarning).toBe(true)
-    })
-  })
 })

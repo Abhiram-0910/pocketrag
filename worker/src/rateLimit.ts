@@ -20,16 +20,6 @@ export const BYOK_DAILY_LIMIT = 500
 // DEFAULT_DAILY_LIMIT so one Notes-tab burst can't consume a disproportionate share of
 // the shared-tier abuse budget on an anonymous endpoint.
 export const OCR_DAILY_LIMIT = 20
-// Milestone 12 Phase A: lower than every other bucket, deliberately. Every other
-// provider call here (Gemini/OpenAI/Anthropic/Grok/OpenRouter, and OCR) is either a
-// free-tier quota or a BYOK request the user pays for themselves — Brave Search is the
-// first call this Worker makes that has a direct, metered dollar cost against a shared
-// project-owned key ($5/1,000 requests — see providers/brave.ts). This per-IP cap is
-// still only an abuse guard, not a spend cap: it does nothing to stop a distributed
-// pattern across many IPs from exhausting the account's budget. That gap is explicitly
-// deferred, not silently accepted — see TODO.md's Milestone 12 entry for the reasoning
-// and why a global circuit breaker is out of scope for Phase A.
-export const WEBSEARCH_DAILY_LIMIT = 10
 const SECONDS_PER_DAY = 86400
 
 // The bucket's day boundary (UTC) doubles as the reset time shown to the user — same

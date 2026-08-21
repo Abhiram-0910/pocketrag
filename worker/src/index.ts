@@ -1,14 +1,13 @@
-import { validateAnswerRequest, validateModelsRequest, validateOcrRequest, validateWebSearchRequest } from './validate'
+import { validateAnswerRequest, validateModelsRequest, validateOcrRequest } from './validate'
 import { buildPrompt } from './prompt'
 import { checkGrounding } from './grounding'
 import { assignDocLabels } from './labels'
-import { checkRateLimit, BYOK_DAILY_LIMIT, OCR_DAILY_LIMIT, WEBSEARCH_DAILY_LIMIT } from './rateLimit'
+import { checkRateLimit, BYOK_DAILY_LIMIT, OCR_DAILY_LIMIT } from './rateLimit'
 import { callGemini, listGeminiModels, transcribeImage, DEFAULT_SHARED_MODEL } from './providers/gemini'
 import { callOpenAI, listOpenAIModels } from './providers/openai'
 import { callAnthropic, listAnthropicModels } from './providers/anthropic'
 import { callGrok, listGrokModels } from './providers/grok'
 import { callOpenRouter, listOpenRouterModels } from './providers/openrouter'
-import { searchBrave } from './providers/brave'
 import { corsHeaders, resolveCorsOrigin } from './cors'
 import { sendDiscordAlert, shouldNotify, type DiscordEndpoint } from './discord'
 
@@ -21,7 +20,6 @@ const ANSWER_UNAVAILABLE_MESSAGE =
 const MODELS_UNAVAILABLE_MESSAGE =
   "This provider's model list isn't available yet. Please try Gemini or OpenAI for now — we're working on it."
 const OCR_UNAVAILABLE_MESSAGE = "OCR isn't available right now. Please try again in a moment."
-const WEBSEARCH_UNAVAILABLE_MESSAGE = "Web search isn't available right now. Please try again in a moment."
 
 // `status` is pulled from the "<Provider> API error <status>: <body>" shape every
 // provider file already throws, rather than adding a custom error class. Shared by
@@ -99,32 +97,6 @@ function notifyDiscordOfOcrFailure(ctx: ExecutionContext, env: Env, status: stri
   )
 }
 
-/**
- * Milestone 12 Phase A: same narrow-logging discipline as logOcrFailure — /websearch
- * sends the user's live question text to Brave before any answer exists, so a failure
- * body that happens to echo the query back (e.g. a 400 quoting an invalid `q` param)
- * must never reach Workers Logs or Discord. Only status, never a message field.
- */
-function logWebSearchFailure(status: string | null): void {
-  console.error(JSON.stringify({ event: 'websearch_call_failed', status }))
-}
-
-function notifyDiscordOfWebSearchFailure(ctx: ExecutionContext, env: Env, status: string | null): void {
-  if (!env.DISCORD_WEBHOOK_URL) return
-  ctx.waitUntil(
-    shouldNotify(env.RATE_LIMIT_KV, 'brave', 'websearch').then((notify) =>
-      notify
-        ? sendDiscordAlert(fetch, env.DISCORD_WEBHOOK_URL, {
-            provider: 'brave',
-            model: null,
-            status,
-            message: 'Web search request failed.',
-          })
-        : undefined,
-    ),
-  )
-}
-
 function json(body: unknown, status: number, origin: string | null): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -177,14 +149,7 @@ async function handleAnswer(
   // image when one is attached — without that, "answer using ONLY the passages" reads
   // as an instruction to ignore it (see prompt.ts's doc comment for how this was found).
   const image = validation.keySource === 'shared' ? validation.image : undefined
-  const prompt = buildPrompt(
-    validation.question,
-    validation.chunks,
-    labelOf,
-    validation.history,
-    image !== undefined,
-    validation.webResults,
-  )
+  const prompt = buildPrompt(validation.question, validation.chunks, labelOf, validation.history, image !== undefined)
 
   // BYOK: the key lives only in this local, request-scoped variable — passed straight
   // into the provider call and never assigned anywhere else (no env, no KV, no logging).
@@ -216,10 +181,7 @@ async function handleAnswer(
       label: labelOf.get(chunk.documentId)!,
       page: chunk.page,
     }))
-    // Web N labels are assigned by array position, matching buildPrompt's own labelling
-    // (see prompt.ts's doc comment — no persistent identity to freeze across turns).
-    const providedWebLabels = validation.webResults.map((_, i) => i + 1)
-    const grounding = checkGrounding(answer, providedPairs, providedWebLabels)
+    const grounding = checkGrounding(answer, providedPairs)
     return json({ answer, groundingWarning: grounding.groundingWarning, docLabels }, 200, origin)
   } catch (err) {
     logProviderError(provider, model, err)
@@ -322,52 +284,6 @@ async function handleOcr(
   }
 }
 
-/**
- * Milestone 12 Phase A: fetches web results for a query via Brave Search, before any
- * answer is composed — the client calls this first, then echoes the returned results
- * back on POST /answer's `webResults` field (see validate.ts). Mirrors /ocr's shape
- * exactly: own rate-limit bucket, own narrow failure-logging path (no raw error
- * message ever logged or Discorded — see logWebSearchFailure's doc comment).
- * BRAVE_API_KEY is a Worker secret only — there is no keySource/apiKey field on
- * WebSearchRequestBody for a dispatch switch to ever branch BYOK on.
- */
-async function handleWebSearch(
-  request: Request,
-  env: Env,
-  origin: string | null,
-  ip: string,
-  ctx: ExecutionContext,
-): Promise<Response> {
-  let body: unknown
-  try {
-    body = await request.json()
-  } catch {
-    return json({ error: 'Invalid JSON body.' }, 400, origin)
-  }
-
-  const validation = validateWebSearchRequest(body)
-  if (!validation.ok) {
-    return json({ error: validation.error }, 400, origin)
-  }
-
-  // websearch has its own bucket — see rateLimit.ts's WEBSEARCH_DAILY_LIMIT for why
-  // it's set lower than every other bucket here.
-  const rateLimit = await checkRateLimit(env.RATE_LIMIT_KV, ip, 'websearch', WEBSEARCH_DAILY_LIMIT)
-  if (!rateLimit.allowed) {
-    return json({ error: RATE_LIMIT_MESSAGE, resetAt: rateLimit.resetAt }, 429, origin)
-  }
-
-  try {
-    const results = await searchBrave(fetch, env.BRAVE_API_KEY, validation.query)
-    return json({ results }, 200, origin)
-  } catch (err) {
-    const { status } = extractFailureDetails(err)
-    logWebSearchFailure(status)
-    notifyDiscordOfWebSearchFailure(ctx, env, status)
-    return json({ error: WEBSEARCH_UNAVAILABLE_MESSAGE }, 502, origin)
-  }
-}
-
 export default {
   async fetch(request, env, ctx): Promise<Response> {
     const origin = resolveCorsOrigin(request.headers.get('Origin'), env.PAGES_ORIGIN)
@@ -387,9 +303,6 @@ export default {
     }
     if (request.method === 'POST' && url.pathname === '/ocr') {
       return handleOcr(request, env, origin, ip, ctx)
-    }
-    if (request.method === 'POST' && url.pathname === '/websearch') {
-      return handleWebSearch(request, env, origin, ip, ctx)
     }
     return json({ error: 'Not found.' }, 404, origin)
   },
