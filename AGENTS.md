@@ -2672,4 +2672,117 @@ Anthropic/Grok/OpenRouter, Milestone 14's landing-page half, milestones 15-16.
 
 ---
 
+### Session 24 — 2026-08-21
+**Goal:** Two independent planning sessions run alongside Milestone 12's in-progress,
+uncommitted grounding work (deliberately left untouched throughout — confirmed via
+`git status`/`git diff --name-only` at the start of each session that neither touched
+any of Milestone 12's mid-diff files before starting): Milestone 9 Phase B (PDF/
+multi-page support for the Notes tab) planned but not implemented, pending Milestone
+12's quota-reset gate; Milestone 14 (landing page) planned, approved, and shipped in
+full, since it was confirmed genuinely isolated.
+
+**Milestone 9 Phase B — planning only, no code.** Re-read Phase A's actual shipped
+code first (`transcribeImage`, `OcrRequestBody`/`OCR_ALLOWED_MIME_TYPES`/
+`MAX_OCR_BASE64_LENGTH`, `NotesDropZone.tsx`'s consent flow) rather than assuming.
+Verified live against `ai.google.dev/gemini-api/docs/document-processing`: Gemini
+supports PDFs up to **50MB or 1,000 pages** — a real, material correction to Session
+22's own recorded claim of "100MB in Jan 2026," which was either wrong or conflated
+Gemini's PDF limit with Cloudflare Workers' unrelated 100MB *request body* limit.
+Also confirmed no documented guarantee for reliable per-page-delimited output from a
+single multi-page call — a real correctness risk, not just added complexity, which
+ruled out the "one call, ask for page markers" design. **Recommended and approved:
+Option C** — send the whole PDF as one `inlineData` part exactly like Phase A already
+does for one image, keep it as one undifferentiated `PageInput` with `page: 1`. Zero
+chunking/embedding pipeline changes needed (`chunkText()` already handles arbitrarily
+long single-page text); `OCR_DAILY_LIMIT` stays unchanged since the "one call per
+file" invariant is preserved; the existing consent copy's use of "file" (not "photo")
+already holds up for a PDF without a rewrite, though the drop-zone's own "Drag
+**photos**..." label needs updating. A real anchor point exists for the eventual
+byte-size cap derivation: the same 23-page real scanned notebook used for Phase A's
+live verification (`daa-unit2.pdf`, still in this machine's scratchpad) is 6.5MB raw
+— real data, not yet a derived cap. **Not implemented — waiting on Milestone 12's
+quota-reset gate and explicit go-ahead**, per the user's standing instruction.
+
+**Milestone 14 (landing page) — planned, approved, and shipped.** Read `App.tsx`,
+the Session 14 design system (`Button`/`StatusBanner` primitives, Minimalist Swiss
+light+dark via `prefers-color-scheme` only), and TODO.md's own record before
+proposing anything — found that the task framing ("landing page + the remaining
+general UI/UX pass") overstated the remaining scope: TODO.md and Session 14's own
+entry both already record the general UI/UX pass as complete, with the landing page
+as the sole deliberately-deferred item ("No new landing/marketing screen... stays
+open, separate future work"). Confirmed genuine file-level isolation from Milestone
+12's in-progress diff in both directions before starting, and again after
+implementation: this work never touched `QueryPanel.tsx`, `answerRequest.ts`, or any
+`worker/` file.
+
+**Built:**
+- `src/components/LandingPage.tsx` (new) — composed entirely from existing
+  primitives (`Button`, Phosphor icons already a dependency, the same slate/blue
+  Tailwind token vocabulary every other component uses). No new dependency, no new
+  design-system component.
+- `src/lib/landingVisitSetting.ts` (new) — a `pocketrag:has-visited-app` localStorage
+  flag, mirroring `diagramImageSetting.ts`/`webSearchSetting.ts`'s exact pattern:
+  read once, synchronously, at mount. `view: 'landing' | 'app'` state in `App.tsx` is
+  computed from it directly in `useState`'s initializer — zero flash, no async race
+  against the IndexedDB document-restore effect that already runs on mount. A
+  returning visitor must have set the flag on an earlier visit to have gotten
+  anywhere at all, so they skip landing deterministically. Accepted, documented
+  trade-off: not also gated on live IndexedDB document presence for the *current*
+  render — the rare edge case (cleared `localStorage` but real IndexedDB documents
+  still present) shows landing once more, harmlessly, then never again, rather than
+  adding a loading/undetermined third state to synchronize a synchronous first-paint
+  decision against an async check for a one-time inconvenience.
+- **Copy proposed and approved before implementation**, per the user's explicit
+  standing instruction (set in this same session, and now the standard going
+  forward for every user-facing copy change, including Milestone 9 Phase B's
+  eventual consent-copy work): headline, how-it-works, differentiators, and CTA
+  drafted and shown for review first. One real correction the user caught before
+  approval — the original BYOK differentiator line presented all five providers as
+  equally proven ("Gemini, OpenAI, Anthropic, Grok, or OpenRouter"); revised to
+  match the confidence distinction the app itself already encodes
+  (`ByokPanel.tsx`'s `EXPERIMENTAL_PROVIDERS`): *"Gemini and OpenAI are fully
+  supported today, with Anthropic, Grok, and OpenRouter available as experimental
+  options."* Explicitly confirmed zero mention of web search/grounding or any other
+  not-yet-shipped feature.
+
+**Verification:** 129/129 frontend tests (was 126; +3 from
+`landingVisitSetting.test.ts`), `tsc -b` clean, `oxlint` clean (same one
+pre-existing, unrelated `titleFor`/`useCallback` warning in `QueryPanel.tsx`,
+carried over unchanged), production build clean with the bundle-size guard passing.
+**Live-verified in a real browser**, not just unit-tested: Playwright installed →
+used → uninstalled (this codebase has no component-render test infrastructure —
+no `@testing-library/react`, no jsdom, zero `.test.tsx` files anywhere — so adding
+one silently just to unit-test a button click was rejected in favor of this
+project's own established real-browser-verification convention). Confirmed: a
+fresh visitor sees the landing headline and "Get started" button with no app tab
+switcher present; clicking "Get started" transitions to the app view, sets the
+localStorage flag, and reveals the tab switcher; a reload after that goes straight
+to the app view with no landing page and no "Get started" button — real flag
+persistence, not assumed.
+
+**Committed and deployed, frontend only — the Worker was never touched, and
+Milestone 12's in-progress Worker/frontend diff was left completely untouched
+throughout** (confirmed via `git status` immediately before staging that only this
+session's 4 files were added to the commit). Code committed as `0d41498` ("Add
+landing page, closing out Milestone 14"). Deployed via `wrangler pages deploy dist
+--project-name=pocketrag --branch=main`; `wrangler pages deployment list` confirms
+it landed as **Production**, branch `main`, tagged to commit `0d41498`. Bundle-hash
+verified against the live site with no CDN propagation lag this time — the
+deployment's own subdomain and the `pocketrag.pages.dev` production alias
+(cache-busted) both served `index-CodEa1Vz.js`/`index-C0B4REZ8.css` immediately.
+Further confirmed the live production bundle literally contains both the new
+headline text and the approved revised BYOK copy, not just a matching hash.
+
+**Milestone 14 is now fully complete** — both the Session 14 styling pass and this
+session's landing page. TODO.md's checklist updated to reflect this.
+
+**Next session should start with:** Milestone 12's quota-reset live-verification
+check (item 1 — real multi-passage prompt + `google_search` grounding, against the
+real Gemini API, once), which gates whether that work can be committed/deployed or
+needs rework. Milestone 9 Phase B implementation is next in line after that, on
+explicit go-ahead. Standing backlog otherwise unchanged: Milestone 10 Phase C,
+BYOK success-path verification for Anthropic/Grok/OpenRouter, milestones 15-16.
+
+---
+
 <!-- Copy the block above for each new session -->
