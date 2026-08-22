@@ -879,3 +879,105 @@ describe('worker fetch handler — /ocr (Milestone 9 Phase A)', () => {
     consoleErrorSpy.mockRestore()
   })
 })
+
+function mockGeminiGroundedSuccess(text: string, webSources: { uri: string; title: string }[], searchEntryPointHtml?: string) {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        candidates: [
+          {
+            content: { parts: [{ text }] },
+            groundingMetadata: {
+              searchEntryPoint: searchEntryPointHtml !== undefined ? { renderedContent: searchEntryPointHtml } : undefined,
+              groundingChunks: webSources.map((web) => ({ web })),
+            },
+          },
+        ],
+      }),
+      text: async () => '',
+    }),
+  )
+}
+
+describe('worker fetch handler — /answer, Gemini-native grounding (Milestone 12, final scope: BYOK-gemini only)', () => {
+  it('rejects enableWebSearch on a shared-tier request with a 400, never reaching the provider call', async () => {
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+    const res = await worker.fetch(answerRequest({ ...validBody, enableWebSearch: true }), makeEnv(), makeCtx())
+    expect(res.status).toBe(400)
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('still answers a shared-tier request normally when enableWebSearch is omitted — no tools field sent, no grounding fields populated', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: 'answer (Doc 1, page 1).' }] } }] }),
+      text: async () => '',
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    const res = await worker.fetch(answerRequest(validBody), makeEnv(), makeCtx())
+
+    expect(res.status).toBe(200)
+    const [, init] = fetchSpy.mock.calls[0]
+    const body = JSON.parse((init as RequestInit).body as string)
+    expect(body.tools).toBeUndefined()
+    const data = (await res.json()) as { webSources: unknown[]; searchEntryPointHtml?: string }
+    expect(data.webSources).toEqual([])
+    expect(data.searchEntryPointHtml).toBeUndefined()
+  })
+
+  it('sends tools: [{"google_search": {}}] to Gemini on a BYOK-gemini request with enableWebSearch true', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: 'answer (Doc 1, page 1).' }] } }] }),
+      text: async () => '',
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    await worker.fetch(answerRequest({ ...byokBody, enableWebSearch: true }), makeEnv(), makeCtx())
+    const [, init] = fetchSpy.mock.calls[0]
+    const body = JSON.parse((init as RequestInit).body as string)
+    expect(body.tools).toEqual([{ google_search: {} }])
+  })
+
+  it('returns webSources: [] when grounding was enabled but Gemini chose not to search this turn (BYOK-gemini)', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: 'answer (Doc 1, page 1).' }] } }] }),
+      text: async () => '',
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    const res = await worker.fetch(answerRequest({ ...byokBody, enableWebSearch: true }), makeEnv(), makeCtx())
+    const data = (await res.json()) as { webSources: unknown[] }
+    expect(data.webSources).toEqual([])
+  })
+
+  it('accepts enableWebSearch on a BYOK request that chose provider "gemini"', async () => {
+    mockGeminiGroundedSuccess('answer.', [{ uri: 'https://example.com', title: 'Source' }])
+    const res = await worker.fetch(answerRequest({ ...byokBody, enableWebSearch: true }), makeEnv(), makeCtx())
+    expect(res.status).toBe(200)
+    const data = (await res.json()) as { webSources: { uri: string; title: string }[] }
+    expect(data.webSources).toEqual([{ uri: 'https://example.com', title: 'Source' }])
+  })
+
+  it('rejects enableWebSearch on a BYOK request for a non-Gemini provider with a 400, never reaching the provider call', async () => {
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+    const nonGeminiByokBody = {
+      ...validBody,
+      keySource: 'own',
+      apiKey: 'user-supplied-key',
+      provider: 'openai',
+      model: 'gpt-4o-mini',
+      enableWebSearch: true,
+    }
+    const res = await worker.fetch(answerRequest(nonGeminiByokBody), makeEnv(), makeCtx())
+    expect(res.status).toBe(400)
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+})

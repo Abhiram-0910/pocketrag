@@ -47,7 +47,16 @@ describe('attemptAnswer', () => {
 
     await attemptAnswer(fetchAnswer, 'q', CHUNKS, byokConfig, 60_000)
 
-    expect(fetchAnswer).toHaveBeenCalledWith('q', CHUNKS, byokConfig, expect.any(AbortSignal), [], [], undefined)
+    expect(fetchAnswer).toHaveBeenCalledWith(
+      'q',
+      CHUNKS,
+      byokConfig,
+      expect.any(AbortSignal),
+      [],
+      [],
+      undefined,
+      undefined,
+    )
   })
 
   it('passes the prior-turn docLabels through to fetchAnswer unchanged, and defaults to []', async () => {
@@ -64,6 +73,7 @@ describe('attemptAnswer', () => {
       DOC_LABELS,
       [],
       undefined,
+      undefined,
     )
 
     await attemptAnswer(fetchAnswer, 'q', CHUNKS, SHARED_CONFIG, 60_000)
@@ -74,6 +84,7 @@ describe('attemptAnswer', () => {
       expect.any(AbortSignal),
       [],
       [],
+      undefined,
       undefined,
     )
   })
@@ -93,6 +104,7 @@ describe('attemptAnswer', () => {
       DOC_LABELS,
       history,
       undefined,
+      undefined,
     )
 
     await attemptAnswer(fetchAnswer, 'q', CHUNKS, SHARED_CONFIG, 60_000)
@@ -103,6 +115,7 @@ describe('attemptAnswer', () => {
       expect.any(AbortSignal),
       [],
       [],
+      undefined,
       undefined,
     )
   })
@@ -114,7 +127,16 @@ describe('attemptAnswer', () => {
       .mockResolvedValue({ answer: 'answer', groundingWarning: false, docLabels: DOC_LABELS })
 
     await attemptAnswer(fetchAnswer, 'q', CHUNKS, SHARED_CONFIG, 60_000, DOC_LABELS, [], image)
-    expect(fetchAnswer).toHaveBeenCalledWith('q', CHUNKS, SHARED_CONFIG, expect.any(AbortSignal), DOC_LABELS, [], image)
+    expect(fetchAnswer).toHaveBeenCalledWith(
+      'q',
+      CHUNKS,
+      SHARED_CONFIG,
+      expect.any(AbortSignal),
+      DOC_LABELS,
+      [],
+      image,
+      undefined,
+    )
 
     await attemptAnswer(fetchAnswer, 'q', CHUNKS, SHARED_CONFIG, 60_000)
     expect(fetchAnswer).toHaveBeenLastCalledWith(
@@ -125,7 +147,72 @@ describe('attemptAnswer', () => {
       [],
       [],
       undefined,
+      undefined,
     )
+  })
+
+  describe('enableWebSearch (Milestone 12, Gemini-native grounding)', () => {
+    it('passes enableWebSearch through to fetchAnswer unchanged, and defaults to undefined', async () => {
+      const fetchAnswer: FetchAnswerFn = vi
+        .fn()
+        .mockResolvedValue({ answer: 'answer', groundingWarning: false, docLabels: DOC_LABELS })
+
+      await attemptAnswer(fetchAnswer, 'q', CHUNKS, SHARED_CONFIG, 60_000, DOC_LABELS, [], undefined, true)
+      expect(fetchAnswer).toHaveBeenCalledWith(
+        'q',
+        CHUNKS,
+        SHARED_CONFIG,
+        expect.any(AbortSignal),
+        DOC_LABELS,
+        [],
+        undefined,
+        true,
+      )
+
+      await attemptAnswer(fetchAnswer, 'q', CHUNKS, SHARED_CONFIG, 60_000)
+      expect(fetchAnswer).toHaveBeenLastCalledWith(
+        'q',
+        CHUNKS,
+        SHARED_CONFIG,
+        expect.any(AbortSignal),
+        [],
+        [],
+        undefined,
+        undefined,
+      )
+    })
+
+    it('surfaces webSources and searchEntryPointHtml from a successful grounded response', async () => {
+      const webSources = [{ uri: 'https://example.com/result', title: 'Result' }]
+      const fetchAnswer: FetchAnswerFn = vi.fn().mockResolvedValue({
+        answer: 'answer',
+        groundingWarning: false,
+        docLabels: DOC_LABELS,
+        webSources,
+        searchEntryPointHtml: '<div>widget</div>',
+      })
+
+      const result = await attemptAnswer(fetchAnswer, 'q', CHUNKS, SHARED_CONFIG, 60_000, [], [], undefined, true)
+
+      expect(result).toEqual({
+        outcome: 'success',
+        answer: 'answer',
+        groundingWarning: false,
+        docLabels: DOC_LABELS,
+        webSources,
+        searchEntryPointHtml: '<div>widget</div>',
+      })
+    })
+
+    it('leaves webSources/searchEntryPointHtml undefined when the response omits them (non-grounded answer)', async () => {
+      const fetchAnswer: FetchAnswerFn = vi
+        .fn()
+        .mockResolvedValue({ answer: 'answer', groundingWarning: false, docLabels: DOC_LABELS })
+
+      const result = await attemptAnswer(fetchAnswer, 'q', CHUNKS, SHARED_CONFIG, 60_000)
+
+      expect(result).toEqual({ outcome: 'success', answer: 'answer', groundingWarning: false, docLabels: DOC_LABELS })
+    })
   })
 
   it('times out and aborts the signal when fetchAnswer hangs past the timeout', async () => {

@@ -3,7 +3,13 @@ import { buildPrompt } from './prompt'
 import { checkGrounding } from './grounding'
 import { assignDocLabels } from './labels'
 import { checkRateLimit, BYOK_DAILY_LIMIT, OCR_DAILY_LIMIT } from './rateLimit'
-import { callGemini, listGeminiModels, transcribeImage, DEFAULT_SHARED_MODEL } from './providers/gemini'
+import {
+  callGemini,
+  listGeminiModels,
+  transcribeImage,
+  DEFAULT_SHARED_MODEL,
+  type GeminiGroundingResult,
+} from './providers/gemini'
 import { callOpenAI, listOpenAIModels } from './providers/openai'
 import { callAnthropic, listAnthropicModels } from './providers/anthropic'
 import { callGrok, listGrokModels } from './providers/grok'
@@ -149,7 +155,18 @@ async function handleAnswer(
   // image when one is attached — without that, "answer using ONLY the passages" reads
   // as an instruction to ignore it (see prompt.ts's doc comment for how this was found).
   const image = validation.keySource === 'shared' ? validation.image : undefined
-  const prompt = buildPrompt(validation.question, validation.chunks, labelOf, validation.history, image !== undefined)
+  // Milestone 12 final scope: grounding is BYOK-gemini-only — the shared branch of
+  // ValidationResult has no enableWebSearch field at all (see validate.ts), so this
+  // is always false for a shared-tier request, never just unset.
+  const enableWebSearch = validation.keySource === 'own' ? validation.enableWebSearch : false
+  const prompt = buildPrompt(
+    validation.question,
+    validation.chunks,
+    labelOf,
+    validation.history,
+    image !== undefined,
+    enableWebSearch,
+  )
 
   // BYOK: the key lives only in this local, request-scoped variable — passed straight
   // into the provider call and never assigned anywhere else (no env, no KV, no logging).
@@ -159,6 +176,12 @@ async function handleAnswer(
 
   try {
     let answer: string
+    // Milestone 12 final scope: webGrounding can now only ever populate on a
+    // BYOK-gemini request — enableWebSearch is unconditionally false for the shared
+    // tier (derived above), so a shared-tier request always calls callGemini with
+    // grounding off and this stays undefined. Every non-Gemini provider's call site
+    // is untouched either way and stays a plain string return.
+    let webGrounding: GeminiGroundingResult | undefined
     switch (provider) {
       case 'openai':
         answer = await callOpenAI(fetch, apiKey, model, prompt)
@@ -172,8 +195,11 @@ async function handleAnswer(
       case 'openrouter':
         answer = await callOpenRouter(fetch, apiKey, model, prompt)
         break
-      default:
-        answer = await callGemini(fetch, apiKey, model, prompt, image)
+      default: {
+        const result = await callGemini(fetch, apiKey, model, prompt, image, enableWebSearch)
+        answer = result.text
+        webGrounding = result.grounding
+      }
     }
     const providedPairs = validation.chunks.map((chunk) => ({
       // Non-null assertion is safe by invariant: assignDocLabels labels every distinct
@@ -182,7 +208,23 @@ async function handleAnswer(
       page: chunk.page,
     }))
     const grounding = checkGrounding(answer, providedPairs)
-    return json({ answer, groundingWarning: grounding.groundingWarning, docLabels }, 200, origin)
+    return json(
+      {
+        answer,
+        groundingWarning: grounding.groundingWarning,
+        docLabels,
+        // Milestone 12: real, structured citation data from Gemini's own grounding —
+        // replaces the earlier (reverted) Brave-search-era fabricated "Web N" label
+        // scheme entirely. Always an array (empty when grounding wasn't enabled, or
+        // was enabled but Gemini chose not to search this turn); searchEntryPointHtml
+        // is present only when Gemini actually searched — see gemini.ts's doc comment
+        // on the ToS requirement to display it alongside any grounded result shown.
+        webSources: webGrounding?.webSources ?? [],
+        searchEntryPointHtml: webGrounding?.searchEntryPointHtml,
+      },
+      200,
+      origin,
+    )
   } catch (err) {
     logProviderError(provider, model, err)
     notifyDiscordOfFailure(ctx, env, provider, model, err, 'answer')

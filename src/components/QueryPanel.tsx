@@ -11,10 +11,12 @@ import {
   type HistoryTurn,
   type ImageAttachment,
   type KeyConfig,
+  type WebSource,
 } from '../lib/answerRequest'
 import { buildRetrievalQuery } from '../lib/conversation'
 import { isDiagramLikely } from '../lib/diagramHeuristic'
 import { getDiagramImagesEnabled, setDiagramImagesEnabled } from '../lib/diagramImageSetting'
+import { getWebSearchEnabled, setWebSearchEnabled } from '../lib/webSearchSetting'
 import { renderPageToImage } from '../lib/pageRender'
 import { buildConversationPdf, type ExportSource } from '../lib/pdfExport'
 import { canRunQuery } from '../lib/queryScope'
@@ -51,6 +53,12 @@ interface ConversationTurn {
   // request — tracked per turn, not just for the current answer, so the always-visible
   // indicator stays accurate when scrolling back through "Conversation."
   imageIncluded: boolean
+  // Milestone 12 (Gemini-native grounding): real, structured sources from Gemini's own
+  // groundingChunks for this specific turn — undefined/empty when grounding wasn't
+  // enabled, or was enabled but Gemini chose not to search. Tracked per turn, same
+  // reasoning as imageIncluded above.
+  webSources?: WebSource[]
+  searchEntryPointHtml?: string
 }
 
 /**
@@ -98,6 +106,15 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
   // The image actually resolved for the *current* submitted question (or undefined) —
   // stored so a retry resends the same image rather than re-rendering the page again.
   const [pendingImage, setPendingImage] = useState<ImageAttachment | undefined>(undefined)
+  // Milestone 12 (Gemini-native grounding) state. Same localStorage-once-at-mount
+  // pattern as diagramImagesEnabled above, default OFF.
+  const [webSearchEnabled, setWebSearchEnabledState] = useState(() => getWebSearchEnabled())
+  const [webSources, setWebSources] = useState<WebSource[] | undefined>(undefined)
+  const [searchEntryPointHtml, setSearchEntryPointHtml] = useState<string | undefined>(undefined)
+  // The toggle state actually used for the *current* submitted question — stored so a
+  // retry resends the same choice, even if the checkbox changed in between (same
+  // "pending" pattern pendingImage above already established).
+  const [pendingWebSearchEnabled, setPendingWebSearchEnabled] = useState(false)
   // Non-blocking, always-visible note for the one failure mode that must never be
   // silent: a diagram-likely chunk matched, but the file isn't in memory to render it
   // (most commonly a document restored from a prior session — see sessionFiles.ts).
@@ -129,6 +146,25 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
     setDiagramImagesEnabled(enabled)
   }, [])
 
+  // Milestone 12 final scope: grounding is BYOK-gemini-only (see the Worker's
+  // validate.ts) — never the shared tier, never any other BYOK provider. Narrowed
+  // from an earlier shared-tier-eligible design: free-tier Google Search grounding
+  // appears to require a billing-linked Google Cloud project to unlock any real
+  // quota (three separate free keys/accounts all returned 429 RESOURCE_EXHAUSTED on
+  // every grounded call attempted, while non-grounded calls on the same keys
+  // succeeded instantly — consistent with multiple reports on Google's own developer
+  // forums), so shipping this on the shared tier would mean shipping a feature that
+  // doesn't work for anyone using it. A BYOK user supplying their own billing-enabled
+  // Gemini key isn't affected by that constraint. The toggle is only ever rendered in
+  // JSX when this is true — entirely absent from the DOM otherwise, same as the
+  // diagram-image checkbox's shared-tier gate.
+  const isGeminiEffective = keyConfig !== null && keyConfig.keySource === 'own' && keyConfig.provider === 'gemini'
+
+  const handleToggleWebSearch = useCallback((enabled: boolean) => {
+    setWebSearchEnabledState(enabled)
+    setWebSearchEnabled(enabled)
+  }, [])
+
   // The currently displayed answer is the last entry in conversationTurns (pushed on
   // every successful runAnswerAttempt below); "Conversation" only ever shows what came
   // before it, so the current answer isn't rendered twice.
@@ -141,6 +177,7 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
       isRetry: boolean,
       activeKeyConfig: KeyConfig,
       image?: ImageAttachment,
+      enableWebSearch?: boolean,
     ) => {
       setAwaitingAnswer(true)
       setTimedOut(false)
@@ -167,6 +204,7 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
         docLabels,
         history,
         image,
+        enableWebSearch,
       )
 
       if (result.outcome === 'success') {
@@ -174,6 +212,8 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
         setGroundingWarning(result.groundingWarning)
         setDocLabels(result.docLabels)
         setImageIncluded(image !== undefined)
+        setWebSources(result.webSources)
+        setSearchEntryPointHtml(result.searchEntryPointHtml)
         setConversationTurns((prev) =>
           [
             ...prev,
@@ -183,6 +223,8 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
               groundingWarning: result.groundingWarning,
               docLabels: result.docLabels,
               imageIncluded: image !== undefined,
+              webSources: result.webSources,
+              searchEntryPointHtml: result.searchEntryPointHtml,
             },
           ].slice(-MAX_STORED_TURNS),
         )
@@ -219,6 +261,11 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
       // the actual question being answered; the blended string never crosses the wire.
       const previousQuestion = conversationTurns.at(-1)?.question ?? null
       const retrievalQuery = buildRetrievalQuery(previousQuestion, question)
+      // Milestone 12: captured once at submit time, same "pending" pattern as
+      // pendingImage — a retry resends this exact choice, even if the checkbox
+      // changes in between.
+      const activeWebSearchEnabled = isGeminiEffective && webSearchEnabled
+      setPendingWebSearchEnabled(activeWebSearchEnabled)
       setBusy(true)
       setError(null)
       setResults(null)
@@ -228,6 +275,8 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
       setTimedOut(false)
       setGroundingWarning(false)
       setDiagramFallbackNote(null)
+      setWebSources(undefined)
+      setSearchEntryPointHtml(undefined)
       // docLabels is intentionally NOT reset here — Milestone 11 Phase C freezes "Doc N"
       // labels for the lifetime of the conversation, so the map from the previous
       // answer carries forward and gets echoed back to the Worker in runAnswerAttempt.
@@ -301,7 +350,7 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
               }
               setPendingImage(image)
 
-              await runAnswerAttempt(question, ranked, false, activeKeyConfig, image)
+              await runAnswerAttempt(question, ranked, false, activeKeyConfig, image, activeWebSearchEnabled)
             })
             .catch((err) => setError(err instanceof Error ? err.message : 'Failed to retrieve chunks.'))
             .finally(() => setBusy(false))
@@ -312,14 +361,28 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
         },
       })
     },
-    [canQuery, keyConfig, scope, selectedReadyId, query, busy, conversationTurns, runAnswerAttempt, diagramImagesEnabled],
+    [
+      canQuery,
+      keyConfig,
+      scope,
+      selectedReadyId,
+      query,
+      busy,
+      conversationTurns,
+      runAnswerAttempt,
+      diagramImagesEnabled,
+      isGeminiEffective,
+      webSearchEnabled,
+    ],
   )
 
   const handleRetry = useCallback(() => {
     if (!submittedQuestion || !results || keyConfig === null) return
     setBusy(true)
-    runAnswerAttempt(submittedQuestion, results, true, keyConfig, pendingImage).finally(() => setBusy(false))
-  }, [submittedQuestion, results, runAnswerAttempt, keyConfig, pendingImage])
+    runAnswerAttempt(submittedQuestion, results, true, keyConfig, pendingImage, pendingWebSearchEnabled).finally(() =>
+      setBusy(false),
+    )
+  }, [submittedQuestion, results, runAnswerAttempt, keyConfig, pendingImage, pendingWebSearchEnabled])
 
   // Resets the conversation itself — turn history, the frozen Doc N map (so numbering
   // restarts at Doc 1 on the next question), and the current answer/results. Document
@@ -336,6 +399,9 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
     setImageIncluded(false)
     setPendingImage(undefined)
     setDiagramFallbackNote(null)
+    setWebSources(undefined)
+    setSearchEntryPointHtml(undefined)
+    setPendingWebSearchEnabled(false)
   }, [])
 
   // Exports every turn currently in conversationTurns (past + current, in order) plus
@@ -402,6 +468,23 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
             className="h-4 w-4 cursor-pointer"
           />
           Send a page image when a matched chunk looks like it has a diagram
+        </label>
+      )}
+      {hasReadyDoc && isGeminiEffective && (
+        <label className="mb-2 flex items-start gap-2 text-xs text-slate-600 dark:text-slate-400">
+          <input
+            type="checkbox"
+            checked={webSearchEnabled}
+            onChange={(e) => handleToggleWebSearch(e.target.checked)}
+            className="mt-0.5 h-4 w-4 cursor-pointer"
+          />
+          <span>
+            Allow Gemini to search the web (Experimental)
+            <span className="block text-slate-400 dark:text-slate-500">
+              Lets Gemini check the live web when useful. Not yet verified against a live billing-enabled
+              account — if something goes wrong, you'll see a generic error message.
+            </span>
+          </span>
         </label>
       )}
       <form onSubmit={handleSubmit} className="flex flex-col gap-2 sm:flex-row">
@@ -474,6 +557,32 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
               {docLabels.map((d) => `Doc ${d.label} = ${titleFor(d.documentId)}`).join(' · ')}
             </p>
           )}
+          {webSources && webSources.length > 0 && (
+            <div className="text-xs text-slate-500 dark:text-slate-400">
+              <p>🌐 Includes results from a live web search:</p>
+              <ul className="ml-4 list-disc">
+                {webSources.map((source, i) => (
+                  <li key={i}>
+                    <a
+                      href={source.uri}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 underline dark:text-blue-400"
+                    >
+                      {source.title}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {searchEntryPointHtml && (
+            // Google's Grounding ToS (ai.google.dev/gemini-api/terms#grounding-with-
+            // google-search) requires displaying this "Search Suggestions" widget,
+            // unmodified, alongside any grounded result shown to an end user — trusted
+            // content from our own configured Gemini API response, not user-supplied.
+            <div dangerouslySetInnerHTML={{ __html: searchEntryPointHtml }} />
+          )}
         </div>
       )}
 
@@ -505,6 +614,26 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
                     {turn.docLabels.map((d) => `Doc ${d.label} = ${titleFor(d.documentId)}`).join(' · ')}
                   </p>
                 )}
+                {turn.webSources && turn.webSources.length > 0 && (
+                  <div className="text-xs text-slate-500 dark:text-slate-400">
+                    <p>🌐 Includes results from a live web search:</p>
+                    <ul className="ml-4 list-disc">
+                      {turn.webSources.map((source, i) => (
+                        <li key={i}>
+                          <a
+                            href={source.uri}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 underline dark:text-blue-400"
+                          >
+                            {source.title}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {turn.searchEntryPointHtml && <div dangerouslySetInnerHTML={{ __html: turn.searchEntryPointHtml }} />}
               </li>
             ))}
           </ul>

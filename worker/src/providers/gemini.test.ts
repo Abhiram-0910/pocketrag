@@ -16,9 +16,10 @@ describe('callGemini', () => {
       jsonBody: { candidates: [{ content: { parts: [{ text: 'The answer (page 1).' }] } }] },
     })
 
-    const answer = await callGemini(fetchImpl, 'test-key', 'gemini-3.5-flash-lite', 'What is x?')
+    const result = await callGemini(fetchImpl, 'test-key', 'gemini-3.5-flash-lite', 'What is x?')
 
-    expect(answer).toBe('The answer (page 1).')
+    expect(result.text).toBe('The answer (page 1).')
+    expect(result.grounding).toBeUndefined()
     const [url, init] = fetchImpl.mock.calls[0]
     expect(url).toContain('gemini-3.5-flash-lite')
     expect(url).not.toContain('test-key')
@@ -80,6 +81,94 @@ describe('callGemini', () => {
       const [, init] = fetchImpl.mock.calls[0]
       const body = JSON.parse((init as RequestInit).body as string)
       expect(body.contents[0].parts).toEqual([{ text: 'q' }])
+    })
+  })
+
+  describe('grounding with Google Search (Milestone 12)', () => {
+    it('omits the tools field entirely when enableWebSearch is false or omitted', async () => {
+      const fetchImpl = mockFetch({ jsonBody: { candidates: [{ content: { parts: [{ text: 'answer' }] } }] } })
+      await callGemini(fetchImpl, 'key', 'gemini-3.5-flash-lite', 'q')
+      const [, init] = fetchImpl.mock.calls[0]
+      const body = JSON.parse((init as RequestInit).body as string)
+      expect(body.tools).toBeUndefined()
+    })
+
+    it('sends tools: [{"google_search": {}}] (snake_case, the confirmed Legacy REST wire shape) when enableWebSearch is true', async () => {
+      const fetchImpl = mockFetch({ jsonBody: { candidates: [{ content: { parts: [{ text: 'answer' }] } }] } })
+      await callGemini(fetchImpl, 'key', 'gemini-3.5-flash-lite', 'q', undefined, true)
+      const [, init] = fetchImpl.mock.calls[0]
+      const body = JSON.parse((init as RequestInit).body as string)
+      expect(body.tools).toEqual([{ google_search: {} }])
+    })
+
+    it('sends the full multi-passage prompt text unchanged alongside the grounding tool — grounding does not alter or truncate the prompt', async () => {
+      const fetchImpl = mockFetch({ jsonBody: { candidates: [{ content: { parts: [{ text: 'answer' }] } }] } })
+      const richPrompt =
+        'You are answering a question using ONLY the passages and the results of a live web search below.\n\n' +
+        'Passages:\n[Doc 1, Page 1]\nThe mitochondrion is the powerhouse of the cell.\n\n' +
+        '[Doc 2, Page 3]\nKneading develops gluten in bread dough.\n\nQuestion: What is the mitochondrion?\n\nAnswer:'
+      await callGemini(fetchImpl, 'key', 'gemini-3.5-flash-lite', richPrompt, undefined, true)
+      const [, init] = fetchImpl.mock.calls[0]
+      const body = JSON.parse((init as RequestInit).body as string)
+      expect(body.contents[0].parts[0].text).toBe(richPrompt)
+      expect(body.tools).toEqual([{ google_search: {} }])
+    })
+
+    it('parses groundingChunks into webSources and searchEntryPoint.renderedContent into searchEntryPointHtml', async () => {
+      const fetchImpl = mockFetch({
+        jsonBody: {
+          candidates: [
+            {
+              content: { parts: [{ text: 'Team A won (Web source).' }] },
+              groundingMetadata: {
+                searchEntryPoint: { renderedContent: '<div>search suggestions</div>' },
+                groundingChunks: [
+                  { web: { uri: 'https://example.com/result-a', title: 'Result A' } },
+                  { web: { uri: 'https://example.com/result-b', title: 'Result B' } },
+                ],
+              },
+            },
+          ],
+        },
+      })
+
+      const result = await callGemini(fetchImpl, 'key', 'gemini-3.5-flash-lite', 'q', undefined, true)
+
+      expect(result.text).toBe('Team A won (Web source).')
+      expect(result.grounding).toEqual({
+        webSources: [
+          { uri: 'https://example.com/result-a', title: 'Result A' },
+          { uri: 'https://example.com/result-b', title: 'Result B' },
+        ],
+        searchEntryPointHtml: '<div>search suggestions</div>',
+      })
+    })
+
+    it('returns grounding: undefined when enableWebSearch is true but Gemini chose not to search (no groundingMetadata in the response)', async () => {
+      const fetchImpl = mockFetch({ jsonBody: { candidates: [{ content: { parts: [{ text: 'answer' }] } }] } })
+      const result = await callGemini(fetchImpl, 'key', 'gemini-3.5-flash-lite', 'q', undefined, true)
+      expect(result.grounding).toBeUndefined()
+    })
+
+    it('filters out a malformed groundingChunks entry missing uri or title', async () => {
+      const fetchImpl = mockFetch({
+        jsonBody: {
+          candidates: [
+            {
+              content: { parts: [{ text: 'answer' }] },
+              groundingMetadata: {
+                groundingChunks: [
+                  { web: { uri: 'https://example.com/ok', title: 'OK' } },
+                  { web: { uri: 'https://example.com/missing-title' } },
+                  { web: { title: 'missing uri' } },
+                ],
+              },
+            },
+          ],
+        },
+      })
+      const result = await callGemini(fetchImpl, 'key', 'gemini-3.5-flash-lite', 'q', undefined, true)
+      expect(result.grounding?.webSources).toEqual([{ uri: 'https://example.com/ok', title: 'OK' }])
     })
   })
 })
@@ -164,6 +253,7 @@ describe('transcribeImage', () => {
     expect(body.contents[0].parts[0].text).toMatch(/transcribe/i)
     expect(body.contents[0].parts[0].text).toMatch(/exactly as written/i)
     expect(body.contents[0].parts[1]).toEqual({ inlineData: { mimeType: 'image/jpeg', data: 'aGVsbG8=' } })
+    expect(body.tools).toBeUndefined()
   })
 
   it('throws with the status and body when Gemini returns a non-2xx response', async () => {

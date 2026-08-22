@@ -475,6 +475,66 @@ describe('validateAnswerRequest', () => {
       expect(result.ok).toBe(true)
     })
   })
+
+  describe('enableWebSearch (Milestone 12, Gemini-native grounding — final scope: BYOK-gemini only)', () => {
+    it('rejects enableWebSearch: true on a shared-tier request outright, not silently dropped', () => {
+      const result = validateAnswerRequest({ question: 'q', chunks: [validChunk], enableWebSearch: true })
+      expect(result.ok).toBe(false)
+    })
+
+    it('still accepts a shared-tier request when enableWebSearch is false or omitted, with no such field on the result', () => {
+      const omitted = validateAnswerRequest({ question: 'q', chunks: [validChunk] })
+      expect(omitted.ok).toBe(true)
+      if (omitted.ok && omitted.keySource === 'shared') expect('enableWebSearch' in omitted).toBe(false)
+
+      const explicitFalse = validateAnswerRequest({ question: 'q', chunks: [validChunk], enableWebSearch: false })
+      expect(explicitFalse.ok).toBe(true)
+      if (explicitFalse.ok && explicitFalse.keySource === 'shared') expect('enableWebSearch' in explicitFalse).toBe(false)
+    })
+
+    it('rejects a non-boolean enableWebSearch', () => {
+      expect(validateAnswerRequest({ question: 'q', chunks: [validChunk], enableWebSearch: 'yes' }).ok).toBe(false)
+    })
+
+    it('accepts enableWebSearch: true on a BYOK request that chose provider "gemini" — their own key, their own cost', () => {
+      const result = validateAnswerRequest({
+        question: 'q',
+        chunks: [validChunk],
+        keySource: 'own',
+        apiKey: 'my-real-key',
+        provider: 'gemini',
+        model: 'gemini-3.5-flash-lite',
+        enableWebSearch: true,
+      })
+      expect(result.ok).toBe(true)
+      if (result.ok && result.keySource === 'own') expect(result.enableWebSearch).toBe(true)
+    })
+
+    it('rejects enableWebSearch: true on a BYOK request for a non-Gemini provider outright, not silently dropped', () => {
+      const result = validateAnswerRequest({
+        question: 'q',
+        chunks: [validChunk],
+        keySource: 'own',
+        apiKey: 'my-real-key',
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        enableWebSearch: true,
+      })
+      expect(result.ok).toBe(false)
+    })
+
+    it('still accepts a BYOK request for a non-Gemini provider when enableWebSearch is false or omitted', () => {
+      const result = validateAnswerRequest({
+        question: 'q',
+        chunks: [validChunk],
+        keySource: 'own',
+        apiKey: 'my-real-key',
+        provider: 'anthropic',
+        model: 'claude-sonnet-4-5',
+      })
+      expect(result.ok).toBe(true)
+    })
+  })
 })
 
 describe('validateModelsRequest', () => {

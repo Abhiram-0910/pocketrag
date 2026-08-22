@@ -119,4 +119,44 @@ describe('buildPrompt', () => {
       expect(prompt).toContain('If the passages do not contain enough information to answer')
     })
   })
+
+  describe('enableWebSearch (Milestone 12, Gemini-native grounding)', () => {
+    const chunks = [{ text: 'The mitochondrion is the powerhouse of the cell.', page: 1, score: 0.9, documentId: 'doc-1' }]
+    const labelOf = new Map([['doc-1', 1]])
+
+    it('produces byte-identical output when enableWebSearch is false or omitted (regression)', () => {
+      const withoutParam = buildPrompt('q', chunks, labelOf)
+      const withExplicitFalse = buildPrompt('q', chunks, labelOf, [], false, false)
+      expect(withoutParam).toBe(withExplicitFalse)
+    })
+
+    it('widens the source rule to include live web search results when enabled, resolving the "ONLY the passages" contradiction with granting the search tool', () => {
+      const prompt = buildPrompt('q', chunks, labelOf, [], false, true)
+      expect(prompt).toContain('Answer using only information found in the passages and the results of a live web search.')
+      expect(prompt).toContain('If the passages and the results of a live web search do not contain enough information to answer')
+    })
+
+    it('does not mention web search anywhere when disabled', () => {
+      const prompt = buildPrompt('q', chunks, labelOf)
+      expect(prompt).not.toContain('web search')
+    })
+
+    it('combines passages, image, and web search into a single three-way source rule ("A, B, and C")', () => {
+      const prompt = buildPrompt('q', chunks, labelOf, [], true, true)
+      expect(prompt).toContain(
+        'Answer using only information found in the passages, the attached image, and the results of a live web search.',
+      )
+    })
+
+    it('adds no new prompt section — no separate "Web results" block, unlike the old (reverted) Brave-search-era design', () => {
+      const prompt = buildPrompt('q', chunks, labelOf, [], false, true)
+      expect(prompt).not.toContain('Web results:')
+      expect(prompt).not.toContain('[Web 1]')
+    })
+
+    it('opening sentence stays fixed to "the passages below" regardless of enableWebSearch — only the Rules section varies', () => {
+      const prompt = buildPrompt('q', chunks, labelOf, [], false, true)
+      expect(prompt).toContain('You are answering a question using ONLY the passages below, extracted from one or more PDF documents.')
+    })
+  })
 })

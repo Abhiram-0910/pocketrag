@@ -14,10 +14,27 @@ export interface HistoryTurn {
   answer: string
 }
 
+// Milestone 12 (Gemini-native grounding): a single real, structured web source from
+// Gemini's own groundingChunks — replaces the earlier (reverted) Brave-search-era
+// fabricated "Web N" label scheme entirely.
+export interface WebSource {
+  uri: string
+  title: string
+}
+
 export interface AnswerResponse {
   answer: string
   groundingWarning: boolean
   docLabels: DocLabel[]
+  // Always present on a real Worker response (empty array when grounding wasn't
+  // enabled, or was enabled but Gemini chose not to search) — optional here
+  // defensively so no pre-existing mocked response in this file's own tests needs
+  // updating for a field they don't exercise.
+  webSources?: WebSource[]
+  // Google's Grounding ToS (ai.google.dev/gemini-api/terms#grounding-with-google-search)
+  // requires displaying this HTML/CSS "Search Suggestions" widget alongside any grounded
+  // result shown to an end user — present only when Gemini actually searched.
+  searchEntryPointHtml?: string
 }
 
 // Milestone 10 Phase B: at most one page image per request, produced by
@@ -57,10 +74,21 @@ export type FetchAnswerFn = (
   docLabels: DocLabel[],
   history: HistoryTurn[],
   image?: ImageAttachment,
+  // Milestone 12: Gemini-specific (see the Worker's validate.ts) — accepted for the
+  // shared tier and for BYOK requests that chose provider 'gemini', rejected outright
+  // for every other BYOK provider.
+  enableWebSearch?: boolean,
 ) => Promise<AnswerResponse>
 
 export type AnswerAttemptResult =
-  | { outcome: 'success'; answer: string; groundingWarning: boolean; docLabels: DocLabel[] }
+  | {
+      outcome: 'success'
+      answer: string
+      groundingWarning: boolean
+      docLabels: DocLabel[]
+      webSources?: WebSource[]
+      searchEntryPointHtml?: string
+    }
   | { outcome: 'timeout' }
   | { outcome: 'error'; message: string; status?: number; resetAt?: string }
 
@@ -78,20 +106,19 @@ export async function attemptAnswer(
   docLabels: DocLabel[] = [],
   history: HistoryTurn[] = [],
   image?: ImageAttachment,
+  enableWebSearch?: boolean,
 ): Promise<AnswerAttemptResult> {
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    const { answer, groundingWarning, docLabels: responseDocLabels } = await fetchAnswer(
-      question,
-      chunks,
-      keyConfig,
-      controller.signal,
-      docLabels,
-      history,
-      image,
-    )
-    return { outcome: 'success', answer, groundingWarning, docLabels: responseDocLabels }
+    const {
+      answer,
+      groundingWarning,
+      docLabels: responseDocLabels,
+      webSources,
+      searchEntryPointHtml,
+    } = await fetchAnswer(question, chunks, keyConfig, controller.signal, docLabels, history, image, enableWebSearch)
+    return { outcome: 'success', answer, groundingWarning, docLabels: responseDocLabels, webSources, searchEntryPointHtml }
   } catch (err) {
     if (isAbortError(err)) return { outcome: 'timeout' }
     if (err instanceof WorkerRequestError) {
@@ -114,6 +141,7 @@ export const fetchAnswerFromWorker: FetchAnswerFn = async (
   docLabels,
   history,
   image,
+  enableWebSearch,
 ) => {
   if (!API_BASE_URL) {
     throw new Error('Answer generation is not configured yet (VITE_API_BASE_URL is unset).')
@@ -121,11 +149,10 @@ export const fetchAnswerFromWorker: FetchAnswerFn = async (
   const res = await fetch(`${API_BASE_URL}/answer`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    // `image` is undefined whenever this phase's toggle/keySource/heuristic gate
-    // didn't fire — JSON.stringify drops an undefined-valued key entirely, so the
-    // Worker sees no `image` field at all on an ordinary text-only request, not an
-    // explicit `null`.
-    body: JSON.stringify({ question, chunks, ...keyConfig, docLabels, history, image }),
+    // `image`/`enableWebSearch` are undefined whenever their respective gate didn't
+    // fire — JSON.stringify drops an undefined-valued key entirely, so the Worker sees
+    // no field at all on an ordinary request, not an explicit `null`/`false`.
+    body: JSON.stringify({ question, chunks, ...keyConfig, docLabels, history, image, enableWebSearch }),
     signal,
   })
   if (!res.ok) {

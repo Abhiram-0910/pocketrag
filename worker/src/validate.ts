@@ -58,6 +58,21 @@ export interface AnswerRequestBody {
   // silently dropped. See the plan's provider-support table for why BYOK is excluded
   // in this phase even for a BYOK request that happens to select Gemini as its provider.
   image?: ImageAttachment
+  // Milestone 12 (Gemini-native grounding): requests Gemini's built-in Google Search
+  // tool. Restricted to BYOK requests that specifically chose provider 'gemini'
+  // (their own key, their own grounding cost) — rejected outright, not silently
+  // dropped, for the shared tier and for every other BYOK provider. Final, deliberate
+  // scope: free-tier Google Search grounding appears to require a billing-linked
+  // Google Cloud project to unlock any real quota (three separate free keys/accounts
+  // all returned 429 RESOURCE_EXHAUSTED on every grounded call attempted, while
+  // non-grounded calls on the same keys succeeded instantly — consistent with
+  // multiple reports on Google's own developer forums), so shipping this on the
+  // shared tier would mean shipping a feature that doesn't actually work for anyone
+  // using it. Never live-verified against a real billing-enabled grounding call —
+  // shipped explicitly marked unverified, same honesty standard as Milestone 10 Phase
+  // C and the three Experimental BYOK providers. Revisit if a billing-enabled key
+  // becomes available.
+  enableWebSearch?: boolean
 }
 
 export type ValidationResult =
@@ -73,6 +88,12 @@ export type ValidationResult =
       // never read an image off validation even by mistake; the type itself enforces
       // the "shared-Gemini only" restriction, not just a runtime check.
       image: ImageAttachment | undefined
+      // Milestone 12: deliberately NOT present on the shared branch at all — grounding
+      // is BYOK-gemini-only in this project's final scope (see AnswerRequestBody's
+      // enableWebSearch doc comment for why), so there is nothing for a shared-tier
+      // code path to ever read, even by mistake. Mirrors the same "the type itself
+      // enforces the restriction" rigor `image` already uses above, just the other
+      // tier.
     }
   | {
       ok: true
@@ -84,6 +105,9 @@ export type ValidationResult =
       model: string
       docLabels: DocLabel[]
       history: HistoryTurn[]
+      // Milestone 12: only ever true here when `provider` is 'gemini' — enforced in
+      // validateAnswerRequest below, not just documented.
+      enableWebSearch: boolean
     }
   | { ok: false; error: string }
 
@@ -184,7 +208,7 @@ export function validateAnswerRequest(body: unknown): ValidationResult {
   if (typeof body !== 'object' || body === null) {
     return { ok: false, error: 'Request body must be a JSON object.' }
   }
-  const { question, chunks, keySource, apiKey, provider, model, docLabels, history, image } =
+  const { question, chunks, keySource, apiKey, provider, model, docLabels, history, image, enableWebSearch } =
     body as Record<string, unknown>
 
   if (typeof question !== 'string' || question.trim().length === 0) {
@@ -258,6 +282,11 @@ export function validateAnswerRequest(body: unknown): ValidationResult {
     validatedImage = image
   }
 
+  if (enableWebSearch !== undefined && typeof enableWebSearch !== 'boolean') {
+    return { ok: false, error: 'enableWebSearch must be a boolean.' }
+  }
+  const resolvedEnableWebSearch = enableWebSearch ?? false
+
   const trimmedQuestion = question.trim()
   const resolvedKeySource = keySource ?? 'shared'
   if (resolvedKeySource !== 'shared' && resolvedKeySource !== 'own') {
@@ -269,6 +298,14 @@ export function validateAnswerRequest(body: unknown): ValidationResult {
   // reasoning as hasDuplicateDocLabels above.
   if (validatedImage && resolvedKeySource !== 'shared') {
     return { ok: false, error: 'image is only supported for the shared tier in this phase.' }
+  }
+
+  // Milestone 12: grounding is BYOK-gemini-only in this project's final scope — fail
+  // closed rather than silently dropping enableWebSearch on a shared-tier request,
+  // same "don't guess, reject" reasoning as the image restriction above (just the
+  // other tier). See AnswerRequestBody's enableWebSearch doc comment for why.
+  if (resolvedEnableWebSearch && resolvedKeySource === 'shared') {
+    return { ok: false, error: 'enableWebSearch is only supported for BYOK requests with provider "gemini".' }
   }
 
   if (resolvedKeySource === 'shared') {
@@ -293,6 +330,13 @@ export function validateAnswerRequest(body: unknown): ValidationResult {
     return { ok: false, error: `model must be a non-empty string of ${MAX_MODEL_LENGTH} characters or fewer.` }
   }
 
+  // Milestone 12: grounding is Gemini-specific — fail closed rather than silently
+  // dropping enableWebSearch for a BYOK request that picked a different provider, same
+  // "don't guess, reject" reasoning as hasDuplicateDocLabels/the image restriction above.
+  if (resolvedEnableWebSearch && provider !== 'gemini') {
+    return { ok: false, error: 'enableWebSearch is only supported when provider is "gemini".' }
+  }
+
   return {
     ok: true,
     question: trimmedQuestion,
@@ -303,6 +347,7 @@ export function validateAnswerRequest(body: unknown): ValidationResult {
     model,
     docLabels: validatedDocLabels,
     history: validatedHistory,
+    enableWebSearch: resolvedEnableWebSearch,
   }
 }
 
