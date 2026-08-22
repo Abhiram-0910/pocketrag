@@ -197,36 +197,39 @@ Session 22 for the full story and the honestly-reported transcription imperfecti
 Phase B (PDF support) stays parked pending explicit go-ahead. See TODO.md's
 Milestone 9 entry below.
 
-**Milestone 12 — Brave Search (Session 23's first half) reverted in full; superseded
-by Gemini's own native "Grounding with Google Search" tool** (no card needed, reuses
-the existing `GEMINI_API_KEY`). The Gemini-native rebuild is fully implemented and
-reviewed but **not yet committed or deployed** — blocked on a real live-verification
-gate (real multi-passage prompt + `google_search` grounding against the real Gemini
-API, confirming neither the passages nor the search are silently suppressed). A
-first attempt hit a genuine `429` quota exhaustion, not a code bug; waiting for the
-daily Pacific-midnight reset, then one clean retry. See TODO.md's Milestone 12 entry
-below for the full story, and AGENTS.md Session 23.
+**Milestone 12 is now fully complete, in an honestly-scoped final state —
+Session 25.** Brave Search (Session 23's first half) was reverted in full,
+superseded by Gemini's own native "Grounding with Google Search" tool. Real live
+verification was attempted four times across two sessions and never succeeded —
+consistently `429 RESOURCE_EXHAUSTED` across three separate free keys/accounts,
+while non-grounded calls on the same keys worked instantly — pointing to
+free-tier Google Search grounding requiring a billing-linked Google Cloud
+project to unlock any real quota. Rather than ship on an unverifiable
+assumption, the feature was rescoped to **BYOK requests with provider "gemini"
+only** (shared-tier eligibility removed entirely), shipped explicitly marked
+"(Experimental)" in the UI and in this history, same honesty standard as
+Milestone 10 Phase C. Committed, pushed, and deployed (both Worker and
+frontend), live-verified post-deploy. See TODO.md's Milestone 12 entry below
+for the full story, and AGENTS.md Session 25.
 
-**Milestone 14 (landing page + full UI/UX pass) is now fully complete — Session 24.**
+**Milestone 14 (landing page + full UI/UX pass) is fully complete — Session 24.**
 The general UI/UX pass was already done in Session 14; the landing page (the one item
-Session 14 deliberately deferred) shipped in Session 24, confirmed genuinely isolated
-from Milestone 12's in-progress diff and deployed independently. See AGENTS.md
-Session 24.
+Session 14 deliberately deferred) shipped in Session 24. See AGENTS.md Session 24.
 
 **Milestone 9 Phase B (PDF/multi-page support for the Notes tab) planned and
-approved in Session 24, not yet implemented** — waiting on Milestone 12's
-quota-verification gate to clear and explicit go-ahead, per standing instruction.
-Real research done, not guessed: Gemini's actual PDF limit is 50MB/1,000 pages
-(confirmed live — corrects Session 22's own recorded "100MB" claim), and the
-recommended design (send the whole PDF as one `inlineData` part, same as Phase A
-already does for one image) needs zero chunking/embedding pipeline changes. See
-AGENTS.md Session 24 and TODO.md's Milestone 9 entry above.
+approved in Session 24, ready to implement on explicit go-ahead** — no longer
+blocked on anything from Milestone 12, which is now closed. Real research done,
+not guessed: Gemini's actual PDF limit is 50MB/1,000 pages (confirmed live —
+corrects Session 22's own recorded "100MB" claim), and the recommended design
+(send the whole PDF as one `inlineData` part, same as Phase A already does for
+one image) needs zero chunking/embedding pipeline changes. See AGENTS.md
+Session 24 and TODO.md's Milestone 9 entry above.
 
-Full roadmap (Milestones 7-16) in 🟢 below. Standing candidates once Milestone 12's
-gate clears: Milestone 9 Phase B (planned and approved, see above), Milestone 10
-Phase C (BYOK extension, parked), BYOK success-path verification for
-Anthropic/Grok/OpenRouter (live-verify a real grounded answer once test keys are
-available — flip out of `EXPERIMENTAL_PROVIDERS`, no other code change needed), and
+Full roadmap (Milestones 7-16) in 🟢 below. Standing candidates: Milestone 9
+Phase B (planned and approved, see above), Milestone 10 Phase C (BYOK
+extension, parked), BYOK success-path verification for Anthropic/Grok/
+OpenRouter (live-verify a real grounded answer once test keys are available —
+flip out of `EXPERIMENTAL_PROVIDERS`, no other code change needed), and
 milestones 15-16.
 
 ---
@@ -378,67 +381,66 @@ milestones 15-16.
       `QueryPanel.tsx`'s Conversation UI + "Clear conversation" control. Live-verified
       and deployed.
 
-### 12. Hybrid web search toggle
-- Single toggle ("Allow Gemini to search the web"), not three named modes — see
-  Session 23's revised plan for why the three-mode framing stopped being mechanically
-  meaningful once the mechanism changed (below).
+### 12. Hybrid web search toggle ✅ COMPLETE (final honest scope) — Session 25
+- Single toggle ("Allow Gemini to search the web"), not three named modes — the
+  model decides per-query whether search is useful, so "web-only" and "hybrid"
+  collapsed into the same mechanism once passages and grounding could coexist in
+  one call.
 - **Brave Search API — built, reviewed, shipped Worker-only, then fully reverted in
   the same session.** The user doesn't have card access for Brave's paid API.
-  Cleanly reverted (commit `01cd5e7`, "Revert Brave Search integration - superseded
-  by Gemini native grounding, no card available") — `providers/brave.ts`, the
-  `/websearch` endpoint, the `WebResult`/Web N grounding mechanism, the `websearch`
-  rate-limit bucket and Discord endpoint, and `BRAVE_API_KEY` from
-  `Env`/`.dev.vars`/`.dev.vars.example` are all gone, not left as dead code. Worker
-  redeployed post-revert and live-verified: `/websearch` correctly `404`s (route
-  gone), `/answer` unaffected. See AGENTS.md Session 23 for the full story.
+  Cleanly reverted (commit `01cd5e7`) — `providers/brave.ts`, the `/websearch`
+  endpoint, the `WebResult`/Web N grounding mechanism, the `websearch` rate-limit
+  bucket and Discord endpoint, and `BRAVE_API_KEY` are all gone, not left as dead
+  code. See AGENTS.md Session 23.
 - **Superseded by Gemini's own native "Grounding with Google Search" tool** — no new
-  provider, no new key, reuses the existing `GEMINI_API_KEY` already live in
-  production. Confirmed directly against `ai.google.dev/gemini-api/docs/
-  generate-content/google-search` (the Legacy `generateContent` REST docs, not the
-  newer Interactions API `callGemini` deliberately keeps using): `tools:
-  [{"google_search": {}}]` (snake_case in the raw REST body) added alongside the
-  existing prompt; response gains `candidates[0].groundingMetadata` with
-  `groundingChunks[].web.{uri,title}` (real structured sources) and
-  `searchEntryPoint.renderedContent` (an HTML/CSS widget Google's Grounding ToS
-  requires displaying alongside any grounded result shown to an end user — verified
-  directly against `ai.google.dev/gemini-api/terms#grounding-with-google-search`,
-  not left as an open flag). Real cost math computed against Google's official
-  pricing page (`ai.google.dev/gemini-api/docs/pricing`): 5,000 free grounded
-  queries/month (shared across the whole project key), then $14/1,000 queries after
-  — the existing 50/day shared bucket alone permits up to ~$350/day worst-case
-  distributed exposure, so a dedicated `GROUNDING_DAILY_LIMIT = 10` bucket was added
-  (shared-tier only; BYOK-Gemini users pay their own cost via their own key, already
-  covered by the existing BYOK bucket).
-- **Built, reviewed (full literal file content shown twice, per the user's explicit
-  review standard), but NOT yet committed or deployed.** Full implementation exists
-  in the working tree: `worker/src/providers/gemini.ts` (`callGemini`/
-  `generateContent` grounding-aware, `GeminiGroundingResult` type),
-  `worker/src/prompt.ts` (`sourceRule`/`joinWithAnd` extended to a third possible
-  source, resolving the "ONLY the passages... do not use outside knowledge"
-  contradiction with granting a live search tool — no new prompt section or
-  citation-format instruction needed, unlike the reverted Brave design, since
-  Gemini's own structured `groundingMetadata` replaces the fabricated Web N label
-  scheme entirely), `worker/src/validate.ts` (`enableWebSearch`, available to shared
-  tier and to BYOK requests that specifically chose provider `'gemini'`, rejected
-  outright for every other BYOK provider), `worker/src/rateLimit.ts`
-  (`GROUNDING_DAILY_LIMIT`), `worker/src/index.ts` (threading + the new bucket
-  check), `src/lib/answerRequest.ts` (`webSources`/`searchEntryPointHtml` surfaced,
-  kept optional to avoid touching every pre-existing test mock),
-  `src/lib/webSearchSetting.ts` (new, default-OFF localStorage toggle, mirrors
-  `diagramImageSetting.ts`), `src/components/QueryPanel.tsx` (the toggle with an
-  always-visible one-line description next to it, a 🌐 badge, a real "Web sources"
-  link list, and the ToS-mandated `searchEntryPointHtml` widget rendered via
-  `dangerouslySetInnerHTML` — trusted content from the project's own configured
-  Gemini response, not user-supplied). 237/237 worker tests (was 211), 129/129
-  frontend tests, `tsc`/`oxlint` clean both sides, production build clean.
-  **Blocking gate before commit/deploy: item 1 — a real live call proving
-  `google_search` combined with a genuine multi-passage prompt actually uses both
-  the passages AND can search, neither silently suppressed.** A first attempt hit a
-  real `429 RESOURCE_EXHAUSTED` from Google (confirmed via `ai.google.dev/gemini-api/
-  docs/rate-limits`: RPD quota resets at midnight Pacific time) — the request itself
-  was confirmed well-formed and sent correctly, but the actual model response
-  couldn't be observed. Not retried in a loop; waiting for the reset window, then
-  one clean attempt.
+  provider, no new key, reuses the existing `GEMINI_API_KEY`. `tools:
+  [{"google_search": {}}]` (snake_case in the raw REST body, confirmed against
+  `ai.google.dev/gemini-api/docs/generate-content/google-search`) added alongside
+  the existing prompt; response gains `candidates[0].groundingMetadata` with
+  `groundingChunks[].web.{uri,title}` (real structured sources — replaces the
+  reverted Brave design's fabricated Web-N label scheme entirely) and
+  `searchEntryPoint.renderedContent` (Google's Grounding ToS-mandated widget,
+  rendered alongside any grounded result shown to an end user).
+- **Item 1 (live verification) attempted four times across two sessions, never
+  resolved to a clean success — `429 RESOURCE_EXHAUSTED` every time a grounded
+  call was actually attempted**, across three separate free keys/accounts (a temp
+  key, the production key, and a third the user checked outside this session's
+  scope), while non-grounded calls on the same keys succeeded instantly. A
+  diagnostic call against a different, deprecated model (`gemini-2.5-flash-lite`)
+  returned a clean, different `404` — confirming the key itself is valid and
+  reachable, ruling out a fully-locked account, but not resolving the grounding
+  quota question either way. Waited past the documented Pacific-midnight RPD
+  reset window — still `429` afterward. Raw error bodies inspected directly:
+  neither attempt carried a `retryDelay` or a `QuotaFailure` detail with a quota
+  metric name, so the API's own error text never actually told us RPM vs. RPD.
+  **Conclusion: free-tier Google Search grounding appears to require a
+  billing-linked Google Cloud project to unlock any real quota** — consistent
+  with multiple reports on Google's own developer forums. See AGENTS.md Session
+  25 for the full blow-by-blow.
+- **Final scope, decided in light of that evidence: BYOK requests with provider
+  `"gemini"` only — shared-tier eligibility removed entirely, not narrowed.**
+  `worker/src/validate.ts`'s shared branch no longer carries `enableWebSearch` at
+  all; a shared-tier request with it set to `true` is rejected outright with a
+  400, same "don't guess, reject" pattern as every other type-enforced
+  restriction in this file. `worker/src/rateLimit.ts`'s `GROUNDING_DAILY_LIMIT`
+  bucket removed entirely — no longer applicable once the shared tier can never
+  trigger it (removing it actually restored `rateLimit.ts` to being
+  byte-identical to its pre-Milestone-12 state). `src/components/QueryPanel.tsx`'s
+  `isGeminiEffective` narrowed to BYOK-gemini only; the toggle carries an inline
+  "(Experimental)" label and an unverified-account caveat, matching
+  `ByokPanel.tsx`'s `EXPERIMENTAL_PROVIDERS` visual treatment exactly — same
+  honesty standard as Milestone 10 Phase C and the three Experimental BYOK
+  providers, never live-verified against a real billing-enabled grounding call.
+  235/235 worker tests, 129/129 frontend tests, `tsc`/`oxlint` clean both sides,
+  production build clean. Full literal content of every changed file shown for
+  review before shipping.
+- **Committed (`3543d01`), pushed, and deployed — both Worker and frontend.**
+  Worker live-verified post-deploy: non-grounded `/answer` unaffected
+  (backward compatible), shared-tier `enableWebSearch: true` correctly rejected
+  with `400` in production. Frontend deployed and bundle-hash verified against
+  the live production site, including confirming the live bundle literally
+  contains the new "(Experimental)" toggle copy. Revisit shared-tier eligibility
+  if a billing-enabled key becomes available to complete real live verification.
 
 ### 13. Export answer/chat as PDF ✅ COMPLETE — Session 19
 - [x] `src/lib/pdfExport.ts` (jsPDF, manual page-break via `ensureSpace()`) + "Export

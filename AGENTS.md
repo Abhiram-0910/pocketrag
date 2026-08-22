@@ -2785,4 +2785,120 @@ BYOK success-path verification for Anthropic/Grok/OpenRouter, milestones 15-16.
 
 ---
 
+### Session 25 — 2026-08-22
+**Goal:** Resolve Milestone 12's blocking live-verification gate (item 1) one way
+or another, then ship the feature in whatever scope the real evidence actually
+supports — not the scope originally planned.
+
+**item 1 attempted four times across this session and the prior one, never
+resolved to a clean success.** Each attempt used a genuinely different key or
+model to isolate the cause, not the same call repeated hoping for a different
+result:
+1. Temp key (user-supplied, explicitly not the production key) — `429
+   RESOURCE_EXHAUSTED`.
+2. Production key (`worker/.dev.vars`'s `GEMINI_API_KEY`) — `429
+   RESOURCE_EXHAUSTED`, byte-identical error body to attempt 1.
+3. Raw error body inspection (no new call) — confirmed neither response carried a
+   `retryDelay` (`google.rpc.RetryInfo`) or a `QuotaFailure` detail with a quota
+   metric name; only a generic `google.rpc.Help` link in both. The error itself
+   doesn't distinguish RPM from RPD.
+4. Diagnostic call against `gemini-2.5-flash-lite` instead of `gemini-3.5-flash-lite`,
+   same key — a clean, different `404 NOT_FOUND` ("no longer available to new
+   users"), not a `429`. Useful signal: the key itself is valid and reachable
+   (a dead key would 401/403, not a model-specific 404 with a helpful redirect
+   message) — the account isn't universally locked out. But this didn't test
+   `gemini-3.5-flash-lite`'s own quota, so it neither confirmed nor ruled out
+   whether that model's quota had reset.
+
+Checked the actual reset window (`ai.google.dev/gemini-api/docs/rate-limits`:
+RPD resets at midnight Pacific) and waited past it — still `429` afterward.
+Requested the user check `ai.dev/rate-limit` directly in their own browser
+(same "can't authenticate as the user" boundary as every prior account-dashboard
+check in this project) rather than continue guessing from the API's own
+generic error text.
+
+**User's conclusion, based on the pattern across three separate free
+keys/accounts (temp key, production key, and — per the user's own account
+history — a third tried outside this session): free-tier Google Search
+grounding appears to require a billing-linked Google Cloud project to unlock
+any real quota**, consistent with multiple reports on Google's own developer
+forums. Non-grounded calls on the same keys succeeded instantly throughout —
+this is specific to the grounding tool, not a general account problem.
+
+**Final scope decision: restrict `enableWebSearch` to BYOK requests with
+provider `"gemini"` only — shared-tier eligibility removed entirely, not just
+narrowed.** A deliberate, final decision, not a temporary workaround:
+- `worker/src/validate.ts` — the shared branch of `ValidationResult` no longer
+  carries `enableWebSearch` at all (mirrors `image`'s existing "the type itself
+  enforces the restriction" rigor, just the other tier); a shared-tier request
+  with `enableWebSearch: true` is rejected outright with a 400, same
+  "don't guess, reject" pattern as the existing non-Gemini BYOK rejection —
+  never silently dropped.
+- `worker/src/rateLimit.ts` — `GROUNDING_DAILY_LIMIT` and its whole cost-bound
+  comment block removed entirely; with the shared tier no longer able to
+  trigger it, the bucket had no reason to exist. Removing it actually restored
+  `rateLimit.ts` to being byte-identical to its pre-Milestone-12 committed
+  state — confirmed via `git diff` showing zero changes to that file in the
+  final commit.
+- `worker/src/index.ts` — the grounding-specific rate-limit check removed;
+  `enableWebSearch` now derived as `validation.keySource === 'own' ?
+  validation.enableWebSearch : false`, mirroring the existing `image` derivation
+  pattern exactly (just the other tier) so a shared-tier request always calls
+  Gemini with grounding off, never just "unset."
+- `src/components/QueryPanel.tsx` — `isGeminiEffective` narrowed from
+  `keySource === 'shared' || provider === 'gemini'` to
+  `keySource === 'own' && provider === 'gemini'` only; the toggle no longer
+  renders at all for shared-tier users. Added an inline "(Experimental)" suffix
+  to the toggle's own label, plus a caveat line under it ("Not yet verified
+  against a live billing-enabled account — if something goes wrong, you'll see
+  a generic error message"), matching `ByokPanel.tsx`'s existing
+  `EXPERIMENTAL_PROVIDERS` visual treatment exactly, per the user's explicit
+  instruction to hold this feature to the identical honesty standard.
+- Tests updated to match: `validate.test.ts`'s shared-tier grounding-acceptance
+  tests replaced with shared-tier-rejection tests (`'enableWebSearch' in
+  result` checked to be `false`, not just the value); `index.test.ts`'s
+  shared-tier grounding tests and the now-nonexistent bucket-independence test
+  replaced with a shared-tier-rejection test and BYOK-gemini-only coverage.
+
+**Verification:** 235/235 worker tests (was 237 — net -2 from removing the
+shared-tier-eligible test cases that no longer apply), 129/129 frontend tests
+(unchanged — `QueryPanel.tsx` has no dedicated test file, matching this
+project's established pattern of relying on real-browser verification for
+component behavior), `tsc`/`oxlint` clean both sides, production build clean.
+Full literal content of every changed file shown for review before shipping —
+`validate.ts`, `rateLimit.ts` (unchanged, confirmed via `git diff`), `index.ts`,
+`validate.test.ts`, `index.test.ts`, `QueryPanel.tsx` — per the review standard
+already established for every feature this session.
+
+**Committed, pushed, and deployed — both Worker and frontend.** Code committed
+as `3543d01` ("Add hybrid web search via Gemini-native grounding, BYOK-gemini
+only (Milestone 12)"), pushed to `origin/master`. Worker deployed via
+`wrangler deploy` after a clean `--dry-run` (Version ID
+`d51d7491-e4b6-4778-bcd3-fde37ef372ca`); live-verified directly against
+production: a non-grounded `/answer` call still returns a correct grounded
+answer with `webSources: []` (backward compatible), and a shared-tier request
+with `enableWebSearch: true` correctly returns `400` with the exact rejection
+message. Frontend built and deployed via `wrangler pages deploy dist
+--project-name=pocketrag --branch=main`; `wrangler pages deployment list`
+confirms **Production**, branch `main`, commit `3543d01`. Bundle-hash verified
+(deployment subdomain and cache-busted `pocketrag.pages.dev` both served
+`index-Tvnnhyyw.js`/`index-C0B4REZ8.css`), and the live bundle confirmed to
+literally contain both "Allow Gemini to search the web (Experimental)" and the
+unverified-account caveat text, not just a matching hash.
+
+**Milestone 12 is now closed in this honestly-scoped final state** — a real,
+working feature for BYOK users with their own billing-enabled Gemini key,
+explicitly marked unverified in both the UI and this history, never claiming
+more certainty than the actual evidence supports. Revisit shared-tier
+eligibility if a billing-enabled key becomes available to complete real live
+verification.
+
+**Next session should start with:** the standing backlog — Milestone 9 Phase B
+(PDF/multi-page Notes support, planned and approved in Session 24, ready to
+implement on explicit go-ahead — no longer blocked on anything from Milestone
+12), Milestone 10 Phase C, BYOK success-path verification for
+Anthropic/Grok/OpenRouter, milestones 15-16.
+
+---
+
 <!-- Copy the block above for each new session -->
