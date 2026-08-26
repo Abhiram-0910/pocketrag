@@ -241,11 +241,23 @@ Gemini's transcribed text isn't byte-identical run to run — see
 ARCHITECTURE.md's Key Architectural Decisions. 235/235 worker tests, 129/129
 frontend tests, `tsc`/`oxlint` clean both sides. See AGENTS.md Session 26.
 
+**Milestone 15 (security review) is now fully complete — Session 27.** Full audit
+against this project's own accumulated trust-model claims, not a generic checklist —
+see `SECURITY_REVIEW.md` for the complete claim → method → result → verdict report
+across all 6 areas. Two real gaps found and fixed: an unsanitized
+`dangerouslySetInnerHTML` on Gemini grounding's `searchEntryPointHtml` (now sanitized
+via `dompurify` + a server-side length cap), and a high-severity `pdfjs-dist` CVE (now
+upgraded to `6.2.108`, live-verified end to end with a real PDF). Everything else
+checked — provider/shared/Discord key handling, 7 docs-vs-code trust-boundary claims,
+rate-limiting/abuse surface (including a live burst test), CORS, and client-supplied
+data reaching a provider without server-side revalidation — passed both static and
+live adversarial checks. See AGENTS.md Session 27.
+
 Full roadmap (Milestones 7-16) in 🟢 below. Standing candidates: Milestone 10
 Phase C (BYOK extension, parked), BYOK success-path verification for
 Anthropic/Grok/OpenRouter (live-verify a real grounded answer once test keys
 are available — flip out of `EXPERIMENTAL_PROVIDERS`, no other code change
-needed), and milestones 15-16.
+needed), and milestone 16 (final E2E retest, delivery).
 
 ---
 
@@ -489,8 +501,38 @@ needed), and milestones 15-16.
       infrastructure). Frontend-only, no Worker change. Deployed and bundle-hash
       verified against the live production site. See AGENTS.md Session 24.
 
-### 15. Security review
-- `/claude-security` → scan codebase, fix findings
+### 15. Security review ✅ COMPLETE — Session 27
+- [x] Full audit against this project's own accumulated trust-model claims (not a
+      generic checklist) across 6 areas: secret-leak sweep (all 5 BYOK providers +
+      shared key + Discord + Milestone 12's grounding path), docs-vs-code trust
+      boundary reconciliation (7 claims checked), rate-limiting/abuse surface,
+      dependency/supply-chain, CORS/origin validation, client-supplied data reaching
+      a provider without server-side revalidation. Static read-through + live
+      adversarial requests against local `wrangler dev` for every section. Findings
+      logged in `SECURITY_REVIEW.md` (claim → method → result → verdict).
+- [x] **Finding 1 (fixed): unsanitized `dangerouslySetInnerHTML` on Gemini grounding's
+      `searchEntryPointHtml`** — Google's own docs never confirmed this widget HTML
+      is safe to render raw (checked directly). Fixed with `dompurify`
+      (`src/lib/sanitizeHtml.ts`) at both `QueryPanel.tsx` render sites, plus a
+      defensive `MAX_SEARCH_ENTRY_POINT_HTML_LENGTH` (50,000 char) truncation
+      server-side in `providers/gemini.ts`. Tested (script/event-handler/`javascript:`
+      payloads stripped, benign widget shape preserved byte-for-byte); real-widget
+      fidelity remains unverified for the same reason Milestone 12's grounding
+      feature itself has never been live-verified (free-tier `429
+      RESOURCE_EXHAUSTED`).
+- [x] **Finding 2 (fixed): `pdfjs-dist@6.1.200` high-severity CVE** (arbitrary JS
+      execution on a malicious PDF), directly reachable — every user-uploaded PDF is
+      parsed by it in-browser. Upgraded to `6.2.108`. Live-verified end to end with a
+      synthetic test PDF: upload → extraction → chunking → embedding → a real query
+      → a real grounded Gemini answer, plus diagram-detection on a diagram-heavy
+      page. Zero console errors.
+- [x] Live rate-limit burst test (§3): tripped the `ocr` bucket for real against
+      `wrangler dev` — confirmed the `429` path short-circuits before any Gemini
+      call (2-3ms vs 470-494ms for a real provider call).
+- [x] Everything else (provider/shared/Discord key handling, 7 docs-vs-code claims,
+      CORS, client-data revalidation) passed both static and live adversarial
+      checks — no further gaps found. Full report in `SECURITY_REVIEW.md`. See
+      AGENTS.md Session 27.
 
 ### 16. Final E2E retest, GitHub remote + push, delivery
 

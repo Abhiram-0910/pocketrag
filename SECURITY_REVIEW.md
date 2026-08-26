@@ -1,0 +1,344 @@
+# SECURITY_REVIEW.md — PocketRAG (Milestone 15)
+
+Audit date: 2026-08-26. Checked against this project's own accumulated trust-model
+decisions (AGENTS.md, ARCHITECTURE.md), not a generic checklist — see the approved
+audit plan for the six claims this review is structured around. Each finding below is
+logged as **claim → method → result → verdict**. No fixes are applied inline except
+where explicitly noted (one severity exception, approved mid-review — see §1, Finding
+1.1).
+
+Scope note: this review covers the areas in the approved plan (secrets, docs-vs-code
+trust boundaries, rate-limiting/abuse, dependencies, CORS, client-data revalidation).
+It does not cover LLM prompt-injection resistance (a RAG-inherent, model-behavior
+concern distinct from the trust-boundary/secret-handling scope this review targets) or
+general code quality/QA issues found along the way that carry no security implication.
+
+---
+
+## 1. Secret-leak sweep
+
+**Scope:** the 5 BYOK provider keys, the shared `GEMINI_API_KEY`, `DISCORD_WEBHOOK_URL`,
+and — per an explicit addition to the approved plan — the Milestone 12 grounding path
+(`webGrounding`/`webSources`/`searchEntryPointHtml`), traced end-to-end as the newest
+code touching the request pipeline rather than assumed safe by proximity to
+already-reviewed code.
+
+### Finding 1.1 — `searchEntryPointHtml` rendered via unsanitized `dangerouslySetInnerHTML` (FIXED)
+
+- **Claim:** the code comment at `QueryPanel.tsx`'s grounding-widget render site
+  asserted `searchEntryPointHtml` is "trusted content from our own configured Gemini
+  API response, not user-supplied," and rendered it via `dangerouslySetInnerHTML`
+  with no sanitization step anywhere in the pipeline.
+- **Method:** static trace of the full data path — `providers/gemini.ts`'s
+  `extractGrounding()` reads `groundingMetadata.searchEntryPoint.renderedContent`
+  straight out of Gemini's raw API response → returned unmodified through
+  `callGemini()` → `index.ts`'s `handleAnswer` puts it directly into the JSON response
+  → `QueryPanel.tsx` renders it raw at two sites (current-answer and past-turns
+  history) via `dangerouslySetInnerHTML={{ __html: searchEntryPointHtml }}`. Confirmed
+  no `dompurify`/`sanitize-html` existed in either `package.json` before this fix.
+  Followed up with a time-boxed check of Google's own documentation
+  (`ai.google.dev/gemini-api/docs/grounding`, `ai.google.dev/gemini-api/terms`,
+  `ai.google.dev/gemini-api/docs/generate-content/google-search`) specifically for
+  any statement that this widget's HTML is safe to render unsanitized, or any
+  sanitization guidance.
+- **Result:** Google's documentation and ToS require the widget be **displayed**
+  (and forbid framing/caching/syndicating it) but say **nothing** about its safety
+  for direct DOM injection — the security question is genuinely unaddressed by
+  Google's own docs, not resolved either way. The existing code comment's "trusted...
+  not user-supplied" framing was an unverified assumption. Given this app's specific
+  threat model — an XSS in this origin has direct access to the IndexedDB store
+  holding the user's full document text, i.e. the one thing this project exists to
+  keep local — rendering any externally-sourced HTML unsanitized here is a real gap,
+  independent of how trustworthy Google's widget is presumed to be.
+- **Verdict: GAP FOUND — FIXED INLINE as a severity exception** (approved mid-review
+  rather than deferred to the batch-fix pass, since production was live with this gap
+  and the fix was well-understood and low-risk).
+  - **Fix:** added `dompurify` (new dependency, pre-approved for this exception) and
+    a `sanitizeGroundingHtml()` helper (`src/lib/sanitizeHtml.ts`) wrapping
+    `DOMPurify.sanitize()` with its default config — verified directly against
+    DOMPurify's source that the default allowlist includes `<style>` tags/attributes
+    (needed for the widget's light/dark CSS) while stripping `<script>`,
+    event-handler attributes, and `javascript:` URIs. Applied at both render sites in
+    `QueryPanel.tsx` (current-answer and past-turns history).
+  - **Defense-in-depth:** added `MAX_SEARCH_ENTRY_POINT_HTML_LENGTH` (50,000 chars,
+    a defensive circuit-breaker rather than an empirically measured bound — no
+    sample response was available to measure against, unlike `MAX_IMAGE_BASE64_LENGTH`)
+    in `providers/gemini.ts`'s `extractGrounding()`, truncating before the value
+    ever reaches the client. This lives Worker-side in `gemini.ts`, not in
+    `validate.ts` — `validate.ts` only shapes client-to-Worker input, and this field
+    flows the other direction (Worker-to-client, sourced from Gemini's response).
+  - **Tests:** `src/lib/sanitizeHtml.test.ts` (4 new tests, jsdom environment) proves
+    a `<script>` tag, an `onerror` handler, and a `javascript:` URI are all stripped,
+    and that benign structural/style content (the shape the real widget uses) passes
+    through unchanged. `worker/src/providers/gemini.test.ts` gained one test proving
+    an oversized `renderedContent` is truncated to exactly 50,000 chars.
+  - **Fidelity verification:** attempted a real live BYOK-gemini grounded call against
+    local `wrangler dev` with a real Gemini key to visually confirm the actual widget
+    still renders correctly post-sanitization — blocked by the same pre-existing
+    `429 RESOURCE_EXHAUSTED` free-tier quota limitation this project already
+    documented and accepted in Milestone 12 (AGENTS.md Session 25); not a regression
+    from this fix, and not something this fix could resolve. As a substitute, ran
+    `DOMPurify.sanitize()` (via `jsdom`) against a realistic Search-Suggestions-widget
+    HTML shape (a `<style>` block with a `prefers-color-scheme` media query, a
+    `<div class="carousel">`, an `<a>` chip) and confirmed byte-for-byte identical
+    output — the sanitizer does not mangle legitimate widget content of the expected
+    shape. **This is not the same as confirming fidelity against Gemini's actual
+    live-generated widget markup**, which remains unverified for the same reason
+    Milestone 12's own grounding feature has never been live-verified — logged
+    honestly here rather than overclaimed, matching this project's standing
+    documentation practice for this exact feature.
+  - **Verification run:** frontend 133/133 tests (was 129, +4), Worker 236/236 tests
+    (was 235, +1), `tsc`/`oxlint` clean both sides, production build clean (bundle-size
+    guard passes — `dompurify` added ~non-trivial but unremarkable weight, well within
+    guard limits).
+  - **Commit:** _pending — will be added once this document is reviewed and the
+    change is committed, per the agreed sequencing (full document reviewed before any
+    commit)._
+
+### Remaining §1 checks (all provider keys, shared key, Discord)
+
+- **Claim:** every provider key lives only in a request-scoped variable, is passed
+  only via an auth header (never a URL), and is never logged or echoed to the client
+  or Discord; `logProviderError`/`sendDiscordAlert` only ever carry the sanitized
+  `{provider, model, status, message}` shape, never a raw request body or `apiKey`
+  field.
+- **Method:** read all 5 provider files in full
+  (`providers/{gemini,openai,anthropic,grok,openrouter}.ts`) — confirmed each puts
+  its key only in `x-goog-api-key` / `Authorization: Bearer` / `x-api-key` headers,
+  never a URL, and the key parameter never gets assigned to anything outside the
+  function's local scope. Read `index.ts`'s `logProviderError`, `notifyDiscordOfFailure`,
+  `logOcrFailure`, `notifyDiscordOfOcrFailure`, and `discord.ts`'s `buildDiscordPayload`
+  in full — confirmed `apiKey`/raw request `body` are never parameters to any of
+  these functions (the OCR-specific loggers go further: no `message`/`err` parameter
+  at all, by design, since OCR requests carry real note content). Cross-referenced
+  against `index.test.ts`'s existing `realSecretKey`-based regression tests (lines
+  402, 437, 684, 714 and others), which already encode this exact guarantee as
+  automated tests — not just a one-time manual check.
+  Live adversarial test: sent a distinctive fake key
+  (`sk-DISTINCTIVE-FAKE-KEY-abhitest-1234567890`) against local `wrangler dev` for
+  all 5 providers on both `/answer` and `/models` (10 requests total) and confirmed
+  the fake key string never appeared in any response body.
+- **Result:** all 10 adversarial requests passed — 502s (or one 200 from OpenRouter,
+  see informational note below) with no key leakage in any response body. Static read
+  confirms the same structurally, not just per this one test run. Additional live
+  corroboration: `DISCORD_WEBHOOK_URL` was configured in local `.dev.vars`, so the
+  same adversarial batch fired real Discord notifications — the user independently
+  watched the actual Discord channel receive all 9 expected alerts (one per failed
+  call: 5 providers × `/answer`, plus 4 of 5 on `/models` since OpenRouter's returned
+  `200`), each showing only the sanitized `{provider, model, status, message}` shape.
+  One alert (OpenAI) contained a masked partial-key fragment (`sk-DISTI***7890`) in
+  its `message` field — confirmed to be OpenAI's own masked echo of the invalid key in
+  their error response body (matching the fake key's first/last characters), not a
+  PocketRAG-side leak: `extractFailureDetails` and `logProviderError`/`sendDiscordAlert`
+  pass the provider's raw error body through as-is, and OpenAI itself truncates the key
+  to a non-reversible fragment before including it — no code change indicated.
+- **Verdict: PASS.**
+
+**Informational, not a PocketRAG finding:** the OpenRouter `/models` fake-key request
+returned `200` with a full real model catalog (31KB of model data), not a `401` like
+the other 4 providers. This is OpenRouter's own API design — their `/v1/models`
+endpoint is publicly listable without a valid key — not a gap in this project's code.
+`checkRateLimit`'s `byok` bucket still gates the request either way, so this isn't an
+unrestricted endpoint from PocketRAG's side; it just means an invalid BYOK key won't
+be caught until the first real `/answer` call for OpenRouter specifically.
+
+---
+
+## 2. Docs-vs-code trust boundary reconciliation
+
+| Claim (from ARCHITECTURE.md/AGENTS.md) | Method | Result | Verdict |
+|---|---|---|---|
+| Documents tab has zero network calls anywhere in its pipeline | Read `src/lib/pdf.ts`, `chunker.ts`, `embedding.worker.ts` in full | No `fetch`/network call in any of the three — confirmed structurally, not just by absence of a grep hit (traced each file's full control flow) | PASS |
+| `image` restricted to shared-tier, enforced at the type level, not just a runtime `if` | Read `validate.ts`'s `ValidationResult` union in full | Confirmed: the `'shared'` branch has an `image` field, the `'own'` branch has no such field at all — a BYOK code path cannot read `validation.image` even by typo, since it doesn't exist on that branch's type. Runtime check (`validatedImage && resolvedKeySource !== 'shared'` → reject) also present, not just the type. Live-adversarially confirmed: a raw JSON request with `keySource: 'own'` + `image` attached → `400`, never reached a provider call | PASS |
+| `enableWebSearch` restricted to BYOK+gemini only, same type-level rigor | Read `validate.ts`'s `ValidationResult` union | Confirmed: the `'shared'` branch has no `enableWebSearch` field at all (deliberately, per its doc comment mirroring `image`'s pattern). Two independent runtime checks exist (`resolvedEnableWebSearch && resolvedKeySource === 'shared'` → reject; `resolvedEnableWebSearch && provider !== 'gemini'` → reject). Live-adversarially confirmed both: shared-tier + `enableWebSearch: true` → `400`; BYOK+openai + `enableWebSearch: true` → `400` | PASS |
+| Chunk count capped at 5, 2000 chars/chunk, enforced server-side, not just documented | Read `validate.ts`'s `validateAnswerRequest` | `chunks.slice(0, MAX_CHUNKS)` (line 224) and `chunk.text.slice(0, MAX_CHUNK_TEXT_LENGTH)` (line 233) both run before the chunks are ever used in `buildPrompt()`. Live-adversarially confirmed by sending 20 chunks with distinct `documentId`s and reading back the response's `docLabels` — exactly 5 came through, proving the cap is enforced on the actual data flow, not just present in validation logic that could theoretically be bypassed downstream | PASS |
+| `MAX_OCR_BASE64_LENGTH` (21MB) left unchanged for Phase B, PDF requests checked against the same cap as images | Read `validate.ts`'s `validateOcrRequest` and `OCR_ALLOWED_MIME_TYPES` | `base64.length > MAX_OCR_BASE64_LENGTH` check applies uniformly regardless of `mimeType` — no PDF-specific carve-out or separate (larger/smaller) cap exists | PASS |
+| Worker rate-limits by `CF-Connecting-IP`, not a spoofable header | Read `index.ts`'s `fetch` handler | `const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown'` — this header is set by Cloudflare's edge and cannot be client-spoofed for traffic actually routed through Cloudflare (a client-supplied `CF-Connecting-IP` is overwritten at the edge). No fallback to `X-Forwarded-For` or any other client-controllable header | PASS |
+| `docLabels` frozen per conversation, capped, rejected on malformed/duplicate | Read `validate.ts`'s `isValidDocLabel`/`hasDuplicateDocLabels`, `labels.ts`'s `assignDocLabels` | Capped at `MAX_DOC_LABELS` (20) via `slice`, each entry shape-checked, duplicate `documentId`/`label` both explicitly rejected (fail-closed, not "guess which to keep"). Live-adversarially confirmed both duplicate cases → `400` | PASS |
+
+**Verdict: PASS on all 7 claims checked.** No docs-vs-code gap found this session
+(unlike the 100MB PDF-limit precedent this review was specifically watching for) — the
+type-level enforcement claims in particular held up under both static trace and live
+adversarial bypass attempts.
+
+**Minor observation, not logged as a finding (no security implication):** `assignDocLabels`
+can output more than `MAX_DOC_LABELS` (20) entries in a single response if a
+conversation's `existing` map is already near the cap and new chunks introduce several
+more distinct documents in one turn — the *next* request's incoming `docLabels` then
+gets silently re-capped to 20 by `validate.ts`, meaning the oldest overflow label(s)
+from that response could be dropped/renumbered in a very long, many-document
+conversation. This is a functional edge case (potential citation mislabeling in an
+unusual scenario), not a trust-boundary or secret-handling issue, so it's out of this
+review's scope — noting it here for whoever picks up general QA next, not as a
+security finding.
+
+---
+
+## 3. Rate-limiting & abuse surface
+
+- **Claim:** all reachable endpoints sit behind a rate-limit check before any
+  provider call, using three buckets (`shared` 50/day, `byok` 500/day, `ocr` 20/day),
+  and none is reachable without tripping its bucket.
+- **Method:** read `index.ts`'s three handlers (`handleAnswer`, `handleModels`,
+  `handleOcr`) and the top-level `fetch` dispatcher in full — confirmed the only three
+  POST routes (`/answer`, `/models`, `/ocr`) each call `checkRateLimit` before any
+  provider dispatch, and the `OPTIONS` preflight handler does nothing but return CORS
+  headers (no provider work reachable there). Read `rateLimit.ts` in full — confirmed
+  the three limit values and their documented rationale (`shared` protects this
+  project's own Gemini quota; `byok`/`ocr` guard against the Worker being used as an
+  anonymizing relay, sized looser since the abuser burns their own key/quota).
+- **Result:** all three endpoints confirmed to call `checkRateLimit` on every request
+  before any provider work; the non-atomic KV get-then-put (`ponytail:`-marked
+  in `rateLimit.ts`) is an accepted, documented soft-cap tradeoff, not a silent gap —
+  re-confirmed this is still accurate (no Durable Object was introduced elsewhere that
+  would make this stale).
+- **Live burst test:** sent 22 real requests to `/ocr` against local `wrangler dev`
+  (the `ocr` bucket, limit 20 — the smallest of the three, so the fastest one to
+  actually trip live) with a validation-passing but garbage image payload. Local KV
+  already carried 6 counted requests from earlier in the same UTC day (Session 26's
+  own live OCR verification, persisted on disk across `wrangler dev` restarts — itself
+  useful corroboration that the KV counter is genuinely persistent, not just an
+  in-process counter that resets on restart), so the trip landed at request 15 rather
+  than 21 — consistent with, not contradicting, the 20/day limit.
+- **Result:** requests 1-14 each returned `502` (Gemini genuinely called and failing
+  to parse the garbage image, confirmed by exactly 14 matching `ocr_call_failed` log
+  lines) at 470-494ms latency each. Every request from 15 onward returned `429` with a
+  `resetAt` timestamp, at **2-3ms latency** — a ~150-200x difference that directly
+  proves those requests short-circuited before any network call to Gemini, not after
+  one. Zero `ocr_call_failed` log lines exist for any of the 429'd requests, confirming
+  no provider call was attempted once the bucket tripped.
+- **Verdict: PASS** — both the static code-path guarantee (§3 above) and a live trip
+  confirm the same thing: the rate limit check provably gates the provider call, not
+  just the billing/response after the fact.
+
+---
+
+## 4. Dependency / supply-chain check
+
+Ran `npm audit` in both the frontend root and `worker/` (separate npm projects,
+separate lockfiles, checked independently as planned) and triaged every finding
+against actual reachability, per the plan's three-way outcome (not-reachable /
+accepted-risk / fixed).
+
+### Frontend
+
+| Package | Severity | Reachable at runtime? | Notes | Verdict |
+|---|---|---|---|---|
+| `pdfjs-dist@6.1.200` → `6.2.108` | High — "Arbitrary JavaScript execution upon opening a malicious PDF" | **Yes** — direct runtime dependency, ships to the browser, parses every user-uploaded PDF | The one finding with real relevance to this app's actual attack surface: a user opens an arbitrary PDF (their own, but also potentially a PDF from an untrusted source if they're testing/exploring) | **GAP FOUND — FIXED** (severity exception, approved). See below for the upgrade, test, and live-verification detail. |
+| `@huggingface/transformers@4.2.0` (pulls in `onnxruntime-node`, `sharp`, `adm-zip`) | High (via transitive Node-only bindings) | **No** — confirmed via `grep` that this package is imported only from `src/workers/embedding.worker.ts`, which runs exclusively in-browser (WebGPU/WASM path per ARCHITECTURE.md); the vulnerable Node-native bindings (`onnxruntime-node`, `sharp`) are optional dependencies resolved at `npm install` time but never bundled into the Vite browser build | Not-reachable in production. No fix currently published upstream for these transitive packages either way | **Accepted — not reachable.** |
+| `nanoid` (via `vite` → `postcss`), `postcss` | High / Moderate | **No** — build-tooling only, never shipped to the browser bundle or the deployed Worker | Fixes available for both; cheap to pick up via a routine `npm audit fix` on `vite`'s chain but not urgent since unreachable by an attacker of the live app | **Accepted — not reachable, low-priority cleanup available.** |
+
+### Worker
+
+| Package | Severity | Reachable at runtime? | Notes | Verdict |
+|---|---|---|---|---|
+| `wrangler`, `miniflare`, `undici` | Moderate / High | **No** — all three are local CLI/dev-tooling (`wrangler dev`, local test runner), never part of the deployed Worker bundle that runs on Cloudflare's edge | The deployed Worker's actual runtime is Cloudflare's own `workerd`, not `undici`/`miniflare` — those only run on the developer's machine | **Accepted — not reachable in production.** |
+
+### `pdfjs-dist` fix detail
+
+- **Upgrade:** `pdfjs-dist` `6.1.200` → `6.2.108` (`npm install pdfjs-dist@6.2.108`) —
+  confirmed via `npm audit` that this was the only change needed to drop the finding
+  from the report (audit count went from 7 → 6 vulnerabilities, `pdfjs-dist` no longer
+  listed; the remaining 6 are the pre-existing not-reachable findings above, unchanged).
+  A minor version bump within major version 6, so no API surface change was expected
+  for this project's usage (`GlobalWorkerOptions.workerSrc` + `getDocument()`, both
+  stable pdf.js APIs) — verified rather than assumed, see live verification below.
+- **Test suite:** frontend 133/133 (unchanged count — no test needed updating),
+  `tsc`/`oxlint` clean, production build clean (bundle-size guard passes).
+- **Live verification:** generated a synthetic two-page test PDF (via `jspdf`, already
+  a project dependency) — page 1 real extractable paragraph text (distinct,
+  semantically separable sentences for a real embedding/retrieval test), page 2 a
+  diagram (boxes, arrows, labels: "Browser" → "Cloudflare Worker" → "Gemini API") to
+  exercise the diagram-detection/image-rendering path. Drove a real browser session
+  (Playwright, installed temporarily for this one-off verification and uninstalled
+  after, per this project's standing practice) against the local dev server + local
+  `wrangler dev`:
+  - Upload accepted, text extracted correctly from both pages (verified verbatim
+    against the source content, including page 2's diagram labels)
+  - Chunked into 2 chunks (one per page, matching the documented per-page chunking
+    architecture), embedded with zero console errors
+  - Page 2 correctly flagged "📊 may contain a diagram" in the Sources list, confirming
+    `isDiagramLikely` still works against `pdfjs-dist`'s post-upgrade text extraction
+  - Asked a real question ("What does the document say the mitochondrion produces?")
+    against the shared tier — got back a real, correctly grounded, correctly cited
+    Gemini answer: *"Based on the provided document, the mitochondrion produces ATP
+    through oxidative phosphorylation (Doc 1, page 1)."*, with the "Grounded in your
+    documents" banner and `Doc 1 = security-review-test.pdf` legend rendering correctly
+  - Zero console errors across the entire session
+- **Verdict: FIXED, live-verified end to end** (upload → extraction → chunking →
+  embedding → real query → real grounded answer, plus the diagram-detection path).
+
+**Overall §4 verdict:** one real, actionable gap found (`pdfjs-dist`) — **fixed and
+live-verified**. Everything else triaged as not-reachable with a traced reason,
+matching the plan's "pass" bar (every finding explicitly triaged, not silently
+ignored).
+
+---
+
+## 5. CORS & origin validation
+
+- **Claim:** `resolveCorsOrigin()` only allows an exact match against `DEV_ORIGINS`
+  or the configured `PAGES_ORIGIN`; every response path uses it (no hardcoded `*`,
+  no raw-origin echo); a `null` result means no CORS headers at all, never a
+  permissive fallback.
+- **Method:** read `cors.ts` in full (18 lines — the whole file). Traced every `json()`
+  call site in `index.ts` (all success and error paths across all three handlers, plus
+  the `404` fallback and the `OPTIONS` handler) — confirmed every single one derives
+  `origin` from `resolveCorsOrigin(request.headers.get('Origin'), env.PAGES_ORIGIN)`,
+  computed once at the top of `fetch()` and threaded through as a parameter, never
+  recomputed or bypassed in an individual handler.
+- **Result (live adversarial test):** sent a request with `Origin: https://evil.example.com`
+  against `/answer` — response came back with **no** `Access-Control-Allow-Origin`
+  header (confirmed by inspecting the full response header set), while a matching
+  `Origin: http://localhost:5173` (a `DEV_ORIGINS` entry) correctly received one in
+  the earlier adversarial batch.
+- **Verdict: PASS.**
+
+---
+
+## 6. Client-supplied data reaching a provider without server-side revalidation
+
+- **Claim:** every client-originating field on `AnswerRequestBody`/`ModelsRequestBody`/
+  `OcrRequestBody` has a server-side enforcement point independent of whatever the
+  frontend's own UI would ever produce.
+- **Method:** traced each field from `validate.ts`'s validation function through to
+  its point of use, then live-adversarially sent raw JSON (bypassing the frontend
+  entirely) violating each one:
+
+| Field | Server-side guarantee | Live adversarial result |
+|---|---|---|
+| `chunks` (cap 5 / 2000 chars) | Truncated via `.slice()` before `buildPrompt()` | 20-chunk request → capped to 5 (confirmed via response `docLabels`), not rejected |
+| `history` (cap `MAX_HISTORY_TURNS`=3, independent of `SENT_HISTORY_TURNS` the frontend sends) | Truncated via `.slice()`, re-capped regardless of client behavior | 10-turn request → accepted (not rejected, correctly truncated per the "app's own content, not attacker payload" reasoning) |
+| `docLabels` (cap 20, shape-checked, duplicates rejected) | Rejected outright (fail-closed) on any malformed/duplicate entry | Duplicate `documentId` → `400`; duplicate `label` → `400` |
+| `provider` (must be one of 5 known values) | Checked against `SUPPORTED_PROVIDERS.includes()` before any dispatch | `provider: 'evil-provider'` → `400`, never reached the `switch` dispatch |
+| `image` (shared-tier only) | Rejected outright if present on a BYOK request | BYOK + `image` → `400` |
+| `enableWebSearch` (BYOK+gemini only) | Rejected outright on shared tier or non-gemini BYOK | Both variants → `400` |
+| `model` (arbitrary string, cap 128 chars) | **No allowlist** — passed straight into the provider's own API call as the model id | Not a PocketRAG-side risk: this only ever reaches the *user's own* provider account using the *user's own* key (BYOK), so an arbitrary model string just means their own request to their own account fails or targets an unexpected model on their own dime — not a cross-user or server-side risk. No enforcement gap relative to the actual trust boundary. |
+| `apiKey` (BYOK, cap 200 chars, non-empty) | Only ever reaches the specific provider's own hardcoded `API_BASE` (never client-influenceable) via that provider's dedicated wrapper function | Provider allowlist (above) prevents `apiKey` from ever being routed to an unintended endpoint — the pairing of (validated `provider` → fixed `API_BASE` per provider file) means a client can't use its own key against a URL of its choosing |
+| `mimeType` (OCR, exact allowlist) | Checked against `OCR_ALLOWED_MIME_TYPES`, exact match not a wildcard | Disallowed mimeType with extraneous `keySource`/`apiKey` fields present → `400`, confirming those extra fields are simply never read (not silently accepted then ignored downstream — genuinely absent from the type) |
+
+- **Verdict: PASS on all fields checked.** Every client-originating field that could
+  plausibly matter for a trust-boundary violation has an independent server-side
+  enforcement point, verified both by reading the code and by a live adversarial
+  request that bypassed the frontend entirely. No gap found in this section this
+  session (this was the section flagged as highest-value in the approved plan,
+  precisely because it's where "the frontend wouldn't send this" vs. "the server
+  doesn't trust that it won't" gaps tend to hide).
+
+---
+
+## Summary
+
+| # | Area | Verdict | Action |
+|---|---|---|---|
+| 1.1 | `searchEntryPointHtml` unsanitized `dangerouslySetInnerHTML` | **GAP FOUND — FIXED** | DOMPurify + length cap + tests, live corroborated via Discord alert inspection; pending commit |
+| 1 (rest) | Provider/shared/Discord key handling | PASS | none |
+| 2 | Docs-vs-code trust boundary claims (7 checked) | PASS | none (one non-security functional observation noted, not a finding) |
+| 3 | Rate-limiting & abuse surface | PASS | live burst test run (§3) — trip confirmed at ~150-200x latency difference, no provider call once tripped |
+| 4 | Dependency/supply-chain | **GAP FOUND — FIXED** (`pdfjs-dist` 6.1.200 → 6.2.108) | upgraded, full test suite green, live-verified end to end with a real PDF including diagram detection; 6 other findings triaged not-reachable |
+| 5 | CORS & origin validation | PASS | none |
+| 6 | Client-supplied data reaching a provider without revalidation | PASS | none |
+
+**Status: audit complete, both gaps found this session are fixed and verified.**
+Nothing outstanding from the approved plan. Remaining step: your review of this
+document, then AGENTS.md/TODO.md updates and a commit, per the agreed sequencing.

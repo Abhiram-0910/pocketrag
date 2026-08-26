@@ -7,13 +7,14 @@ Claude reads this at the START of every new session to understand what happened 
 
 ## Project State
 **Last updated:** 2026-08-26
-**Current branch:** master (through this session's Milestone 9 Phase B commit — see
-Session 26 below)
+**Current branch:** master (through this session's Milestone 15 security-review
+commits — see Session 27 below)
 **Remote:** `github.com/Abhiram-0910/pocketrag` (private) — pushed through this
-session's commit.
-**Overall status:** MVP **+ Milestones 6-14** feature-complete and **fully deployed in
+session's commits.
+**Overall status:** MVP **+ Milestones 6-15** feature-complete and **fully deployed in
 production** (Milestone 10 Phase C and Milestones 7b's Anthropic/Grok/OpenRouter
-success path remain open — see below and TODO.md). Frontend:
+success path remain open — see below and TODO.md). Milestone 15 (security review) is
+complete — see `SECURITY_REVIEW.md` for the full audit report. Frontend:
 `https://pocketrag.pages.dev` (Cloudflare Pages). API:
 `https://pocketrag-answer.abhiram-dev.workers.dev` (Cloudflare Worker). Supports a
 multi-document library, bulk drag-and-drop, a this-document/all-documents retrieval
@@ -3018,6 +3019,148 @@ handwritten or scanned notes"), not just a matching hash.
 (BYOK extension, parked), BYOK success-path verification for Anthropic/Grok/
 OpenRouter (needs real test keys), milestones 15-16 (security review, final E2E
 retest + delivery).
+
+---
+
+### Session 27 — 2026-08-26
+**Goal:** Milestone 15 — security review. Explicitly framed as an audit, not a coding
+task: before touching anything, laid out a real methodology first (proposed, approved
+before starting) checking against this project's own accumulated trust-model claims
+across AGENTS.md/ARCHITECTURE.md — not a generic checklist. Six areas: secret-leak
+sweep, docs-vs-code trust boundary reconciliation, rate-limiting/abuse surface,
+dependency/supply-chain, CORS/origin validation, and client-supplied data reaching a
+provider without server-side revalidation. Run as one continuous session (not
+pre-split into multiple sessions) per explicit instruction, with a standing rule: any
+real gap found mid-review gets flagged and addressed immediately, not saved for the
+final report.
+
+**Method, for every section:** static read-through of the actual source (not just a
+re-read of prior AGENTS.md claims) paired with live adversarial requests against local
+`wrangler dev` — crafted raw JSON bypassing the frontend entirely, since that's
+specifically where "the frontend wouldn't send this" vs. "the server doesn't trust
+that it won't" gaps hide. Full report in `SECURITY_REVIEW.md` (claim → method → result
+→ verdict per finding).
+
+**Finding 1 (fixed inline, mid-review, as an approved severity exception):**
+`searchEntryPointHtml` — Gemini's Milestone 12 grounding "Search Suggestions" widget
+HTML — was rendered via `dangerouslySetInnerHTML` at both `QueryPanel.tsx` render
+sites with **no sanitization anywhere in the pipeline**. The existing code comment
+called it "trusted content... not user-supplied," but that was never verified. A
+time-boxed check of Google's actual grounding docs/ToS (`ai.google.dev/gemini-api/
+docs/grounding`, `.../terms`, `.../docs/generate-content/google-search`) found they
+require the widget be *displayed* but say **nothing** about its safety for direct DOM
+injection — genuinely unaddressed by Google, not confirmed safe. Given this app's
+threat model (an XSS in this origin has direct IndexedDB access to the user's full
+document text — the one thing this project exists to keep local), this was a real
+gap. Fixed with `dompurify` (new dependency, pre-approved for this exception —
+`src/lib/sanitizeHtml.ts`, default config verified against DOMPurify's own source to
+confirm `<style>` tags/attributes survive while `<script>`/event-handlers/
+`javascript:` URIs are stripped) at both render sites, plus a defensive
+`MAX_SEARCH_ENTRY_POINT_HTML_LENGTH` (50,000 chars, a circuit-breaker not an
+empirically measured bound) truncation in `providers/gemini.ts`'s `extractGrounding()`
+— Worker-to-client, so it lives there rather than in `validate.ts`, which only shapes
+client-to-Worker input. Tested: 4 new frontend tests (script tag, `onerror` handler,
+`javascript:` URI all stripped; benign widget-shaped content passes through
+unchanged), 1 new Worker test (oversized `renderedContent` truncated to exactly
+50,000 chars). Fidelity check: a real live BYOK-gemini grounded call to visually
+confirm the actual widget still renders correctly was attempted against local
+`wrangler dev` with a real key, but blocked by the same pre-existing free-tier `429
+RESOURCE_EXHAUSTED` quota limitation Milestone 12 already documented (Session 25) —
+not a regression from this fix. Substituted a `jsdom`-based check against a realistic
+Search-Suggestions-widget HTML shape (style block with a `prefers-color-scheme` media
+query, a chip link) and confirmed byte-for-byte identical output post-sanitization —
+logged honestly as not the same as confirming against Gemini's actual live-generated
+markup, matching this project's standing practice for this exact feature.
+
+**Additional live corroboration for Finding 1's key-handling claims:** the same
+5-provider fake-key adversarial batch (`sk-DISTINCTIVE-FAKE-KEY-abhitest-1234567890`
+against `/answer` and `/models` for all 5 providers) also fired real Discord alerts —
+the user independently watched the Discord channel receive all 9 expected alerts
+(one per failed call), each showing only the sanitized `{provider, model, status,
+message}` shape. One alert (OpenAI) carried a masked partial-key fragment
+(`sk-DISTI***7890`) in its message field — confirmed to be OpenAI's own masked echo
+of the invalid key in their error response body, not a PocketRAG-side leak.
+
+**Finding 2 (fixed): `pdfjs-dist@6.1.200` high-severity CVE** ("Arbitrary JavaScript
+execution upon opening a malicious PDF"), found via `npm audit` during the
+dependency/supply-chain check — directly reachable, since it's a runtime dependency
+parsing every user-uploaded PDF in the browser. Cross-referenced every other audit
+finding (7 total across frontend + Worker) against actual reachability first — 6 of 7
+triaged as not-reachable with a traced reason (`@huggingface/transformers`'s Node-only
+`onnxruntime-node`/`sharp`/`adm-zip` bindings are never bundled by Vite's browser
+build, confirmed via `grep` that the package is only imported from the in-browser
+`embedding.worker.ts`; `nanoid`/`postcss` are `vite` build-tooling only;
+`wrangler`/`miniflare`/`undici` are Worker-side dev-tooling only, never part of the
+deployed `workerd` runtime). `pdfjs-dist` was the one real, reachable, fixable gap —
+upgraded to `6.2.108` (a minor bump within major version 6, so no API surface change
+expected for this project's stable `GlobalWorkerOptions.workerSrc` + `getDocument()`
+usage — verified, not assumed). Live-verified end to end: generated a synthetic
+two-page test PDF via `jspdf` (already a project dependency) — page 1 real
+extractable paragraph text, page 2 a diagram (boxes/arrows/labels) to exercise the
+diagram-detection path. Drove a real browser session (Playwright, installed
+temporarily for this one-off verification and uninstalled after, same convention as
+every prior session) against local Vite + `wrangler dev`: upload accepted, text
+extracted correctly from both pages verbatim, chunked into 2 chunks (one per page),
+embedded with zero console errors, page 2 correctly flagged "📊 may contain a
+diagram," and a real question ("What does the document say the mitochondrion
+produces?") against the shared tier returned a real, correctly grounded, correctly
+cited Gemini answer ("...the mitochondrion produces ATP through oxidative
+phosphorylation (Doc 1, page 1)."), with the "Grounded in your documents" banner and
+`Doc 1 = security-review-test.pdf` legend rendering correctly.
+
+**Live rate-limit burst test (§3):** sent 22 real requests to `/ocr` against local
+`wrangler dev` (the `ocr` bucket, limit 20 — smallest of the three, fastest to trip
+live) with a validation-passing but garbage image payload. Local KV already carried 6
+counted requests from earlier in the same UTC day (this session's own earlier
+Session-26-era OCR verification, persisted on disk across `wrangler dev` restarts —
+itself useful corroboration that the KV counter is genuinely persistent, not an
+in-process counter), so the trip landed at request 15. Requests 1-14 returned `502`
+at 470-494ms (Gemini genuinely called, confirmed by 14 matching `ocr_call_failed` log
+lines); every request from 15 onward returned `429` at **2-3ms** — a ~150-200x
+latency difference directly proving those requests short-circuited before any network
+call to Gemini, not after one.
+
+**Everything else checked, no further gaps found:** all 5 provider keys + the shared
+key confirmed to live only in request-scoped variables, passed only via auth headers,
+never logged/echoed (static read of all 5 provider files + `index.ts`'s
+logging/Discord functions, cross-referenced against `index.test.ts`'s existing
+`realSecretKey` regression tests). 7 docs-vs-code trust-boundary claims checked
+(Documents tab has zero network calls; `image`/`enableWebSearch` type-level BYOK
+restrictions; chunk/OCR-length caps enforced server-side; `CF-Connecting-IP` used for
+rate-limiting, not a spoofable header; `docLabels` frozen/capped/duplicate-rejected) —
+all held up under live adversarial bypass attempts, unlike the Milestone 9 Phase B
+100MB-limit precedent this review was specifically watching for. CORS confirmed via a
+live `evil.example.com` origin test (no `Access-Control-Allow-Origin` header
+returned). Client-supplied data (`chunks`, `history`, `docLabels`, `provider`,
+`image`, `enableWebSearch`, `model`, `apiKey`, `mimeType`) all confirmed to have an
+independent server-side enforcement point, verified via raw-JSON requests bypassing
+the frontend for every field.
+
+**Minor non-security observation, not a finding:** `assignDocLabels` can output more
+than `MAX_DOC_LABELS` (20) entries in a single response in an unusual many-document
+conversation; the next request's incoming `docLabels` then gets silently re-capped,
+potentially dropping/renumbering the oldest overflow label. Functional edge case, no
+trust-boundary or secret implication — noted in `SECURITY_REVIEW.md` for whoever picks
+up general QA next, not logged as a security finding.
+
+**Two commits, per this project's standing convention:** code fix commit `9ace2ff`
+("Sanitize Gemini grounding HTML and upgrade pdfjs-dist (Milestone 15 security
+review)") — `dompurify` + `sanitizeGroundingHtml()` + both `QueryPanel.tsx` render
+sites + `MAX_SEARCH_ENTRY_POINT_HTML_LENGTH` in `providers/gemini.ts` + `pdfjs-dist`
+bump + their tests — followed by this docs commit (`SECURITY_REVIEW.md`, this entry,
+TODO.md's Milestone 15 closure). Frontend 133/133 tests (was 129, +4), Worker 236/236
+tests (was 235, +1), `tsc`/`oxlint` clean both sides, production build clean
+throughout. Pushed and deployed (both Worker and frontend) immediately following
+these two commits, in the same session — see the deploy confirmation reported to the
+user at session end (Worker version ID, Pages deployment ID, bundle-hash
+verification); not duplicated here to avoid this entry drifting out of sync with the
+actual deploy record if a future redeploy happens without an AGENTS.md edit.
+
+**Milestone 15 is now fully complete.**
+
+**Next session should start with:** the standing backlog — Milestone 10 Phase C (BYOK
+extension, parked), BYOK success-path verification for Anthropic/Grok/OpenRouter
+(needs real test keys), and Milestone 16 (final E2E retest, delivery).
 
 ---
 
