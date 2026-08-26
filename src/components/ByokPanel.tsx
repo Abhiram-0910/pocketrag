@@ -29,6 +29,15 @@ const PROVIDER_LABELS: Record<Provider, string> = {
 // provider error text — see QueryPanel's answerError display.
 const EXPERIMENTAL_PROVIDERS: Provider[] = ['anthropic', 'grok', 'openrouter']
 
+// Gemini's /models list isn't filtered by "available to new users" — it can return a
+// since-deprecated model (e.g. gemini-2.5-flash) ahead of working ones, so picking
+// fetched[0] blindly can auto-select a model that 404s on the very first real question.
+// Prefer the same model the shared tier already pins for exactly this reason
+// (worker/src/providers/gemini.ts's DEFAULT_SHARED_MODEL) when it's present in the
+// fetched list; fall back to fetched[0] only if it's genuinely absent. Found live via
+// Milestone 16's BYOK-Gemini retest (Session 28).
+const PREFERRED_GEMINI_MODEL = 'gemini-3.5-flash-lite'
+
 /**
  * Own-key entry: provider picker, key input, "fetch models" call, model picker. The key
  * lives only in this component's local state — never Zustand, never IndexedDB — so it
@@ -89,9 +98,11 @@ export function ByokPanel({ onChange }: ByokPanelProps) {
         onChange(null)
         return
       }
+      const defaultModel =
+        (provider === 'gemini' && fetched.find((m) => m.id === PREFERRED_GEMINI_MODEL)) || fetched[0]
       setModels(fetched)
-      setSelectedModel(fetched[0].id)
-      onChange({ keySource: 'own', apiKey: trimmedKey, provider, model: fetched[0].id })
+      setSelectedModel(defaultModel.id)
+      onChange({ keySource: 'own', apiKey: trimmedKey, provider, model: defaultModel.id })
     } catch (err) {
       const classified =
         err instanceof WorkerRequestError
