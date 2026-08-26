@@ -7,8 +7,8 @@ Claude reads this at the START of every new session to understand what happened 
 
 ## Project State
 **Last updated:** 2026-08-26
-**Current branch:** master (through this session's Milestone 15 security-review
-commits — see Session 27 below)
+**Current branch:** master (through Session 28's BYOK-Gemini model-default fix —
+see below)
 **Remote:** `github.com/Abhiram-0910/pocketrag` (private) — pushed through this
 session's commits.
 **Overall status:** MVP **+ Milestones 6-15** feature-complete and **fully deployed in
@@ -3161,6 +3161,130 @@ actual deploy record if a future redeploy happens without an AGENTS.md edit.
 **Next session should start with:** the standing backlog — Milestone 10 Phase C (BYOK
 extension, parked), BYOK success-path verification for Anthropic/Grok/OpenRouter
 (needs real test keys), and Milestone 16 (final E2E retest, delivery).
+
+---
+
+### Session 28 — 2026-08-26
+**Goal:** Session A of the Milestone 16 staged retest plan
+(`~/.claude/plans/snoopy-stirring-tide.md`) — Areas 1-3: core document flow,
+retrieval, answer generation. Followed the plan's own staging exactly, including
+asking the user for real BYOK Gemini/OpenAI keys at Area 3 per the plan's explicit
+note.
+
+**Method:** Playwright (installed fresh, uninstalled after — matches every prior
+session's convention), driving the real production site
+(`pocketrag.pages.dev`/`pocketrag-answer.abhiram-dev.workers.dev`), not local dev.
+Two hand-rolled fixture PDFs (`biology.pdf`, `cooking.pdf` — reused jsPDF, already a
+project dependency, rather than adding a new PDF-generation library) built with
+enough content to produce 5 total chunks once embedded (3 + 2), specifically so
+hybrid search's candidate pool (5) exceeds `TOP_K` (3) and reranking actually fires
+— a 1-chunk-per-doc fixture (this session's first attempt) can't exercise the
+RRF-vs-logit score-scale behavior Milestone 11 documented. A real `corrupt.pdf` and
+`throwaway.pdf` for the bad-file and delete-flow tests. All fixture/script files live
+at `/tmp/pocketrag-m16-fixtures/` (not the session scratchpad, deliberately — that
+path is session-UUID-scoped and wouldn't survive into Session B/C/D) and drove a
+**persistent Chromium profile** at `/tmp/pocketrag-m16-profile` so the document
+library (embedded biology.pdf/cooking.pdf) survives across separate script runs —
+IndexedDB/localStorage persist per-profile, so this really does carry state across
+process boundaries, unlike conversation turns (see the honest caveat below).
+
+**Area 1 (core document flow) — pass, matches Session 6/7.** Single upload → ready;
+bulk upload of a good file + `corrupt.pdf` → good file reaches ready, corrupt file
+gets `Invalid PDF structure.` (`classifyPdfError`) without blocking the other, exactly
+as designed. Reload → `restoreDocuments` brought both ready docs back from IndexedDB;
+the never-persisted corrupt row correctly did not reappear. Delete (via the real
+inline two-step confirm, not a DOM/API shortcut) on a third throwaway doc → gone
+immediately and after reload, both siblings intact. WebGPU/wasm: this sandbox still
+has no GPU (consistent since Session 2); did not re-attempt a live GPU run, left as
+structurally untestable here per the plan's own scoping.
+
+**Area 2 (retrieval) — pass, matches Sessions 15-18.** With biology.pdf selected and
+scope=`document`, a cooking-topic question correctly retrieved only biology's own
+(irrelevant) chunks and Gemini correctly declined to fabricate an answer
+("The provided passages do not contain information...") — RRF-only score scale
+(~0.03) since only 3 candidates ≤ `TOP_K`, so reranking didn't fire for this scope.
+Switching to scope=`all` and re-asking the identical question correctly surfaced
+`cooking.pdf`'s chunk as the top result (Session 6-style cross-document proof), and
+the score scale visibly jumped to raw cross-encoder logits (5.18, -5.18, -11.5) —
+live confirmation reranking fired now that the pool (5) exceeds `TOP_K` (3), and of
+the known RRF-vs-logit display quirk from Milestone 11. A pronoun follow-up
+("What dish is that technique usually used for?") correctly kept surfacing
+`cooking.pdf` via retrieval-query blending. Across all turns, `Doc 1 = biology.pdf` /
+`Doc 2 = cooking.pdf` stayed frozen once assigned, including the turn where biology
+wasn't retrieved at all — exact match to Session 17's proof. (First attempt at this
+sequence showed one turn silently missing from the conversation history with no
+error surfaced by the loose test script — re-ran with explicit success/error/timeout
+detection on every turn and got a clean, fully-accounted-for result; treating the
+first run as a script artifact, not an app bug, since the clean rerun reproduced
+twice.)
+
+**Area 3 (answer generation) — pass, with one real regression found and fixed.**
+The Area 2 conversation above **is** the shared-tier Gemini proof (4 real grounded
+answers, correct citations, real citation-decline behavior on the deliberately
+mismatched first turn). BYOK: user provided real Gemini and OpenAI keys via
+scratch files (`/tmp/pocketrag-scratch/*.txt`, read directly by the Playwright
+script, never echoed/logged/printed anywhere in tool output, deleted immediately
+after use — twice, once per verification round). **Finding:** BYOK-Gemini's model
+picker auto-selected `fetched[0]` from Gemini's own `/models` list with no filtering
+— live-verified that the model Google's API actually returns first,
+`gemini-2.5-flash`, is now `404`-deprecated for new users (`"...no longer available
+to new users... use models/gemini-3.6-flash..."`), the same class of issue already
+known and pinned around for the *shared* key (`DEFAULT_SHARED_MODEL` in
+`gemini.ts`), just never hit on the BYOK path before because no real fresh key had
+exercised it live until this session. **Fixed** (`ByokPanel.tsx`): prefer
+`gemini-3.5-flash-lite` — the exact model the shared tier already trusts — when
+present in the BYOK-fetched list, falling back to `fetched[0]` only if genuinely
+absent. Frontend-only change (Worker untouched). 133/133 frontend tests, `tsc`/
+`oxlint` clean, production build clean. **Deployed** (`wrangler pages deploy`,
+bundle-hash-verified identical between local build and
+`pocketrag.pages.dev`'s live `index-DktHxhx3.js`), then **live-re-verified against
+production with the real key**: no manual override this time, the model dropdown
+auto-selected `gemini-3.5-flash-lite` on its own, and a real question produced a
+real grounded, correctly-cited answer. BYOK-OpenAI: live-verified separately (its
+own `runTurn`, no code change needed there) — a real question about mayonnaise
+correctly cited `Doc 2 = cooking.pdf` with the exact "Grounded in your documents"
+success banner (not the `answerError`/raw-passages-fallback path), i.e. a genuine
+200-level success at the `/answer` HTTP layer, not merely "no Discord alert fired"
+(the Discord webhook only fires *on* failure — its absence was never the evidence
+here; the rendered answer text and citation are). Anthropic/Grok/OpenRouter failure
+path: OpenRouter's `/models` endpoint turned out to accept a garbage key
+unauthenticated (a public catalog, not gated) — the UI failure path only shows up at
+`/answer`, so re-verified all three directly against the live Worker with `curl` and
+a deliberately invalid key: all three returned `502` with the identical sanitized
+`"This provider isn't fully supported yet..."` message, zero raw provider text —
+exact match to Session 11/13.
+
+**Honest scope note on "preserving" the conversation for Session C's PDF-export
+reuse (per this session's explicit instruction):** conversation turns are pure React
+component state in `QueryPanel.tsx` (`conversationTurns`), never persisted anywhere
+— confirmed directly this session (a mid-flow page reload wiped the answer/turns
+instantly, documents included). There is no mechanism in this app to literally carry
+live conversation state across a closed browser process, let alone across a future
+session with a different environment. What *is* actually preserved: the document
+library itself (biology.pdf + cooking.pdf, embedded, sitting in the persistent
+Chromium profile at `/tmp/pocketrag-m16-profile`) and the exact deterministic script
+(`/tmp/pocketrag-m16-fixtures/area2-3-combined.cjs`) that reproduces the identical
+6-turn conversation end-to-end against that same profile. **Session C (PDF export,
+Area 7) should re-run that script** (needs real BYOK Gemini/OpenAI keys again for
+turns 5-6, or can stop after turn 4 for a still-valid multi-turn/multi-document
+conversation using shared-tier only) immediately followed by the "Export as PDF"
+click, all in one continuous Playwright page — not attempt to resume a closed
+session. If `/tmp` has been cleared by then, the fixture-generation scripts
+(`make-fixtures2.cjs`) are self-contained and reproduce byte-different but
+functionally identical PDFs in seconds.
+
+**Verification:** 133/133 frontend tests, 236/236 worker tests, `tsc` clean both
+sides, `oxlint` clean both sides (one pre-existing non-blocking warning, unchanged
+since Session 19). Production build clean. One commit-worthy change this session
+(`ByokPanel.tsx`), not yet committed — see next steps.
+
+**Next session should start with:** commit the `ByokPanel.tsx` fix (not yet
+committed as of this session's end — confirm with the user first, per this
+project's commit-only-when-asked convention); then Session B of the Milestone 16
+retest (Areas 4-5: Notes tab, diagram Q&A — gated on the user re-supplying
+`daa-unit2.pdf` and the handwritten-notes photo per the plan). Standing backlog
+otherwise unchanged: Milestone 10 Phase C (parked), Anthropic/Grok/OpenRouter
+success-path verification (still no working test key for any of the three).
 
 ---
 

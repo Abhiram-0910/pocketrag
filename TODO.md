@@ -253,11 +253,20 @@ rate-limiting/abuse surface (including a live burst test), CORS, and client-supp
 data reaching a provider without server-side revalidation — passed both static and
 live adversarial checks. See AGENTS.md Session 27.
 
+**Milestone 16, Session A of 4 (core document flow, retrieval, answer generation)
+complete — Session 28.** Full live retest against production, all pass. Found and
+fixed a real regression along the way: BYOK-Gemini's model auto-select picked a
+since-deprecated model instead of the shared tier's already-trusted default —
+fixed, deployed, live-re-verified. See TODO.md's Milestone 16 entry below and
+AGENTS.md Session 28 for full detail, including the honest note on why a live
+multi-turn conversation can't be literally preserved across sessions.
+
 Full roadmap (Milestones 7-16) in 🟢 below. Standing candidates: Milestone 10
 Phase C (BYOK extension, parked), BYOK success-path verification for
 Anthropic/Grok/OpenRouter (live-verify a real grounded answer once test keys
 are available — flip out of `EXPERIMENTAL_PROVIDERS`, no other code change
-needed), and milestone 16 (final E2E retest, delivery).
+needed), and Milestone 16 Sessions B-D (Notes/diagram Q&A, web
+search/PDF-export/error-states/landing, responsive+delivery).
 
 ---
 
@@ -535,6 +544,27 @@ needed), and milestone 16 (final E2E retest, delivery).
       AGENTS.md Session 27.
 
 ### 16. Final E2E retest, GitHub remote + push, delivery
+GitHub remote + push already satisfied (has been in sync since early sessions —
+confirmed, not new work). Real remaining scope is the staged E2E retest + delivery
+plan at `~/.claude/plans/snoopy-stirring-tide.md` (Sessions A-D).
+- [x] **Session A — Areas 1-3 (core document flow, retrieval, answer generation) —
+      Session 28.** All pass, matching the original shipping sessions' live-verified
+      outcomes. One real regression found and fixed along the way: BYOK-Gemini's
+      model auto-select picked a since-deprecated model (`gemini-2.5-flash`, 404 for
+      new users) instead of the shared tier's already-trusted pinned default —
+      fixed in `ByokPanel.tsx` (prefer `gemini-3.5-flash-lite` when present in the
+      fetched list), deployed, and live-re-verified against production with a real
+      key. See AGENTS.md Session 28 for full per-area results and the honest scope
+      note on why the multi-turn conversation itself can't be literally preserved
+      across sessions (pure React state, never persisted) — only the document
+      library + a reproducible script are, at `/tmp/pocketrag-m16-fixtures/`.
+- [ ] Session B — Areas 4-5 (Notes tab, diagram Q&A) — needs the user to re-supply
+      `daa-unit2.pdf` + the handwritten-notes photo.
+- [ ] Session C — Areas 6-9 (web search grounding, PDF export, error states, landing
+      page) — PDF export reuses Session A's conversation-reproduction recipe.
+- [ ] Session D — Area 10 (light/dark + responsive) + delivery (root `README.md`,
+      doc-currency pass, closing TODO.md entry). Milestone 16 only marked complete
+      here.
 
 ---
 
