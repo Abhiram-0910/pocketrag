@@ -216,21 +216,36 @@ for the full story, and AGENTS.md Session 25.
 The general UI/UX pass was already done in Session 14; the landing page (the one item
 Session 14 deliberately deferred) shipped in Session 24. See AGENTS.md Session 24.
 
-**Milestone 9 Phase B (PDF/multi-page support for the Notes tab) planned and
-approved in Session 24, ready to implement on explicit go-ahead** — no longer
-blocked on anything from Milestone 12, which is now closed. Real research done,
-not guessed: Gemini's actual PDF limit is 50MB/1,000 pages (confirmed live —
-corrects Session 22's own recorded "100MB" claim), and the recommended design
-(send the whole PDF as one `inlineData` part, same as Phase A already does for
-one image) needs zero chunking/embedding pipeline changes. See AGENTS.md
-Session 24 and TODO.md's Milestone 9 entry above.
+**Milestone 9 Phase B (PDF/multi-page support for the Notes tab) shipped and
+deployed — Session 26. Milestone 9 is now fully complete (Phases A and B both
+live).** Built on Session 24's approved plan (Option C: send the whole PDF as
+one `inlineData` part, zero chunking/embedding pipeline changes) after
+re-reading the actual shipped Phase A code to confirm nothing had drifted.
+`worker/src/validate.ts`'s `OCR_ALLOWED_MIME_TYPES` gained `application/pdf`;
+`MAX_OCR_BASE64_LENGTH` (21MB base64) confirmed unchanged against a real
+measurement, not a guess — a real 23-page scanned notebook (`daa-unit2.pdf`)
+came in at 9,117,320 base64 chars, ~57% under the cap, and the cap's original
+derivation (Gemini's generic inline-request-size guidance) was never
+image-specific to begin with. `OCR_PROMPT`'s wording generalized from "this
+image" to "this file" — sent to Gemini itself, so this was a real accuracy fix,
+not cosmetic. Two copy updates (`NotesDropZone.tsx`'s drop-zone label,
+`App.tsx`'s Notes-tab subtitle) now name PDFs alongside photos. Live-verified
+against the real `daa-unit2.pdf`: a direct `/ocr` call transcribed it correctly
+in ~20.4s (well under the existing 120s `OCR_TIMEOUT_MS`, left unchanged), and
+a full real-browser round trip (drop → consent → OCR → chunk → embed → ask a
+question) produced a real grounded Gemini answer with correct `(Doc 1, page 1)`
+citations and zero console errors. One finding recorded for future sessions,
+not a bug: OCR'd documents don't chunk deterministically across re-uploads of
+the same file (chunk counts varied 28-43 across identical re-runs), since
+Gemini's transcribed text isn't byte-identical run to run — see
+ARCHITECTURE.md's Key Architectural Decisions. 235/235 worker tests, 129/129
+frontend tests, `tsc`/`oxlint` clean both sides. See AGENTS.md Session 26.
 
-Full roadmap (Milestones 7-16) in 🟢 below. Standing candidates: Milestone 9
-Phase B (planned and approved, see above), Milestone 10 Phase C (BYOK
-extension, parked), BYOK success-path verification for Anthropic/Grok/
-OpenRouter (live-verify a real grounded answer once test keys are available —
-flip out of `EXPERIMENTAL_PROVIDERS`, no other code change needed), and
-milestones 15-16.
+Full roadmap (Milestones 7-16) in 🟢 below. Standing candidates: Milestone 10
+Phase C (BYOK extension, parked), BYOK success-path verification for
+Anthropic/Grok/OpenRouter (live-verify a real grounded answer once test keys
+are available — flip out of `EXPERIMENTAL_PROVIDERS`, no other code change
+needed), and milestones 15-16.
 
 ---
 
@@ -314,7 +329,7 @@ milestones 15-16.
       network error, unreadable PDF, WebGPU unsupported (correctly `info` severity,
       not `error` — it's a working automatic fallback).
 
-### 9. Handwritten/Scanned Notes
+### 9. Handwritten/Scanned Notes ✅ COMPLETE — Session 26
 - [x] **Phase A — Images only, shared-Gemini OCR — Session 22.** Separate Notes tab
       (`App.tsx` tab state), structurally distinct from Documents so its local-only
       guarantee holds by construction, not just by current behavior. Strict per-file
@@ -336,9 +351,16 @@ milestones 15-16.
       Session 22 for the full story and the honestly-reported transcription
       imperfections (this is Gemini's general vision OCR, not a specialized
       handwriting-recognition benchmark — good-but-imperfect is the expected outcome).
-- [ ] **Phase B (parked)** — PDF support (multi-page scans), including re-verifying
-      the 15MB/20-page caps against a real large scan. Not started; needs explicit
-      go-ahead.
+- [x] **Phase B — PDF/multi-page support — Session 26.** `OCR_ALLOWED_MIME_TYPES`
+      gained `application/pdf`; zero pipeline changes (Option C — same one-`inlineData`-
+      part request shape Phase A already used for images). `MAX_OCR_BASE64_LENGTH`
+      confirmed unchanged against a real measured 23-page scan (`daa-unit2.pdf`,
+      9,117,320 base64 chars, ~57% under the 21MB cap) rather than re-derived — its
+      original derivation was never image-specific. `OCR_PROMPT` generalized "image" →
+      "file". Live-verified: real `/ocr` call transcribed the real scan correctly in
+      ~20.4s; full real-browser round trip (drop → consent → OCR → chunk → embed →
+      question) produced a real grounded answer with correct citations. See AGENTS.md
+      Session 26.
 - Documents tab stays 100% local, unchanged — see ARCHITECTURE.md's two-tab privacy
   model note
 

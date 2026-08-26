@@ -118,6 +118,11 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
   tab that sometimes uploads and sometimes doesn't depending on file type — is what
   keeps "Documents stays 100% local" a claim that's true by construction, not just by
   current behavior that a future change could quietly violate.
+- **OCR'd documents (Notes tab) don't chunk deterministically across re-uploads of the
+  same file**, unlike the Documents tab's typed-PDF pipeline (`pdf.js` text extraction
+  is deterministic byte-for-byte). This is an expected property of LLM-based
+  transcription — Gemini's exact transcribed text can vary slightly run to run, which
+  shifts chunk boundaries/counts downstream — not a bug in `chunker.ts` or a regression.
 - **Chunker takes an injected `Tokenizer` interface** (`{ countTokens(text): number }`)
   rather than importing `@huggingface/transformers` directly. Keeps `chunker.ts`
   pure and testable (unit tests use the real tokenizer directly in Node — no browser

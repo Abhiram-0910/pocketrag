@@ -6,34 +6,35 @@ Claude reads this at the START of every new session to understand what happened 
 ---
 
 ## Project State
-**Last updated:** 2026-08-18
-**Current branch:** master (through `552757a` — Milestone 9 Phase A, handwritten/
-scanned notes OCR (images only), deployed both sides — see Session 22 below)
-**Remote:** `github.com/Abhiram-0910/pocketrag` (private) — **not yet pushed**;
-`origin/master` still at `97a28d2` as of 2026-08-15, local is 5 commits ahead
-(`65475b7`, `5d886df`, `4f922b2`, `c8ad518`, `552757a`) as of this session. Push on
-explicit request only.
-**Overall status:** MVP **+ Milestones 6-8, 9 (Phase A), 10 (Phases A-B), 11, 13**
-feature-complete and **fully deployed in production** (Milestone 9 Phase B, Milestone
-10 Phase C, Milestones 7b's Anthropic/Grok/OpenRouter success path, and Milestone 14's
-landing page remain open — see below and TODO.md). Frontend:
+**Last updated:** 2026-08-26
+**Current branch:** master (through this session's Milestone 9 Phase B commit — see
+Session 26 below)
+**Remote:** `github.com/Abhiram-0910/pocketrag` (private) — pushed through this
+session's commit.
+**Overall status:** MVP **+ Milestones 6-14** feature-complete and **fully deployed in
+production** (Milestone 10 Phase C and Milestones 7b's Anthropic/Grok/OpenRouter
+success path remain open — see below and TODO.md). Frontend:
 `https://pocketrag.pages.dev` (Cloudflare Pages). API:
 `https://pocketrag-answer.abhiram-dev.workers.dev` (Cloudflare Worker). Supports a
 multi-document library, bulk drag-and-drop, a this-document/all-documents retrieval
 scope toggle with cross-document ranking, Worker-owned per-request `Doc N` citation
 labels, restore-on-reload from IndexedDB, `navigator.storage.persist()`, deleting a
-persisted document, and bring-your-own-key across 5 providers (Gemini, OpenAI,
-Anthropic, Grok, OpenRouter — provider picker in the BYOK panel) as an alternative to
-the shared/free-tier key. **Gemini and OpenAI are fully proven** (real grounded-answer
-E2E verified live). **Anthropic, Grok, and OpenRouter are Experimental** — selectable
-with a visible caveat, code-complete and unit-tested, and their *failure* path is
-live-verified (real invalid-key 502 + clean structured server-side log, confirmed via
-`wrangler tail` for all three), but their *success* path (an actual working answer) is
-not yet proven against a real key for any of the three. A uniform log-and-sanitize
-path (`logProviderError` in `worker/src/index.ts`) covers all 5 providers: any
-provider-call failure logs a structured, key-free entry server-side and returns a calm
-generic message to the client instead of raw provider error text. 60s timeout + manual
-retry still there as a demo-day safety net.
+persisted document, bring-your-own-key across 5 providers (Gemini, OpenAI, Anthropic,
+Grok, OpenRouter — provider picker in the BYOK panel) as an alternative to the
+shared/free-tier key, a separate Notes tab for handwritten/scanned notes (images and
+now PDFs, shared-Gemini OCR only, strict per-file consent), hybrid retrieval with
+reranking and multi-turn conversation context, diagram-aware Q&A (opt-in page-image
+attachment), BYOK-gemini-only web search grounding (Experimental), a landing page, and
+PDF export of a conversation. **Gemini and OpenAI are fully proven** (real
+grounded-answer E2E verified live). **Anthropic, Grok, and OpenRouter are
+Experimental** — selectable with a visible caveat, code-complete and unit-tested, and
+their *failure* path is live-verified (real invalid-key 502 + clean structured
+server-side log, confirmed via `wrangler tail` for all three), but their *success*
+path (an actual working answer) is not yet proven against a real key for any of the
+three. A uniform log-and-sanitize path (`logProviderError` in `worker/src/index.ts`)
+covers all 5 providers: any provider-call failure logs a structured, key-free entry
+server-side and returns a calm generic message to the client instead of raw provider
+error text. 60s timeout + manual retry still there as a demo-day safety net.
 
 ---
 
@@ -2898,6 +2899,125 @@ verification.
 implement on explicit go-ahead — no longer blocked on anything from Milestone
 12), Milestone 10 Phase C, BYOK success-path verification for
 Anthropic/Grok/OpenRouter, milestones 15-16.
+
+---
+
+### Session 26 — 2026-08-26
+**Goal:** Milestone 9 Phase B — PDF/multi-page support for the Notes tab, per the
+plan approved (planning-only) in Session 24. Re-read Session 24's actual plan and
+the current shipped Phase A code first, same reconciliation discipline as every
+phase transition, since Phase A's OCR code, `validate.ts`, and the Notes tab UI
+could have shifted in the interim (they hadn't — confirmed via `git diff --stat`
+against the commit at Session 24's end: the only commit since then, `3543d01`,
+touched only Milestone 12 files).
+
+**Reconciliation, before any code:** Re-read `handleOcr`/`transcribeImage`
+directly rather than trusting the plan's own description — confirmed Option C
+(send the whole PDF as one `inlineData` part, no dispatch-level branching, zero
+chunking/embedding changes) was still exactly right, since neither function had
+ever been image-specific in the first place. Recovered the real `daa-unit2.pdf`
+(23-page scanned notebook used for Phase A's own live verification) from an old
+session's scratchpad and measured it directly rather than trusting Session 24's
+recorded "6.5MB": 6,837,990 raw bytes / 9,117,320 base64 chars — ~57% under the
+existing 21,000,000-char `MAX_OCR_BASE64_LENGTH` cap. Recommended leaving that cap
+unchanged (its original derivation was Gemini's generic inline-request-size
+guidance, never actually image-specific) rather than re-deriving a new number,
+approved by the user. Also found and flagged two things the Session 24 plan
+hadn't called out: `OCR_PROMPT` (sent to Gemini itself) said "this image," which
+would become a real inaccuracy once PDFs hit the same prompt — approved for a
+wording generalization to "this file"; and `App.tsx`'s Notes-tab subtitle had the
+same "photo"-only gap as the drop-zone label Session 24 already flagged. Proposed
+exact before/after copy for both changes, approved before writing any code, same
+standard as Milestone 14's landing-page copy.
+
+**Built:**
+- `worker/src/validate.ts` — `OCR_ALLOWED_MIME_TYPES` gained `application/pdf`.
+  `MAX_OCR_BASE64_LENGTH` left numerically unchanged; its comment updated to
+  record the real measurement against `daa-unit2.pdf` as the confirming anchor
+  point, not just Phase A's original derivation.
+- `worker/src/providers/gemini.ts` — `OCR_PROMPT`'s "this image" → "this file";
+  `transcribeImage`'s doc comment generalized from "a single image" to "a single
+  image or PDF."
+- `src/components/NotesDropZone.tsx` — `ALLOWED_MIME_TYPES` gained
+  `application/pdf`; drop-zone label → "Drag photos or PDFs of handwritten or
+  scanned notes here, or"; `OCR_TIMEOUT_MS`'s comment updated with the real
+  measured duration below, rather than left as a stale "flagged for
+  re-verification" note.
+- `src/App.tsx` — Notes-tab subtitle → "Upload a photo or PDF of handwritten or
+  scanned notes."
+- `worker/src/validate.test.ts` / `worker/src/index.test.ts` — the two tests that
+  previously asserted `application/pdf` gets rejected (Phase A's "not yet
+  supported" placeholder) flipped to assert acceptance, with a different
+  genuinely-unsupported mimeType (`application/msword`/`text/plain`) swapped in
+  so mimeType-rejection coverage doesn't shrink.
+- `ARCHITECTURE.md` — new Key Architectural Decisions bullet: OCR'd documents
+  (Notes tab) don't chunk deterministically across re-uploads of the same file,
+  unlike the Documents tab's byte-deterministic `pdf.js` text extraction — an
+  expected property of LLM-based transcription, not a bug, recorded so a future
+  session doesn't misdiagnose the variance found during this session's live
+  verification (see below).
+
+**Verification:** 235/235 worker tests, 129/129 frontend tests (both unchanged in
+count — no new test files needed, existing OCR/Notes tests already covered the
+mimeType-allowlist shape generically), `tsc`/`oxlint` clean both sides, production
+build clean (bundle-size guard passes, unaffected — no new dependency).
+
+**Live-verified against the real `daa-unit2.pdf`, not a synthetic fixture**
+(Playwright installed → used → uninstalled, same convention as every prior
+session — confirmed no leftover in `package.json`/lockfile afterward):
+- Direct `/ocr` call against `wrangler dev`: real transcription (Greedy method,
+  Dijkstra, Bellman-Ford notes, math notation preserved) in **~20.4s** — well
+  under the existing 120s `OCR_TIMEOUT_MS`, which was left unchanged rather than
+  tightened from one data point.
+- Full real-browser round trip against Vite dev + `wrangler dev`: drop PDF →
+  per-file consent banner (confirmed it still names the file correctly) → OCR →
+  chunk → embed → document reaches `ready`. First attempt hit the
+  already-documented cold-Vite-reoptimization-reload gotcha (Sessions 3/6/7,
+  first `npm run dev` warm-up after a dependency-graph change causes a page
+  reload that wipes in-progress client state) — not a new bug, resolved by
+  retrying once Vite was warm, exactly as those prior sessions predicted.
+- A real question against the OCR'd document ("What is the greedy method and how
+  does it make decisions?") produced a real grounded Gemini answer with correct
+  `(Doc 1, page 1)` citations and a correctly-populated Sources list. Zero
+  console errors across every run.
+- **New finding, not anticipated by the Session 24 plan:** re-running the exact
+  same file through the OCR pipeline multiple times in this session produced
+  different chunk counts each time (28, 32, 35, 43) — Gemini's transcribed text
+  isn't byte-identical run to run, which shifts chunk boundaries downstream. Not
+  a bug: the Documents tab's `pdf.js` extraction is deterministic, but Notes-tab
+  OCR was never going to be, being LLM-based. Recorded in ARCHITECTURE.md (see
+  above) specifically so a future session doesn't spend time chasing this as a
+  regression.
+
+**Cleanup:** Playwright and both scratch verification scripts
+(`.verify-notes-pdf.mjs`, `.verify-notes-query.mjs`, written directly in the repo
+root since the scratchpad's own PDF fixture needed a `file://`-adjacent working
+directory for Node's ESM resolution) removed after use; `wrangler dev`/Vite dev
+background processes killed; `git status` confirmed clean before staging.
+
+**Committed, pushed, and deployed — both Worker and frontend.** Code committed as
+`dfa5123` ("Add PDF/multi-page support to Notes tab OCR (Milestone 9 Phase B)"),
+pushed to `origin/master` (confirmed `origin/master` == local `HEAD`). Worker
+deployed via `wrangler deploy` after a clean `--dry-run` (Version ID
+`ad68509b-5792-429d-8d1e-a8b735273e95`); live-verified directly against
+production: a real `/ocr` call with `mimeType: 'text/plain'` returns `400` with
+the updated allowlist message including `application/pdf`. Frontend built and
+deployed via `wrangler pages deploy dist --project-name=pocketrag --branch=main`
+(deployment `d9986d0e`); `wrangler pages deployment list` confirms **Production**,
+branch `main`, source `dfa5123`. Bundle-hash verified — both the deployment's own
+subdomain and the cache-busted `pocketrag.pages.dev` production alias serve
+`index-Jy790i-t.js`/`index-C0B4REZ8.css`, matching the local build exactly — and
+the live bundle confirmed to literally contain both new copy strings ("Drag
+photos or PDFs of handwritten or scanned notes here" / "Upload a photo or PDF of
+handwritten or scanned notes"), not just a matching hash.
+
+**Milestone 9 is now fully complete** — Phase A (Session 22, images) and Phase B
+(this session, PDFs) both live in production.
+
+**Next session should start with:** the standing backlog — Milestone 10 Phase C
+(BYOK extension, parked), BYOK success-path verification for Anthropic/Grok/
+OpenRouter (needs real test keys), milestones 15-16 (security review, final E2E
+retest + delivery).
 
 ---
 
