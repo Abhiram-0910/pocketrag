@@ -39,6 +39,14 @@ export interface GeminiGroundingResult {
   searchEntryPointHtml?: string
 }
 
+// Defensive circuit-breaker, not an empirically measured bound like MAX_IMAGE_BASE64_LENGTH
+// (no sample response to measure against) — the real widget is a small HTML/CSS chip set,
+// so this only ever fires against a degenerate/oversized response. Client-side sanitization
+// (sanitizeGroundingHtml) is what actually neutralizes malicious content; this just bounds
+// how much of it can ever reach the client at all. Worker-to-client, so this lives here
+// rather than in validate.ts, which only shapes client-to-Worker input.
+const MAX_SEARCH_ENTRY_POINT_HTML_LENGTH = 50_000
+
 // A malformed groundingChunks entry (missing uri or title) is filtered out rather than
 // thrown on — same defensive stance every other response-parsing function in this file
 // already takes toward a provider's response shape.
@@ -47,7 +55,7 @@ function extractGrounding(metadata: GeminiGroundingMetadata | undefined): Gemini
   const webSources = (metadata.groundingChunks ?? [])
     .map((chunk) => chunk.web)
     .filter((web): web is { uri: string; title: string } => typeof web?.uri === 'string' && typeof web?.title === 'string')
-  const searchEntryPointHtml = metadata.searchEntryPoint?.renderedContent
+  const searchEntryPointHtml = metadata.searchEntryPoint?.renderedContent?.slice(0, MAX_SEARCH_ENTRY_POINT_HTML_LENGTH)
   if (webSources.length === 0 && searchEntryPointHtml === undefined) return undefined
   return { webSources, searchEntryPointHtml }
 }

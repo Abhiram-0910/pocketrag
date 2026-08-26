@@ -170,6 +170,22 @@ describe('callGemini', () => {
       const result = await callGemini(fetchImpl, 'key', 'gemini-3.5-flash-lite', 'q', undefined, true)
       expect(result.grounding?.webSources).toEqual([{ uri: 'https://example.com/ok', title: 'OK' }])
     })
+
+    it('truncates an oversized searchEntryPoint.renderedContent to MAX_SEARCH_ENTRY_POINT_HTML_LENGTH (50,000 chars) — a defensive circuit-breaker against a degenerate/oversized response, not the normal path', async () => {
+      const oversized = '<div>'.repeat(20_000) // well over 50,000 chars
+      const fetchImpl = mockFetch({
+        jsonBody: {
+          candidates: [
+            {
+              content: { parts: [{ text: 'answer' }] },
+              groundingMetadata: { searchEntryPoint: { renderedContent: oversized } },
+            },
+          ],
+        },
+      })
+      const result = await callGemini(fetchImpl, 'key', 'gemini-3.5-flash-lite', 'q', undefined, true)
+      expect(result.grounding?.searchEntryPointHtml).toHaveLength(50_000)
+    })
   })
 })
 

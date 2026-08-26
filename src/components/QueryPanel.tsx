@@ -18,6 +18,7 @@ import { isDiagramLikely } from '../lib/diagramHeuristic'
 import { getDiagramImagesEnabled, setDiagramImagesEnabled } from '../lib/diagramImageSetting'
 import { getWebSearchEnabled, setWebSearchEnabled } from '../lib/webSearchSetting'
 import { renderPageToImage } from '../lib/pageRender'
+import { sanitizeGroundingHtml } from '../lib/sanitizeHtml'
 import { buildConversationPdf, type ExportSource } from '../lib/pdfExport'
 import { canRunQuery } from '../lib/queryScope'
 import { classify, type TaxonomyResult } from '../lib/errorTaxonomy'
@@ -578,10 +579,12 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
           )}
           {searchEntryPointHtml && (
             // Google's Grounding ToS (ai.google.dev/gemini-api/terms#grounding-with-
-            // google-search) requires displaying this "Search Suggestions" widget,
-            // unmodified, alongside any grounded result shown to an end user — trusted
-            // content from our own configured Gemini API response, not user-supplied.
-            <div dangerouslySetInnerHTML={{ __html: searchEntryPointHtml }} />
+            // google-search) requires displaying this "Search Suggestions" widget
+            // alongside any grounded result shown to an end user. Google's docs never
+            // state this HTML is safe to inject unsanitized (checked directly — see
+            // SECURITY_REVIEW.md), so it's sanitized before render like any other
+            // externally-sourced content reaching this origin's DOM.
+            <div dangerouslySetInnerHTML={{ __html: sanitizeGroundingHtml(searchEntryPointHtml) }} />
           )}
         </div>
       )}
@@ -633,7 +636,9 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
                     </ul>
                   </div>
                 )}
-                {turn.searchEntryPointHtml && <div dangerouslySetInnerHTML={{ __html: turn.searchEntryPointHtml }} />}
+                {turn.searchEntryPointHtml && (
+                  <div dangerouslySetInnerHTML={{ __html: sanitizeGroundingHtml(turn.searchEntryPointHtml) }} />
+                )}
               </li>
             ))}
           </ul>
