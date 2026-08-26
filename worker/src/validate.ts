@@ -365,18 +365,29 @@ export type OcrValidationResult =
   | { ok: true; mimeType: string; base64: string }
   | { ok: false; error: string }
 
-// Phase A: images only, exact mimeType allowlist (not a generic image/* match) — same
-// "no real use case yet to support otherwise" reasoning as isValidImage above. PDF
-// (application/pdf) is Phase B, deliberately not included here yet.
-export const OCR_ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'] as const
+// Exact mimeType allowlist (not a generic image/*|application/* match) — same "no real
+// use case yet to support otherwise" reasoning as isValidImage above. application/pdf
+// added in Phase B (multi-page scans) — reuses the same inlineData request shape
+// transcribeImage already sends for images, so no dispatch-level branching needed.
+export const OCR_ALLOWED_MIME_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/heic',
+  'image/heif',
+  'application/pdf',
+] as const
 
 // Derived, not guessed: 15MB raw-file cap (see NotesDropZone.tsx / AGENTS.md's Phase A
 // session for the full reasoning — keeps every request under Gemini's 20MB inline-
 // recommended threshold, avoiding the File API's separate upload+poll+reference flow,
 // and well under Cloudflare Workers' 100MB request body limit on this project's plan).
 // Base64 inflates raw bytes by 4/3 (15,728,640 * 4/3 = 20,971,520); rounded up for
-// padding/JSON-escaping overhead. Flagged for live re-verification against a real
-// photo upload before Phase A is considered done.
+// padding/JSON-escaping overhead. This derivation was never image-specific — it's
+// Gemini's generic inline-request-size guidance — so Phase B (PDF) reuses it unchanged
+// rather than deriving a new number. Confirmed against a real 23-page scanned notebook
+// (daa-unit2.pdf, Phase A/B's live-verification file): 6,837,990 raw bytes / 9,117,320
+// base64 chars, ~57% headroom under this cap.
 export const MAX_OCR_BASE64_LENGTH = 21_000_000
 
 function isValidOcrMimeType(value: unknown): value is (typeof OCR_ALLOWED_MIME_TYPES)[number] {

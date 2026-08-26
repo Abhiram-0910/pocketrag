@@ -136,19 +136,22 @@ export async function callGemini(
 // Deliberately instructs verbatim transcription, not summarization or correction — an
 // LLM-based OCR path can otherwise "fix" spelling/grammar or paraphrase, which a real
 // OCR engine wouldn't do. [illegible] gives the model an explicit way to signal
-// uncertainty instead of guessing at unreadable text.
+// uncertainty instead of guessing at unreadable text. Says "file", not "image" — Phase
+// B (Milestone 9) sends multi-page PDFs through this same prompt, and "image" would be
+// a real inaccuracy in the model's own instructions, not just cosmetic.
 const OCR_PROMPT =
-  'Transcribe all text in this image exactly as written. Do not correct spelling, grammar, or ' +
+  'Transcribe all text in this file exactly as written. Do not correct spelling, grammar, or ' +
   'punctuation. Do not summarize, paraphrase, or add commentary of your own. If any text is ' +
   'illegible, write [illegible] in its place. Output only the transcribed text, nothing else.'
 
 /**
- * OCRs a single image via Gemini vision (Milestone 9, Phase A) — reuses the same
- * generateContent request shape as callGemini's image attachment, just with a
- * transcription-only prompt and no retrieved-chunk context. Shared-tier only: index.ts
- * never has an apiKey to pass here other than env.GEMINI_API_KEY (see validate.ts's
- * OcrRequestBody, which has no keySource/apiKey field to begin with). Never grounded —
- * OCR has no question to answer, just an image to transcribe verbatim.
+ * OCRs a single image or PDF via Gemini vision/document understanding (Milestone 9,
+ * Phase A images + Phase B multi-page PDFs) — reuses the same generateContent request
+ * shape as callGemini's image attachment, just with a transcription-only prompt and no
+ * retrieved-chunk context. Shared-tier only: index.ts never has an apiKey to pass here
+ * other than env.GEMINI_API_KEY (see validate.ts's OcrRequestBody, which has no
+ * keySource/apiKey field to begin with). Never grounded — OCR has no question to
+ * answer, just a file to transcribe verbatim.
  */
 export async function transcribeImage(
   fetchImpl: typeof fetch,

@@ -7,12 +7,14 @@ import { useDocumentStore } from '../store/documentStore'
 import { StatusBanner } from './ui/StatusBanner'
 import { Button } from './ui/Button'
 
-// Phase A: images only (mirrors worker/src/validate.ts's OCR_ALLOWED_MIME_TYPES).
-// application/pdf is Phase B, deliberately not accepted yet.
-const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']
+// Mirrors worker/src/validate.ts's OCR_ALLOWED_MIME_TYPES. Phase A: images. Phase B
+// added application/pdf for multi-page scans.
+const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif', 'application/pdf']
 // Longer than QueryPanel's ANSWER_TIMEOUT_MS (60s) — OCR has real work to do (tiling/
-// reading a full image), not just composing from a few short chunks. Flagged for live
-// re-verification once Phase B (multi-page PDF) is tested against a real scan.
+// reading a full image or document), not just composing from a few short chunks.
+// Live-verified against a real 23-page scanned PDF (daa-unit2.pdf, Phase B): ~20s for
+// the /ocr call itself, well under this cap — left unchanged, not derived from that one
+// data point, since a longer real scan is plausible and there's no cost to the margin.
 const OCR_TIMEOUT_MS = 120_000
 
 /**
@@ -195,7 +197,7 @@ export function NotesDropZone() {
         }`}
       >
         <UploadSimple className="size-6 text-slate-400 dark:text-slate-500" weight="bold" aria-hidden="true" />
-        <p className="text-slate-600 dark:text-slate-400">Drag photos of handwritten or scanned notes here, or</p>
+        <p className="text-slate-600 dark:text-slate-400">Drag photos or PDFs of handwritten or scanned notes here, or</p>
         <label className="inline-flex min-h-11 cursor-pointer items-center rounded text-blue-600 underline underline-offset-2 focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-blue-600 dark:text-blue-400 dark:focus-within:outline-blue-400">
           browse
           <input

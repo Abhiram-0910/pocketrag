@@ -73,7 +73,7 @@ function App() {
     <main className="mx-auto max-w-2xl px-4 py-8 sm:px-8">
       <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-50">PocketRAG</h1>
       <p className="mt-1 text-slate-500 dark:text-slate-400">
-        {tab === 'documents' ? 'Drop a PDF, then ask a question about it.' : 'Upload a photo of handwritten or scanned notes.'}
+        {tab === 'documents' ? 'Drop a PDF, then ask a question about it.' : 'Upload a photo or PDF of handwritten or scanned notes.'}
       </p>
       <div className="mt-6 inline-flex overflow-hidden rounded border border-slate-200 text-sm dark:border-slate-700">
         {(['documents', 'notes'] as const).map((option) => (

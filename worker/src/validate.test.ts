@@ -605,15 +605,15 @@ describe('validateOcrRequest', () => {
     }
   })
 
-  it('accepts every Phase A allowed mimeType', () => {
-    for (const mimeType of ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']) {
+  it('accepts every allowed mimeType, images and PDF', () => {
+    for (const mimeType of ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif', 'application/pdf']) {
       expect(validateOcrRequest({ mimeType, base64: 'aGVsbG8=' }).ok).toBe(true)
     }
   })
 
-  it('rejects an unsupported mimeType, including application/pdf (Phase B, not yet supported)', () => {
-    expect(validateOcrRequest({ mimeType: 'application/pdf', base64: 'aGVsbG8=' }).ok).toBe(false)
+  it('rejects an unsupported mimeType', () => {
     expect(validateOcrRequest({ mimeType: 'text/plain', base64: 'aGVsbG8=' }).ok).toBe(false)
+    expect(validateOcrRequest({ mimeType: 'application/msword', base64: 'aGVsbG8=' }).ok).toBe(false)
     expect(validateOcrRequest({ base64: 'aGVsbG8=' }).ok).toBe(false)
   })
 

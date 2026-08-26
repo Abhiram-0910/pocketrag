@@ -776,7 +776,7 @@ describe('worker fetch handler — /ocr (Milestone 9 Phase A)', () => {
   it('rejects a request with an unsupported mimeType without calling Gemini', async () => {
     const fetchSpy = vi.fn()
     vi.stubGlobal('fetch', fetchSpy)
-    const res = await worker.fetch(ocrRequest({ mimeType: 'application/pdf', base64: 'aGVsbG8=' }), makeEnv(), makeCtx())
+    const res = await worker.fetch(ocrRequest({ mimeType: 'text/plain', base64: 'aGVsbG8=' }), makeEnv(), makeCtx())
     expect(res.status).toBe(400)
     expect(fetchSpy).not.toHaveBeenCalled()
   })
