@@ -91,9 +91,8 @@ already-reviewed code.
     (was 235, +1), `tsc`/`oxlint` clean both sides, production build clean (bundle-size
     guard passes — `dompurify` added ~non-trivial but unremarkable weight, well within
     guard limits).
-  - **Commit:** _pending — will be added once this document is reviewed and the
-    change is committed, per the agreed sequencing (full document reviewed before any
-    commit)._
+  - **Commit:** `9ace2ff` — "Sanitize Gemini grounding HTML and upgrade pdfjs-dist
+    (Milestone 15 security review)".
 
 ### Remaining §1 checks (all provider keys, shared key, Discord)
 
@@ -339,6 +338,7 @@ ignored).
 | 5 | CORS & origin validation | PASS | none |
 | 6 | Client-supplied data reaching a provider without revalidation | PASS | none |
 
-**Status: audit complete, both gaps found this session are fixed and verified.**
-Nothing outstanding from the approved plan. Remaining step: your review of this
-document, then AGENTS.md/TODO.md updates and a commit, per the agreed sequencing.
+**Status: audit complete, both gaps found this session are fixed, verified, and
+committed (`9ace2ff`).** Nothing outstanding from the approved plan. Re-confirmed
+current as of the Milestone 16 retest (Sessions 28-31): both fixes remain live in
+production, no new dependency/CORS/trust-boundary drift found in later sessions.

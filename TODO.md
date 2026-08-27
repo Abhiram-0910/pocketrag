@@ -292,12 +292,55 @@ webgpu-unsupported (info banner, this sandbox has no GPU). Area 9 (landing
 page): fresh profile shows it once, reload skips straight to the app. No
 source changes — pure retest. See AGENTS.md Session 30.
 
-Full roadmap (Milestones 7-16) in 🟢 below. Standing candidates: Milestone 10
-Phase C (BYOK extension, parked), BYOK success-path verification for
-Anthropic/Grok/OpenRouter (live-verify a real grounded answer once test keys
-are available — flip out of `EXPERIMENTAL_PROVIDERS`, no other code change
-needed), and Milestone 16 Session D (light/dark + responsive retest, plus
-delivery: README.md, doc-currency pass, closing TODO.md entry).
+**Milestone 16, Session D of 4 (light/dark + responsive, delivery) complete —
+Session 31. Milestone 16 is now fully complete (Sessions A-D all done), and
+this closes the full Milestone 7-16 roadmap.** Area 10: Playwright against
+production, 3 widths (375/768/1280) × 2 color schemes × 4 views (landing,
+Documents tab, Notes tab, BYOK-expanded form) — 24/24 combinations zero
+horizontal overflow, plus manual visual review of 8 representative
+screenshots confirmed clean contrast and correct responsive reflow on the
+two surfaces never before checked (landing page, Notes tab). No source
+changes, no regressions. Delivery: root `README.md` written (what it is, the
+two live URLs, stack, an honest proven-vs-experimental feature summary,
+links to ARCHITECTURE.md/SECURITY_REVIEW.md) — one real correction made
+during review: the opening paragraph originally implied the whole app is
+local-only, corrected to scope that claim to the Documents tab specifically
+and name the Notes-tab OCR upload as the disclosed exception, matching the
+Features section below it. Doc-currency pass on `ARCHITECTURE.md` found and
+fixed real drift: the Folder Structure and Key Files sections still
+reflected an early-milestone file layout (missing `ByokPanel.tsx`,
+`LandingPage.tsx`, `NotesDropZone.tsx`, the `ui/` primitives, most of
+`src/lib/`, and the Worker's `providers/*.ts` split — some pointed at
+`worker/src/gemini.ts`, which no longer exists), now updated to match the
+real current tree; a leftover "frontend deploy not yet built" line
+(contradicted by the same document's own deployment section) was removed.
+`SECURITY_REVIEW.md` needed two placeholder fixes (pending-commit note
+resolved to the real commit hash `9ace2ff`; closing status line updated to
+reflect both fixes are live and re-confirmed current as of this retest) —
+its actual audit findings needed no changes, all still accurate. Final
+verification: 133/133 frontend tests, 236/236 worker tests (both unchanged),
+`tsc` clean both sides, `oxlint` clean both sides (one pre-existing warning
+noted honestly, `QueryPanel.tsx:419` exhaustive-deps — not introduced this
+session, not fixed here, out of scope for a docs-only delivery session),
+local build bundle hash (`index-DktHxhx3.js`) confirmed byte-identical to
+the live production bundle via direct `curl`. See AGENTS.md Session 31.
+
+**The app is feature-complete and fully deployed. This was the final
+verification pass of the Milestone 16 retest plan and closes out the
+Milestone 7-16 roadmap.** Two items are explicitly deferred as known future
+work, not silently dropped: **Milestone 10 Phase C** (BYOK extension for
+diagram-aware Q&A — parked pending a real per-provider vision-capability-
+detection mechanism), and **BYOK success-path verification for
+Anthropic/Grok/OpenRouter** (all three are code-complete and live with a
+verified failure path; a real successful answer/model-fetch call remains
+unverified for lack of a working test key — flip out of
+`EXPERIMENTAL_PROVIDERS` once one is available, no other code change
+needed). Gemini's web search grounding success path (Milestone 12,
+Experimental) remains similarly gated on a billing-linked API key, same
+honest-scope standard, documented in README.md/ARCHITECTURE.md rather than
+silently assumed fixed.
+
+Full roadmap (Milestones 7-16) in 🟢 below.
 
 ---
 
@@ -574,7 +617,7 @@ delivery: README.md, doc-currency pass, closing TODO.md entry).
       checks — no further gaps found. Full report in `SECURITY_REVIEW.md`. See
       AGENTS.md Session 27.
 
-### 16. Final E2E retest, GitHub remote + push, delivery
+### 16. Final E2E retest, GitHub remote + push, delivery ✅ COMPLETE — Session 31
 GitHub remote + push already satisfied (has been in sync since early sessions —
 confirmed, not new work). Real remaining scope is the staged E2E retest + delivery
 plan at `~/.claude/plans/snoopy-stirring-tide.md` (Sessions A-D).
@@ -597,11 +640,19 @@ plan at `~/.claude/plans/snoopy-stirring-tide.md` (Sessions A-D).
       image's pixels). Two new hand-rolled fixtures (`combo-doc.pdf`,
       `diagram-doc.pdf`, jsPDF + stdlib `zlib`, no new dependency) plus the user's
       re-supplied `daa-unit2.pdf`/handwritten-notes photo. See AGENTS.md Session 29.
-- [ ] Session C — Areas 6-9 (web search grounding, PDF export, error states, landing
-      page) — PDF export reuses Session A's conversation-reproduction recipe.
-- [ ] Session D — Area 10 (light/dark + responsive) + delivery (root `README.md`,
-      doc-currency pass, closing TODO.md entry). Milestone 16 only marked complete
-      here.
+- [x] **Session C — Areas 6-9 (web search grounding, PDF export, error states, landing
+      page) — Session 30.** All 10 checks pass. Grounding success path still
+      structurally unverifiable (no billing-enabled key); everything else
+      live-verified, including a real 4-turn PDF export round-tripped through
+      pdf.js and all 4 `errorTaxonomy.ts` types tripped for real against local
+      `wrangler dev`. See AGENTS.md Session 30.
+- [x] **Session D — Area 10 (light/dark + responsive) + delivery — Session 31.**
+      24/24 width×theme×view combinations clean, no overflow, correct contrast
+      and reflow on Notes tab/landing page (never checked before). `README.md`
+      written; `ARCHITECTURE.md`/`SECURITY_REVIEW.md` doc-currency pass found and
+      fixed real drift (stale folder/file references, a contradicted "not yet
+      deployed" line, two stale placeholder notes). Milestone 16 now complete.
+      See AGENTS.md Session 31.
 
 ---
 

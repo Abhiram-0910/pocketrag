@@ -25,18 +25,29 @@ Keep this updated as the project evolves.
 ```
 pocketrag/
 ├── src/
-│   ├── components/         # DropZone, DocumentList, QueryPanel
-│   ├── lib/                 # Pure logic: pdf.ts, chunker.ts, similarity.ts, retrieval.ts,
-│   │                         # db.ts, embeddingClient.ts
-│   ├── store/               # documentStore.ts (Zustand)
-│   └── workers/             # embedding.worker.ts, backend.ts, embedding.types.ts
-├── worker/                  # Cloudflare Worker — separate npm project, separate deploy
-│   └── src/                 # index.ts, validate.ts, prompt.ts, labels.ts, grounding.ts,
-│                             # rateLimit.ts, cors.ts, gemini.ts
-├── scripts/                 # check-bundle-size.mjs (build-time Pages size guard)
+│   ├── components/          # DropZone, DocumentList, QueryPanel, ByokPanel, NotesDropZone,
+│   │                         # LandingPage, ui/Button, ui/StatusBanner
+│   ├── lib/                  # Pure logic — retrieval (retrieval.ts, bm25.ts, reranker.ts,
+│   │                          # similarity.ts, conversation.ts), ingestion (pdf.ts, chunker.ts,
+│   │                          # pageRender.ts, sessionFiles.ts), persistence (db.ts,
+│   │                          # embeddingClient.ts), network (answerRequest.ts, ocrRequest.ts,
+│   │                          # apiError.ts, models.ts, sanitizeHtml.ts), UX state
+│   │                          # (errorTaxonomy.ts, queryScope.ts, diagramHeuristic.ts,
+│   │                          # diagramImageSetting.ts, webSearchSetting.ts,
+│   │                          # landingVisitSetting.ts), export (pdfExport.ts)
+│   ├── store/                # documentStore.ts (Zustand)
+│   └── workers/              # embedding.worker.ts, backend.ts, embedding.types.ts
+├── worker/                   # Cloudflare Worker — separate npm project, separate deploy
+│   └── src/                  # index.ts, validate.ts, prompt.ts, labels.ts, grounding.ts,
+│                              # rateLimit.ts, cors.ts, discord.ts,
+│                              # providers/{gemini,openai,anthropic,grok,openrouter}.ts
+├── scripts/                  # check-bundle-size.mjs (build-time Pages size guard)
+├── README.md
 ├── CLAUDE.md
 ├── AGENTS.md
 ├── ARCHITECTURE.md
+├── SECURITY_REVIEW.md
+├── SKILLS.md
 └── TODO.md
 ```
 
@@ -58,13 +69,28 @@ pocketrag/
 | `src/components/DropZone.tsx` | Drag-and-drop + browse; queues a whole batch up front, then embeds one document at a time. `processFile` resolves (never rejects) on ready or error so one bad file can't block the rest. Auto-selects the first ready doc |
 | `src/components/DocumentList.tsx` | The multi-document library: one row per doc with live status, click-to-select (ready docs only), ✕ to dismiss an error row, inline two-step "Delete permanently?" confirm on ready rows (destructive — calls `deleteDocument()` then `removeDocument()`; failure keeps the row with a brief inline error) |
 | `src/components/QueryPanel.tsx` | Scope toggle (this doc / all docs) → embed query → rank the scoped chunk pool from IndexedDB → POST to the Worker → composed answer as primary result, `Doc N = fileName` legend, raw ranked chunks as collapsible "Sources," visible failure note (not silent fallback) if the Worker call fails |
-| `worker/src/index.ts` | `POST /answer` handler: CORS → rate limit → validate → build prompt → call Gemini → groundedness check → JSON response |
-| `worker/src/validate.ts` | Caps chunk count (5) and per-chunk text length (2000 chars) server-side — never trusts the client |
+| `src/components/ByokPanel.tsx` | BYOK provider picker (all 5), key input, live model-list fetch, "(Experimental)" labeling for the 3 unverified providers — key is request-scoped component state only, never persisted |
+| `src/components/NotesDropZone.tsx` | Notes-tab drop zone — per-file OCR consent prompt before anything uploads, no "remember my choice" shortcut |
+| `src/components/LandingPage.tsx` | First-visit-only landing screen, gated by `landingVisitSetting.ts`'s localStorage flag |
+| `src/components/ui/Button.tsx`, `ui/StatusBanner.tsx` | Shared primitives (Session 14 design system) — every action button and every error/warning/info banner in the app routes through these two |
+| `src/lib/bm25.ts` | BM25 keyword scoring, fused with cosine similarity via Reciprocal Rank Fusion in `retrieval.ts`'s `hybridRankChunks()` |
+| `src/lib/reranker.ts` | Client-side cross-encoder reranking (`Xenova/ms-marco-MiniLM-L-2-v2`) over the hybrid-search pool, with graceful fallback to hybrid-only results if reranking fails |
+| `src/lib/conversation.ts` | `buildRetrievalQuery()` — blends the immediately preceding question into retrieval only, never sent to the Worker as-is (see Key Architectural Decisions) |
+| `src/lib/answerRequest.ts` | `attemptAnswer()` — one answer attempt wrapped in an `AbortController` ~60s timeout, discriminated `{outcome}` return instead of throwing |
+| `src/lib/errorTaxonomy.ts` | Maps every failure (rate-limit, provider-unavailable, network, corrupt-pdf, webgpu-unsupported, unknown) to a severity + plain-language message |
+| `src/lib/diagramHeuristic.ts`, `src/lib/pageRender.ts`, `src/lib/sessionFiles.ts` | Diagram-aware Q&A (Milestone 10): lexical diagram-likely detection, on-demand page-image rendering, and the session-only (never persisted) raw-`File` cache page rendering needs |
+| `src/lib/diagramImageSetting.ts`, `src/lib/webSearchSetting.ts`, `src/lib/landingVisitSetting.ts` | Opt-in localStorage flags (diagram image sending, Gemini web-search grounding, landing-page-seen) — all default OFF/unset, same read-once-at-mount pattern |
+| `src/lib/ocrRequest.ts` | Client-side call to the Worker's `/ocr` endpoint for Notes-tab transcription |
+| `src/lib/pdfExport.ts` | `buildConversationPdf()` — jsPDF conversation export with real manual page-break logic (`ensureSpace()`) |
+| `src/lib/sanitizeHtml.ts` | DOMPurify wrapper for Gemini grounding's `searchEntryPointHtml` before it reaches `dangerouslySetInnerHTML` (Session 27 security fix) |
+| `worker/src/index.ts` | Request router: `POST /answer`, `POST /models`, `POST /ocr` — CORS → rate limit → validate → dispatch to the selected provider → groundedness check (answer only) → JSON response |
+| `worker/src/validate.ts` | Caps chunk count (5), per-chunk text length (2000 chars), history/doc-label array sizes, and OCR file size/MIME type server-side — never trusts the client |
 | `worker/src/prompt.ts` | Grounded-QA prompt: answer only from passages, cite `(Doc N, page M)`, admit gaps |
 | `worker/src/labels.ts` | `assignDocLabels()` — `Doc N` ↔ documentId map, frozen per conversation via an `existing` param (see Key Architectural Decisions) |
 | `worker/src/grounding.ts` | `checkGrounding()` — citation-level groundedness heuristic over `(Doc N, page)` pairs |
-| `worker/src/rateLimit.ts` | KV counter-per-IP-per-day, 50/day default |
-| `worker/src/gemini.ts` | Thin, injectable-`fetch` wrapper around Gemini's `generateContent` endpoint |
+| `worker/src/rateLimit.ts` | KV counter-per-IP-per-day — independent buckets per tier/endpoint (shared `/answer`, BYOK, `/ocr`) |
+| `worker/src/providers/*.ts` | One file per BYOK provider (gemini, openai, anthropic, grok, openrouter) — each a thin, injectable-`fetch` wrapper around that provider's chat + model-list endpoints, same two-key-leak-test discipline |
+| `worker/src/discord.ts` | Fire-and-forget (`ctx.waitUntil`) sanitized failure alerts to an optional webhook, suppressed per `(provider, endpoint)` per 10-minute window |
 
 ---
 
@@ -92,9 +118,6 @@ a caveat banner if `groundingWarning` is true, and the raw ranked chunks underne
 a collapsible "Sources" section. If the Worker call fails for any reason, the frontend
 falls back to just the raw ranked chunks with a **visible** failure note — never a
 silent swap.
-
-**Not yet built:** frontend deploy (Cloudflare Pages), so `PAGES_ORIGIN` CORS config
-and `.env.production`'s `VITE_ANSWER_API_URL` are both still placeholders.
 
 Note: chunking happens **inside the embedding Worker**, not on the main thread as
 Milestone 1's diagram had it — the real tokenizer is model logic (CLAUDE.md: "All

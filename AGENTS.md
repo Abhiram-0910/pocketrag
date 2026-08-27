@@ -3474,4 +3474,112 @@ success-path verification (still no working test key).
 
 ---
 
+### Session 31 — 2026-08-27
+**Goal:** Session D of the Milestone 16 staged retest plan
+(`~/.claude/plans/snoopy-stirring-tide.md`) — the final session. Area 10
+(light/dark + responsive) plus delivery (README.md, doc-currency pass,
+closing TODO.md entry). Started by confirming state: `origin/master` matched
+local `HEAD` (`3979e12`), working tree clean — Session 29/30's docs were
+already committed, no leftover uncommitted state to reconcile.
+
+**Method:** Playwright (installed fresh, uninstalled after) driving
+production (`pocketrag.pages.dev`) for Area 10 — 3 viewports (375/768/1280)
+× 2 `colorScheme` contexts (light/dark) × 4 views (landing, Documents tab,
+Notes tab, BYOK-expanded form via the "Use your own API key" checkbox) = 24
+combinations, each checked for `document.documentElement.scrollWidth >
+window.innerWidth` and screenshotted full-page.
+
+**Area 10 — pass, no visual breakage found.** 0/24 combinations had
+horizontal overflow. Manually reviewed 8 representative screenshots
+covering the two surfaces that postdate the Session 14 styling pass and had
+never had a dedicated responsive check: the landing page (mobile+desktop,
+both themes — numbered list and icon bullets wrap cleanly, dark-mode
+contrast holds against the near-black background) and the Notes tab
+(mobile, both themes — identical structure/contrast to the Documents tab).
+Also specifically checked the BYOK-expanded form (provider dropdown + key
+input + "Fetch models" button on one row — the densest surface, most likely
+responsive-break candidate) at mobile and tablet: held without wrapping at
+375px, correctly reflowed the query input + Search button from stacked
+(mobile) to side-by-side (tablet+). No source changes.
+
+**Delivery.**
+- **`README.md`** written per the plan's proposed contents. One real
+  correction made during user review: the opening paragraph originally
+  implied the whole app never sends source content anywhere, which
+  contradicts the Notes tab's OCR upload (already correctly disclosed
+  further down in Features) — reworded to scope the "nothing leaves the
+  browser" claim specifically to the Documents tab, name the Notes-tab OCR
+  upload as the one deliberate exception with a pointer to
+  ARCHITECTURE.md's two-tab privacy model, and note the diagram-aware
+  page-image toggle as the second (opt-in, default-off) exception, so the
+  top of the file no longer contradicts what Features says below it.
+- **`ARCHITECTURE.md` doc-currency pass — real drift found and fixed.** The
+  Folder Structure and Key Files sections still reflected an early-milestone
+  layout: missing `ByokPanel.tsx`, `LandingPage.tsx`, `NotesDropZone.tsx`,
+  both `ui/` primitives, most of `src/lib/` (18 files existed that the table
+  didn't mention — `bm25.ts`, `reranker.ts`, `conversation.ts`,
+  `errorTaxonomy.ts`, `pdfExport.ts`, `sanitizeHtml.ts`, and more), and the
+  Worker's provider split (`worker/src/gemini.ts` no longer exists — it's
+  `worker/src/providers/{gemini,openai,anthropic,grok,openrouter}.ts`, plus
+  `discord.ts`). Rewrote both sections against a real `find` of the current
+  tree, not a guess. Also removed a leftover "Not yet built: frontend
+  deploy" line in the Data Flow section that flatly contradicted the same
+  document's own Environment Variables section two screens down (which
+  correctly describes both URLs as live production since Session 5) — this
+  was a straightforward correctness error, not a style choice, so it's
+  fixed rather than left as-is. The Stack table, Key Architectural
+  Decisions, Environment Variables, and Known Technical Debt sections were
+  all re-checked against the real model ID (`gemini-3.5-flash-lite`,
+  confirmed via `worker/src/providers/gemini.ts`) and current
+  `package.json` dependencies — no drift found there, left unchanged.
+- **`SECURITY_REVIEW.md` doc-currency pass — two stale placeholders fixed,
+  findings unchanged.** Finding 1.1's "commit: pending" note resolved to the
+  real commit hash (`9ace2ff`, confirmed via `git log`). The closing status
+  line's "remaining step: your review, then a commit" was stale by four
+  sessions — updated to state both fixes are live and re-confirmed current
+  as of this retest. The actual audit findings (all 6 areas) were re-read
+  against current code where checkable in this session's scope (provider
+  key handling, rate-limit bucket values, CORS) and found unchanged —
+  no re-audit performed, this was a currency check per the plan's explicit
+  scope ("no drift since Session 27"), not a new security review.
+- **Closing TODO.md entry** written: Milestone 16 marked complete (Sessions
+  A-D), the full Milestone 7-16 roadmap closed out, and the two genuinely
+  open items named as explicitly deferred future work rather than dropped —
+  Milestone 10 Phase C (BYOK diagram extension, parked on a real
+  per-provider vision-capability-detection mechanism) and BYOK
+  success-path verification for Anthropic/Grok/OpenRouter (code-complete,
+  failure path live-verified, success path blocked on a working test key).
+  Milestone 12's web-search-grounding success path is named alongside them
+  for the same reason (blocked on a billing-linked key, not a bug).
+
+**Honest note, not fixed this session:** `oxlint` surfaced one pre-existing
+warning not mentioned in Sessions 28-30's logs (`QueryPanel.tsx:419`,
+`react-hooks/exhaustive-deps` on `titleFor`) — confirmed via `git status`
+that no source file was touched this session and `package-lock.json` is
+unchanged, so this isn't a regression from anything done here; exit code is
+still 0 (not a failure). Logged for whoever next touches `QueryPanel.tsx`,
+not silently ignored, but out of scope for a docs-only delivery session to
+chase further.
+
+**Verification:** 133/133 frontend tests, 236/236 worker tests (both
+unchanged from Session 30). `tsc --noEmit` clean both sides. `oxlint` clean
+both sides except the one pre-existing warning above. Production build
+clean, bundle hash `index-DktHxhx3.js` — matches Sessions 28-30 exactly, and
+confirmed byte-identical to the live `pocketrag.pages.dev` bundle via a
+direct `curl` against production (not just a local-history comparison).
+Playwright installed then uninstalled per convention (`npm ls playwright`
+confirms empty afterward).
+
+**Next session should start with:** nothing queued — Milestone 16 and the
+full Milestone 7-16 roadmap are complete. Standing candidates for future
+work, none blocking: Milestone 10 Phase C (parked), BYOK success-path
+verification for Anthropic/Grok/OpenRouter (needs test keys), Gemini web
+search grounding success-path verification (needs a billing-linked key),
+and the pre-existing `QueryPanel.tsx:419` lint warning noted above. Standing
+backlog: commit this session's `README.md`/`ARCHITECTURE.md`/
+`SECURITY_REVIEW.md`/`AGENTS.md`/`TODO.md` changes (confirm with the user
+first, per this project's commit-only-when-asked convention).
+
+---
+
 <!-- Copy the block above for each new session -->
