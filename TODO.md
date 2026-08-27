@@ -261,12 +261,43 @@ fixed, deployed, live-re-verified. See TODO.md's Milestone 16 entry below and
 AGENTS.md Session 28 for full detail, including the honest note on why a live
 multi-turn conversation can't be literally preserved across sessions.
 
+**Milestone 16, Session B of 4 (Notes tab, diagram Q&A) complete — Session 29.**
+Full live retest against production using user-resupplied fixtures
+(`daa-unit2.pdf`, a real handwritten-notes photo), all pass — image OCR, 23-page
+PDF OCR, per-file consent (no remember-choice shortcut), combined
+Notes+Documents retrieval badges, diagram-toggle default-off, and a live
+image-attachment proof (Gemini correctly named the color of a swatch that exists
+only in an embedded image's pixels, never in extractable PDF text). No source
+changes. See AGENTS.md Session 29.
+
+**Milestone 16, Session C of 4 (web search grounding, PDF export, error states,
+landing page) complete — Session 30.** Full live retest, all 10 checks pass.
+Area 6 (grounding): success path stays structurally unverifiable on a
+free-tier key (still no billing-enabled key available) — retest covered
+everything else live: toggle absent on shared tier, appears only for real
+BYOK-gemini (fetched a real model list with a real key), absent again for
+BYOK-openai, "(Experimental)" caveat text renders correctly, and a raw
+shared-tier request with `enableWebSearch` forced true correctly 400s
+server-side. Area 7 (PDF export): regenerated the conversation-reproduction
+fixtures fresh (Session A's originals no longer existed in `/tmp`), built a
+real 4-turn multi-document conversation against production, exported, and
+round-tripped the actual downloaded PDF bytes through pdf.js — all 4 turns
+present in order with correct grounding banners, `Doc N` legend, and a
+current-turn Sources section. Area 8 (error states): live-verified all 4
+`errorTaxonomy.ts` types against local `wrangler dev` — rate-limit (real
+50-request burst tripped the shared bucket exactly at request 51, correct
+warning banner + reset message), invalid BYOK key (sanitized 502, warning),
+network failure (killed the local Worker mid-session, red error banner), and
+webgpu-unsupported (info banner, this sandbox has no GPU). Area 9 (landing
+page): fresh profile shows it once, reload skips straight to the app. No
+source changes — pure retest. See AGENTS.md Session 30.
+
 Full roadmap (Milestones 7-16) in 🟢 below. Standing candidates: Milestone 10
 Phase C (BYOK extension, parked), BYOK success-path verification for
 Anthropic/Grok/OpenRouter (live-verify a real grounded answer once test keys
 are available — flip out of `EXPERIMENTAL_PROVIDERS`, no other code change
-needed), and Milestone 16 Sessions B-D (Notes/diagram Q&A, web
-search/PDF-export/error-states/landing, responsive+delivery).
+needed), and Milestone 16 Session D (light/dark + responsive retest, plus
+delivery: README.md, doc-currency pass, closing TODO.md entry).
 
 ---
 
@@ -558,8 +589,14 @@ plan at `~/.claude/plans/snoopy-stirring-tide.md` (Sessions A-D).
       note on why the multi-turn conversation itself can't be literally preserved
       across sessions (pure React state, never persisted) — only the document
       library + a reproducible script are, at `/tmp/pocketrag-m16-fixtures/`.
-- [ ] Session B — Areas 4-5 (Notes tab, diagram Q&A) — needs the user to re-supply
-      `daa-unit2.pdf` + the handwritten-notes photo.
+- [x] **Session B — Areas 4-5 (Notes tab, diagram Q&A) — Session 29.** All pass.
+      Image OCR, 23-page PDF OCR, per-file consent (no remember-choice shortcut),
+      combined Notes+Documents retrieval (📝/📄 badges both present), diagram
+      toggle default-OFF confirmed on a fresh profile, and a live image-attachment
+      proof (Gemini correctly named a color that exists only in an embedded
+      image's pixels). Two new hand-rolled fixtures (`combo-doc.pdf`,
+      `diagram-doc.pdf`, jsPDF + stdlib `zlib`, no new dependency) plus the user's
+      re-supplied `daa-unit2.pdf`/handwritten-notes photo. See AGENTS.md Session 29.
 - [ ] Session C — Areas 6-9 (web search grounding, PDF export, error states, landing
       page) — PDF export reuses Session A's conversation-reproduction recipe.
 - [ ] Session D — Area 10 (light/dark + responsive) + delivery (root `README.md`,

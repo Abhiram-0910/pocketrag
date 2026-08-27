@@ -3288,4 +3288,190 @@ success-path verification (still no working test key for any of the three).
 
 ---
 
+### Session 29 — 2026-08-27
+**Goal:** Session B of the Milestone 16 staged retest plan
+(`~/.claude/plans/snoopy-stirring-tide.md`) — Areas 4-5: Notes tab, diagram Q&A.
+User re-supplied both fixtures directly into `/tmp/pocketrag-m16-fixtures/`
+(`daa-unit2.pdf`, confirmed byte-identical to Session 26's original; a real
+WhatsApp photo of handwritten notes as `handwritten-notes.jpeg`) — no regeneration
+needed for Area 4. Note: Session A's persistent Chromium profile
+(`/tmp/pocketrag-m16-profile`) and its fixtures (`biology.pdf`/`cooking.pdf`) had
+already been cleared from `/tmp` by this session's start, confirming the plan's own
+caveat that this path doesn't reliably survive between sessions — not needed for
+Areas 4-5 anyway.
+
+**Method:** Playwright (installed fresh, uninstalled after), driving the real
+production site, fresh browser profile (no persisted state reused from Session A).
+Two new tiny fixture PDFs generated with jsPDF (already a project dependency) plus
+Node's stdlib `zlib` for a hand-built solid-color PNG — no new dependency for
+either: `combo-doc.pdf` (plain text, "Photosynthesis converts sunlight into
+chemical energy in plants.", no image — deliberately kept separate from the
+diagram fixture so the combined-retrieval check isn't conflated with the
+diagram-image check) and `diagram-doc.pdf` (text + a real embedded magenta PNG
+square — the color exists only in image pixels, never as extractable PDF text, so
+a correct answer about it is proof the image itself reached the model, not the
+surrounding text). Generator script and both fixtures left at
+`/tmp/pocketrag-m16-fixtures/`.
+
+**Area 4 (Notes tab) — pass, matches Sessions 22/26.**
+- Image OCR: `handwritten-notes.jpeg` uploaded → per-file consent banner named the
+  file correctly before anything left the browser → accepted → reached `ready`.
+- PDF OCR: `daa-unit2.pdf` (23-page scan) uploaded → its own separate consent
+  banner (proving no "remember my choice" shortcut — confirmed both from the live
+  behavior and from `NotesDropZone.tsx`'s source, which has no such state) →
+  accepted → reached `ready`. First live attempt at documenting the exact OCR
+  latency hit `150s` (this script's cap) mid-run on a repeat pass — not a
+  regression: the original run moments earlier completed the identical call in
+  ~92s, and the code's own comment already flags real-scan OCR latency as
+  variable, not fixed. Both timings are within Session 26's precedent.
+- Combined retrieval: with exactly one Documents-tab doc (`combo-doc.pdf`) and one
+  Notes-tab doc (`handwritten-notes.jpeg`) ready — deliberately kept the pool at 2
+  total chunks (≤ `TOP_K`) so both sources are guaranteed to surface regardless of
+  query relevance — a scope=all query returned both in Sources with the correct
+  📝 (note) and 📄 (document) badges.
+- Pass: matches Sessions 22/26's live-verified transcription + retrieval outcomes.
+
+**Area 5 (diagram-aware Q&A) — pass, matches Sessions 20/21.**
+- Toggle default: confirmed OFF (`diagramImagesEnabled` unchecked) on a fresh
+  profile, before any interaction — matches `diagramImageSetting.ts`'s documented
+  default.
+- Gating: the toggle is gated on shared-tier key (`keyConfig?.keySource ===
+  'shared'`), not BYOK-Gemini specifically — confirmed directly from
+  `QueryPanel.tsx` (separate from web search grounding's `isGeminiEffective` gate,
+  a different feature) — no correction needed to my earlier Session-start report,
+  which had conflated the two only in passing conversation, never in code.
+- Live image-attachment proof: uploaded `diagram-doc.pdf`, selected it, scope="This
+  document", toggle switched ON, asked "What is the dominant color of the swatch
+  shown in the attached image?" — real Gemini answer: **"Pink (Doc 1, page 1)"** —
+  correct (the embedded swatch is magenta/pink), correctly cited, and the color
+  exists nowhere in the page's extractable text — direct proof the `hasImage`
+  prompt branch fired and the page image actually reached the model. No
+  `diagramFallbackNote` fired (same-session upload, file still in `sessionFiles`
+  memory map, no reload).
+- Pass: matches Session 20/21's live-verified outcomes; doesn't require the exact
+  original fixture per the plan's own allowance (any PDF with a real embedded
+  raster image is sufficient).
+
+**Verification:** No source files changed this session (pure E2E retest). 133/133
+frontend tests, 236/236 worker tests unchanged. Playwright installed then
+uninstalled per convention (`npm ls playwright` confirms empty afterward).
+
+**Next session should start with:** Session C of the Milestone 16 retest (Areas
+6-9: web search grounding, PDF export, error states, landing page — PDF export
+reuses Session A's conversation-reproduction recipe at
+`/tmp/pocketrag-m16-fixtures/area2-3-combined.cjs`, if it still exists in `/tmp` by
+then; regenerate via `make-fixtures2.cjs` if not). Standing backlog unchanged:
+commit the Session 28 `ByokPanel.tsx` fix if not already committed, Milestone 10
+Phase C (parked), Anthropic/Grok/OpenRouter success-path verification.
+
+---
+
+### Session 30 — 2026-08-27
+**Goal:** Session C of the Milestone 16 staged retest plan
+(`~/.claude/plans/snoopy-stirring-tide.md`) — Areas 6-9: web search grounding,
+PDF export, error states, landing page. Started by confirming state: `origin/master`
+matched local `HEAD` (`13550e6`), but Session 29's `AGENTS.md`/`TODO.md` entries were
+still uncommitted from the previous session — left as-is per this project's
+commit-only-when-asked convention, not committed mid-retest.
+
+**Method:** Playwright (installed fresh, uninstalled after) driving production
+(`pocketrag.pages.dev`) for Areas 6/7/9; local `wrangler dev` + `vite dev` for Area 8
+(needs precise control over rate-limit tripping and a real network failure). Area 7's
+fixtures (`export-bio.pdf`/`export-cooking.pdf`, jsPDF-generated) and its conversation
+were built fresh — Session A's `area2-3-combined.cjs` and persistent Chromium profile
+no longer existed in `/tmp`, confirmed at session start, matching Session A's own
+documented fallback ("`make-fixtures2.cjs` are self-contained and reproduce
+byte-different but functionally identical PDFs in seconds").
+
+**Area 6 (web search grounding) — pass, honest scope maintained.** Asked the user
+directly whether a billing-enabled Gemini key was available yet (per the plan's
+explicit instruction) — still no. Retest covered only what's structurally testable on
+a free-tier key: toggle absent on shared tier (confirmed), toggle appears only for
+real BYOK-gemini (fetched a real model list using the project's own real Gemini key,
+read directly from a scratch file, never printed — same discipline as Session 28's
+BYOK key handling), toggle disappears again when switching to BYOK-openai (proving the
+gate is `isGeminiEffective`, not just "any BYOK"), "(Experimental)" caveat text
+renders verbatim. The shared-tier negative path — `enableWebSearch: true` +
+`keySource: "shared"` — was live-verified directly against **production** via raw
+`curl` (bypassing the frontend, same technique as Session 27): real `400`, exact
+message `"enableWebSearch is only supported for BYOK requests with provider
+\"gemini\"."`. Success path logged as still unverified, not silently re-passed —
+unchanged since Session 25.
+
+**Area 7 (PDF export) — pass, verified by a different but equally direct method
+than Session 19.** Built a real 4-turn,
+2-document conversation against production (shared tier, `export-bio.pdf` +
+`export-cooking.pdf`, scope "All documents"), clicked "Export as PDF", saved the real
+downloaded file, then round-tripped its actual bytes through `pdf.js` (same
+`extractPages()` technique as `pdfExport.test.ts` — Node-side this time rather than
+Session 19's in-page-context canvas render, since this retest didn't need a Vite dev
+server for the live-production half of the flow). Real extracted text confirmed: all
+4 turns present in order, exact question text, exact "Grounded in your documents."
+banner, correct real Gemini answers with correct `(Doc N, page 1)` citations, correct
+`Doc 1 = export-bio.pdf · Doc 2 = export-cooking.pdf` legend after every turn, and a
+"Sources (current answer only)" section scoped to the last turn only, exactly as
+`pdfExport.ts`'s doc comment describes. One page (conversation was short — page-break
+logic itself stays covered by the existing unit test, not re-forced live here, per the
+plan's parity-only pass criterion).
+
+**Area 8 (error states) — pass, all 4 `errorTaxonomy.ts` types confirmed live.**
+Against local `wrangler dev` + `vite dev`:
+- **Rate limit:** real 51-request burst against `/answer` (shared bucket, limit 50) —
+  tripped exactly at request 51 (local KV had zero leftover count for today), correct
+  `429` + `"You've hit today's request limit. Please try again tomorrow."` +
+  `resetAt` at next UTC midnight. UI-driven confirmation: `warning` (amber) banner,
+  exact `"You've hit today's request limit. Resets at 12:00 AM."` message.
+  **Side effect, not a bug:** requests ~18-50 of the burst returned `502` instead of
+  real `200`s — the burst's own real Gemini calls hit Google's actual **per-minute**
+  free-tier quota (`generativelanguage.googleapis.com/generate_content_free_tier_requests`,
+  15/min/model), sanitized correctly into the same generic `provider-unavailable`
+  message. Self-healing (per-minute, not per-day) — confirmed recovered by re-querying
+  **production** directly a short while later: real `200`, real grounded answer.
+- **Invalid BYOK key:** a deliberately fake Gemini key against `/models` → real `400
+  API_KEY_INVALID` from Gemini → sanitized `502` → `warning` banner, exact
+  `"This provider's model list isn't available yet. Please try Gemini or OpenAI for
+  now — we're working on it."` (the `/models`-specific sanitized message, distinct
+  from `/answer`'s — both equally scrubbed of raw provider text).
+- **Network failure:** local `wrangler dev` had already exited on its own sometime
+  after the rate-limit burst (confirmed via `ss` — port 8787 no longer listening,
+  unrelated to the burst's outcome, no crash trace beyond normal log output) — a
+  request against the closed port produced a genuine `fetch()` rejection with no HTTP
+  response, correctly classified `network` type, `error` (red) banner, exact
+  `"Network error — check your connection and try again."` message.
+- **webgpu-unsupported:** this sandbox naturally reports `wasm-unavailable` (confirmed
+  since Session 2, no GPU here) → `info` (slate) banner, not `error` — correctly
+  treated as a working fallback, not a failure.
+
+**Area 9 (landing page) — pass, matches Session 24.** Fresh profile → landing page
+shown → "Get started" → app view. Reload → skips straight to app (flag persisted in
+localStorage), landing page not shown again.
+
+**Debugging notes for future Playwright scripts in this project:** `locator.isVisible
+({timeout})` does **not** actually wait — the timeout only bounds the actionability
+probe, it returns near-instantly regardless of whether the element appears later. Two
+checks in this session's Area 6 script initially false-failed for exactly this reason
+(checking a model picker / toggle that appears only after an async fetch resolves) —
+fixed by switching to `locator.waitFor({state: 'visible', timeout})`, which genuinely
+polls. Record this for any future session's Playwright work in this project, same
+category as the Session 19 PDF-viewer note and the `wrangler tail` limitation.
+
+**Verification:** No source files changed this session (pure E2E retest, 10/10 Area
+6/7/9 checks + 4/4 Area 8 checks, all with real live evidence, not summary claims).
+133/133 frontend tests, 236/236 worker tests unchanged. `tsc`/`oxlint` clean both
+sides. Production build clean, same bundle hash (`index-DktHxhx3.js`) as Sessions
+28/29 — confirms no drift. Playwright installed then uninstalled per convention
+(`npm ls playwright` confirms empty afterward); scratch Gemini key file deleted
+immediately after Area 6's BYOK check.
+
+**Next session should start with:** Session D of the Milestone 16 retest (Area 10:
+light/dark + responsive across Documents/Notes/BYOK/landing views) plus delivery
+(root `README.md`, `ARCHITECTURE.md`/`SECURITY_REVIEW.md` doc-currency pass, closing
+TODO.md entry) — the final session in the plan's A→B→C→D split. Standing backlog
+unchanged: commit this session's `AGENTS.md`/`TODO.md` entries (confirm with the user
+first — not yet committed as of this session's end, same as Session 28/29's
+end-of-session state), Milestone 10 Phase C (parked), Anthropic/Grok/OpenRouter
+success-path verification (still no working test key).
+
+---
+
 <!-- Copy the block above for each new session -->
