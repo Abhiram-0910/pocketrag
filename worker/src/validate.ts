@@ -33,6 +33,10 @@ export type KeySource = 'shared' | 'own'
 
 export const SUPPORTED_PROVIDERS = ['gemini', 'openai', 'anthropic', 'grok', 'openrouter'] as const
 export type SupportedProvider = (typeof SUPPORTED_PROVIDERS)[number]
+// Must match ByokPanel.tsx's EXPERIMENTAL_PROVIDERS (enforced by a frontend test) —
+// these keep the "isn't fully supported yet" copy for unclassified failures and alert
+// Discord on request_rejected, since a rejection there may be our request shape.
+export const EXPERIMENTAL_PROVIDERS: readonly SupportedProvider[] = ['anthropic', 'grok', 'openrouter']
 
 export interface AnswerRequestBody {
   question: string
@@ -124,7 +128,18 @@ export const MAX_DOCUMENT_ID_LENGTH = 128
 // a different wrong key, so silently accepting a cut one would be worse than clearly
 // rejecting an oversized one.
 export const MAX_API_KEY_LENGTH = 200
+export const MIN_API_KEY_LENGTH = 8
 export const MAX_MODEL_LENGTH = 128
+// Printable ASCII, no spaces, MIN..MAX length. The key goes into an HTTP header — a
+// newline or non-latin1 char makes fetch() throw a TypeError whose message can carry
+// the header value, i.e. the key, into our own logs. Rejected here, before any fetch.
+const API_KEY_PATTERN = /^[\x21-\x7E]{8,200}$/
+// Gemini puts the model in the URL path (models/<model>:generateContent), so it gets
+// the strictest set: no '/', ':', '?', '#', '%'. Other providers put it in a JSON body;
+// '/' and ':' are real id chars there (openai/gpt-4o:free) and '~' prefixes
+// OpenRouter's alias ids (~openai/gpt-mini-latest). '..' is rejected for every provider.
+const GEMINI_MODEL_PATTERN = /^[A-Za-z0-9._-]{1,128}$/
+const MODEL_PATTERN = /^[A-Za-z0-9._:/~-]{1,128}$/
 // A conversation realistically cites a handful of distinct documents, not dozens —
 // generous enough for real multi-doc use, small enough to bound the label lookup.
 export const MAX_DOC_LABELS = 20
@@ -146,6 +161,18 @@ export const MAX_HISTORY_ANSWER_LENGTH = 1000
 // Changing pageRender.ts's resolution/quality without re-measuring invalidates this.
 export const MAX_IMAGE_BASE64_LENGTH = 400_000
 const IMAGE_MIME_TYPE = 'image/jpeg'
+
+function isValidApiKey(value: unknown): value is string {
+  return typeof value === 'string' && API_KEY_PATTERN.test(value)
+}
+
+function isValidModel(provider: SupportedProvider, value: unknown): value is string {
+  if (typeof value !== 'string' || value.includes('..')) return false
+  return (provider === 'gemini' ? GEMINI_MODEL_PATTERN : MODEL_PATTERN).test(value)
+}
+
+// Never interpolates the value itself — a rejected key must not be echoed back.
+const API_KEY_ERROR = `apiKey must be ${MIN_API_KEY_LENGTH}-${MAX_API_KEY_LENGTH} printable ASCII characters with no spaces.`
 
 function isValidChunk(value: unknown): value is InputChunk {
   if (typeof value !== 'object' || value === null) return false
@@ -320,14 +347,17 @@ export function validateAnswerRequest(body: unknown): ValidationResult {
     }
   }
 
-  if (typeof apiKey !== 'string' || apiKey.length === 0 || apiKey.length > MAX_API_KEY_LENGTH) {
-    return { ok: false, error: `apiKey must be a non-empty string of ${MAX_API_KEY_LENGTH} characters or fewer.` }
+  if (!isValidApiKey(apiKey)) {
+    return { ok: false, error: API_KEY_ERROR }
   }
   if (typeof provider !== 'string' || !SUPPORTED_PROVIDERS.includes(provider as SupportedProvider)) {
     return { ok: false, error: `provider must be one of: ${SUPPORTED_PROVIDERS.join(', ')}.` }
   }
-  if (typeof model !== 'string' || model.length === 0 || model.length > MAX_MODEL_LENGTH) {
-    return { ok: false, error: `model must be a non-empty string of ${MAX_MODEL_LENGTH} characters or fewer.` }
+  if (!isValidModel(provider as SupportedProvider, model)) {
+    return {
+      ok: false,
+      error: `model must be 1-${MAX_MODEL_LENGTH} characters of letters, digits, and . _ - (plus : / ~ for non-Gemini providers), with no "..".`,
+    }
   }
 
   // Milestone 12: grounding is Gemini-specific — fail closed rather than silently
@@ -428,8 +458,8 @@ export function validateModelsRequest(body: unknown): ModelsValidationResult {
   if (typeof provider !== 'string' || !SUPPORTED_PROVIDERS.includes(provider as SupportedProvider)) {
     return { ok: false, error: `provider must be one of: ${SUPPORTED_PROVIDERS.join(', ')}.` }
   }
-  if (typeof apiKey !== 'string' || apiKey.length === 0 || apiKey.length > MAX_API_KEY_LENGTH) {
-    return { ok: false, error: `apiKey must be a non-empty string of ${MAX_API_KEY_LENGTH} characters or fewer.` }
+  if (!isValidApiKey(apiKey)) {
+    return { ok: false, error: API_KEY_ERROR }
   }
 
   return { ok: true, provider: provider as SupportedProvider, apiKey }

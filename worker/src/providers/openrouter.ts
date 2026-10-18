@@ -1,3 +1,5 @@
+import { providerError } from './errors'
+
 const API_BASE = 'https://openrouter.ai/api/v1'
 // Optional but recommended identifying headers — attribute this app's traffic on
 // OpenRouter's own dashboard. Fixed values, not user-configurable; the first provider
@@ -36,10 +38,7 @@ export async function callOpenRouter(
     }),
   })
 
-  if (!response.ok) {
-    const body = await response.text()
-    throw new Error(`OpenRouter API error ${response.status}: ${body}`)
-  }
+  if (!response.ok) throw await providerError('OpenRouter', response, apiKey, prompt)
 
   const data = (await response.json()) as OpenRouterChatResponse
   const text = data.choices?.[0]?.message?.content
@@ -53,27 +52,42 @@ export interface ModelInfo {
 }
 
 interface OpenRouterModelsListResponse {
-  data?: { id?: string; name?: string }[]
+  data?: { id?: string; name?: string; architecture?: { output_modalities?: unknown } }[]
+}
+
+// Keeps text-only models. A model with no output_modalities field is kept (unknown is
+// not evidence it can't answer in text); anything that also emits image/audio is dropped.
+function isTextOnly(outputModalities: unknown): boolean {
+  if (outputModalities == null) return true
+  return Array.isArray(outputModalities) && outputModalities.length === 1 && outputModalities[0] === 'text'
 }
 
 /**
- * Lists models visible to this key. OpenRouter's /v1/models wraps the list under
- * `data` (same key as OpenAI) and each entry has a real `name` field — used as
- * displayName, falling back to id like every other provider when absent.
+ * Lists OpenRouter's text-only models. /v1/models is a public catalog that returns 200
+ * for any key (see SECURITY_REVIEW.md §1), so the key is checked first against
+ * GET /v1/key — a fake key gets 401 "User not found." there (confirmed live
+ * 2026-10-18) — and a bad key fails here instead of on the first /answer call.
+ * Entries use `name` as displayName, falling back to id like every other provider.
  */
 export async function listOpenRouterModels(fetchImpl: typeof fetch, apiKey: string): Promise<ModelInfo[]> {
+  const keyResponse = await fetchImpl(`${API_BASE}/key`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${apiKey}` },
+  })
+  if (!keyResponse.ok) throw await providerError('OpenRouter', keyResponse, apiKey)
+
   const response = await fetchImpl(`${API_BASE}/models`, {
     method: 'GET',
     headers: { Authorization: `Bearer ${apiKey}` },
   })
 
-  if (!response.ok) {
-    const body = await response.text()
-    throw new Error(`OpenRouter API error ${response.status}: ${body}`)
-  }
+  if (!response.ok) throw await providerError('OpenRouter', response, apiKey)
 
   const data = (await response.json()) as OpenRouterModelsListResponse
   return (data.data ?? [])
-    .filter((model): model is { id: string; name?: string } => typeof model.id === 'string')
+    .filter(
+      (model): model is { id: string; name?: string } =>
+        typeof model.id === 'string' && isTextOnly(model.architecture?.output_modalities),
+    )
     .map((model) => ({ id: model.id, displayName: model.name ?? model.id }))
 }

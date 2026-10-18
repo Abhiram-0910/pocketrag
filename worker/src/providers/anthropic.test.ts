@@ -40,7 +40,7 @@ describe('callAnthropic', () => {
     expect(answer).toBe('The real answer.')
   })
 
-  it('throws with the status and body when Anthropic returns a non-2xx response', async () => {
+  it('throws a ProviderError carrying the status when Anthropic returns a non-2xx response', async () => {
     const fetchImpl = mockFetch({ ok: false, status: 429, textBody: 'rate limited' })
     await expect(callAnthropic(fetchImpl, 'key', 'claude-sonnet-4-5', 'q')).rejects.toThrow(/429/)
   })
@@ -53,14 +53,20 @@ describe('callAnthropic', () => {
   })
 
   it('never includes the raw API key in a thrown error message', async () => {
-    const fetchImpl = mockFetch({ ok: false, status: 401, textBody: 'invalid x-api-key' })
     const secretKey = 'sk-ant-super-secret-value-should-never-leak-12345'
+    // The provider body echoes the key back — the exact-key scrub must remove it.
+    const fetchImpl = mockFetch({
+      ok: false,
+      status: 401,
+      textBody: JSON.stringify({ error: { message: `invalid x-api-key: ${secretKey}` } }),
+    })
     try {
       await callAnthropic(fetchImpl, secretKey, 'claude-sonnet-4-5', 'q')
       expect.unreachable('callAnthropic should have thrown')
     } catch (err) {
       expect(err).toBeInstanceOf(Error)
       expect((err as Error).message).not.toContain(secretKey)
+      expect((err as Error).message).toContain('[redacted]')
     }
   })
 })
@@ -105,20 +111,26 @@ describe('listAnthropicModels', () => {
     expect(await listAnthropicModels(fetchImpl, 'key')).toEqual([])
   })
 
-  it('throws with the status and body on a non-2xx response', async () => {
+  it('throws a ProviderError carrying the status on a non-2xx response', async () => {
     const fetchImpl = mockFetch({ ok: false, status: 403, textBody: 'permission denied' })
     await expect(listAnthropicModels(fetchImpl, 'key')).rejects.toThrow(/403/)
   })
 
   it('never includes the raw API key in a thrown error message', async () => {
-    const fetchImpl = mockFetch({ ok: false, status: 401, textBody: 'invalid x-api-key' })
     const secretKey = 'sk-ant-another-secret-value-should-never-leak-67890'
+    // The provider body echoes the key back — the exact-key scrub must remove it.
+    const fetchImpl = mockFetch({
+      ok: false,
+      status: 401,
+      textBody: JSON.stringify({ error: { message: `invalid x-api-key: ${secretKey}` } }),
+    })
     try {
       await listAnthropicModels(fetchImpl, secretKey)
       expect.unreachable('listAnthropicModels should have thrown')
     } catch (err) {
       expect(err).toBeInstanceOf(Error)
       expect((err as Error).message).not.toContain(secretKey)
+      expect((err as Error).message).toContain('[redacted]')
     }
   })
 })

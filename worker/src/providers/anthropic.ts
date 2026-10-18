@@ -1,3 +1,5 @@
+import { providerError } from './errors'
+
 const API_BASE = 'https://api.anthropic.com/v1'
 const ANTHROPIC_API_VERSION = '2023-06-01'
 // Anthropic's Messages API requires max_tokens (unlike Gemini/OpenAI, which use a
@@ -37,10 +39,7 @@ export async function callAnthropic(
     }),
   })
 
-  if (!response.ok) {
-    const body = await response.text()
-    throw new Error(`Anthropic API error ${response.status}: ${body}`)
-  }
+  if (!response.ok) throw await providerError('Anthropic', response, apiKey, prompt)
 
   const data = (await response.json()) as AnthropicMessageResponse
   const text = data.content?.find((block) => block.type === 'text')?.text
@@ -71,10 +70,7 @@ export async function listAnthropicModels(fetchImpl: typeof fetch, apiKey: strin
     headers: { 'x-api-key': apiKey, 'anthropic-version': ANTHROPIC_API_VERSION },
   })
 
-  if (!response.ok) {
-    const body = await response.text()
-    throw new Error(`Anthropic API error ${response.status}: ${body}`)
-  }
+  if (!response.ok) throw await providerError('Anthropic', response, apiKey)
 
   const data = (await response.json()) as AnthropicModelsListResponse
   return (data.data ?? [])

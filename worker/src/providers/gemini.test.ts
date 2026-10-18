@@ -28,7 +28,7 @@ describe('callGemini', () => {
     expect(body.contents[0].parts[0].text).toBe('What is x?')
   })
 
-  it('throws with the status and body when Gemini returns a non-2xx response', async () => {
+  it('throws a ProviderError carrying the status when Gemini returns a non-2xx response', async () => {
     const fetchImpl = mockFetch({ ok: false, status: 429, textBody: 'quota exceeded' })
     await expect(callGemini(fetchImpl, 'key', 'gemini-3.5-flash-lite', 'q')).rejects.toThrow(/429/)
   })
@@ -41,14 +41,20 @@ describe('callGemini', () => {
   })
 
   it('never includes the raw API key in a thrown error message', async () => {
-    const fetchImpl = mockFetch({ ok: false, status: 401, textBody: 'invalid API key' })
     const secretKey = 'sk-super-secret-value-should-never-leak-12345'
+    // The provider body echoes the key back — the exact-key scrub must remove it.
+    const fetchImpl = mockFetch({
+      ok: false,
+      status: 401,
+      textBody: JSON.stringify({ error: { message: `invalid API key: ${secretKey}` } }),
+    })
     try {
       await callGemini(fetchImpl, secretKey, 'gemini-3.5-flash-lite', 'q')
       expect.unreachable('callGemini should have thrown')
     } catch (err) {
       expect(err).toBeInstanceOf(Error)
       expect((err as Error).message).not.toContain(secretKey)
+      expect((err as Error).message).toContain('[redacted]')
     }
   })
 
@@ -231,20 +237,26 @@ describe('listGeminiModels', () => {
     expect(await listGeminiModels(fetchImpl, 'key')).toEqual([])
   })
 
-  it('throws with the status and body on a non-2xx response', async () => {
+  it('throws a ProviderError carrying the status on a non-2xx response', async () => {
     const fetchImpl = mockFetch({ ok: false, status: 403, textBody: 'permission denied' })
     await expect(listGeminiModels(fetchImpl, 'key')).rejects.toThrow(/403/)
   })
 
   it('never includes the raw API key in a thrown error message', async () => {
-    const fetchImpl = mockFetch({ ok: false, status: 401, textBody: 'invalid API key' })
     const secretKey = 'sk-another-secret-value-should-never-leak-67890'
+    // The provider body echoes the key back — the exact-key scrub must remove it.
+    const fetchImpl = mockFetch({
+      ok: false,
+      status: 401,
+      textBody: JSON.stringify({ error: { message: `invalid API key: ${secretKey}` } }),
+    })
     try {
       await listGeminiModels(fetchImpl, secretKey)
       expect.unreachable('listGeminiModels should have thrown')
     } catch (err) {
       expect(err).toBeInstanceOf(Error)
       expect((err as Error).message).not.toContain(secretKey)
+      expect((err as Error).message).toContain('[redacted]')
     }
   })
 })
@@ -272,7 +284,7 @@ describe('transcribeImage', () => {
     expect(body.tools).toBeUndefined()
   })
 
-  it('throws with the status and body when Gemini returns a non-2xx response', async () => {
+  it('throws a ProviderError carrying the status when Gemini returns a non-2xx response', async () => {
     const fetchImpl = mockFetch({ ok: false, status: 500, textBody: 'internal error' })
     await expect(
       transcribeImage(fetchImpl, 'key', 'gemini-3.5-flash-lite', { mimeType: 'image/jpeg', base64: 'aGVsbG8=' }),
@@ -287,8 +299,13 @@ describe('transcribeImage', () => {
   })
 
   it('never includes the raw API key in a thrown error message', async () => {
-    const fetchImpl = mockFetch({ ok: false, status: 401, textBody: 'invalid API key' })
     const secretKey = 'sk-ocr-secret-value-should-never-leak-24680'
+    // The provider body echoes the key back — the exact-key scrub must remove it.
+    const fetchImpl = mockFetch({
+      ok: false,
+      status: 401,
+      textBody: JSON.stringify({ error: { message: `invalid API key: ${secretKey}` } }),
+    })
     try {
       await transcribeImage(fetchImpl, secretKey, 'gemini-3.5-flash-lite', {
         mimeType: 'image/jpeg',
@@ -298,6 +315,7 @@ describe('transcribeImage', () => {
     } catch (err) {
       expect(err).toBeInstanceOf(Error)
       expect((err as Error).message).not.toContain(secretKey)
+      expect((err as Error).message).toContain('[redacted]')
     }
   })
 })

@@ -1,3 +1,5 @@
+import { providerError } from './errors'
+
 // gemini-2.5-flash-lite (named in the original spec) returns 404 "no longer
 // available to new users" for this API key — pinned to 3.5 instead, deliberately,
 // not via the floating `gemini-flash-lite-latest` alias. Confirmed working 2026-07-25.
@@ -105,8 +107,10 @@ async function generateContent(
   })
 
   if (!response.ok) {
-    const body = await response.text()
-    throw new Error(`Gemini API error ${response.status}: ${body}`)
+    // Echo guard covers the text parts only — the prompt (and, for OCR, the fixed
+    // OCR_PROMPT). An image's base64 isn't matched, but /ocr never logs the message.
+    const promptText = parts.map((p) => ('text' in p ? p.text : '')).join('\n')
+    throw await providerError('Gemini', response, apiKey, promptText)
   }
 
   const data = (await response.json()) as GeminiGenerateResponse
@@ -192,10 +196,7 @@ export async function listGeminiModels(fetchImpl: typeof fetch, apiKey: string):
     headers: { 'x-goog-api-key': apiKey },
   })
 
-  if (!response.ok) {
-    const body = await response.text()
-    throw new Error(`Gemini API error ${response.status}: ${body}`)
-  }
+  if (!response.ok) throw await providerError('Gemini', response, apiKey)
 
   const data = (await response.json()) as GeminiModelsListResponse
   return (data.models ?? [])

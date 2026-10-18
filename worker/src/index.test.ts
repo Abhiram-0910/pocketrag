@@ -65,6 +65,19 @@ const byokBody = {
   model: 'gemini-3.5-pro',
 }
 
+// Client-facing copy, duplicated here on purpose: a test that imported these from
+// index.ts would pass even if the wording regressed.
+const KEY_REJECTED_COPY = "The provider rejected your API key. Check that it's correct, active, and has access to this model."
+const OWN_RATE_LIMITED_COPY = 'Your provider account hit its rate limit, quota, or credit balance. Wait a moment or check your plan.'
+const SHARED_RATE_LIMITED_COPY = 'The free shared tier is at capacity right now. Try again later, or use your own API key.'
+const REQUEST_REJECTED_COPY = 'The provider rejected this request. The selected model may not be available to your key; try another.'
+const PROVIDER_UNAVAILABLE_COPY = "The provider couldn't respond right now. Please try again in a moment."
+const SHARED_UNAVAILABLE_COPY = "The free tier couldn't respond right now. Try again in a moment, or use your own API key."
+const EXPERIMENTAL_ANSWER_COPY =
+  "This provider isn't fully supported yet. Please try Gemini or OpenAI for now — we're working on it."
+const EXPERIMENTAL_MODELS_COPY =
+  "This provider's model list isn't available yet. Please try Gemini or OpenAI for now — we're working on it."
+
 type IncomingRequest = Parameters<typeof worker.fetch>[0]
 
 // A locally-constructed Request lacks the edge-only `cf` metadata the ambient Workers
@@ -246,8 +259,9 @@ describe('worker fetch handler — /answer, shared key', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500, text: async () => 'server error' }))
     const res = await worker.fetch(answerRequest(validBody), makeEnv(), makeCtx())
     expect(res.status).toBe(502)
-    const data = (await res.json()) as { error: string }
-    expect(data.error).toBe("This provider isn't fully supported yet. Please try Gemini or OpenAI for now — we're working on it.")
+    const data = (await res.json()) as { error: string; code: string }
+    expect(data.error).toBe(SHARED_UNAVAILABLE_COPY)
+    expect(data.code).toBe('provider_unavailable')
     expect(data.error).not.toContain('server error')
   })
 
@@ -384,16 +398,13 @@ describe('worker fetch handler — /answer, BYOK', () => {
     expect((init as RequestInit).headers).toMatchObject({ Authorization: 'Bearer user-supplied-key' })
   })
 
-  it('logs a structured, key-free entry and returns a sanitized message when a provider call fails (exercises the real "<Provider> API error <status>: <body>" shape and status-extraction regex, not a hand-built error)', async () => {
+  it('logs a structured, key-free entry with the classified code when a provider rejects the key (real Grok body shape)', async () => {
     const realSecretKey = 'xai-real-secret-should-never-appear-in-logs-13579'
-    // Realistic failure body, not a trivial stand-in — includes a masked-key-lookalike
-    // fragment (the kind of thing a real provider's own error text might legitimately
-    // include), deliberately different from realSecretKey so the assertion below is
-    // meaningful rather than accidentally passing either way.
+    // Grok's live fake-key response: a 400 whose only key signal is the message text.
     const fetchSpy = vi.fn().mockResolvedValue({
       ok: false,
-      status: 401,
-      text: async () => 'Incorrect API key provided: xai-****...fake9999',
+      status: 400,
+      text: async () => JSON.stringify({ code: 'invalid-argument', error: 'Incorrect API key provided. You can obtain an API key from https://console.x.ai.' }),
     })
     vi.stubGlobal('fetch', fetchSpy)
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -404,55 +415,84 @@ describe('worker fetch handler — /answer, BYOK', () => {
     )
 
     expect(res.status).toBe(502)
-    const data = (await res.json()) as { error: string }
-    expect(data.error).toBe("This provider isn't fully supported yet. Please try Gemini or OpenAI for now — we're working on it.")
-    expect(data.error).not.toContain(realSecretKey)
+    expect(await res.json()).toEqual({ error: KEY_REJECTED_COPY, code: 'key_rejected' })
 
     expect(consoleErrorSpy).toHaveBeenCalledTimes(1)
     const logged = consoleErrorSpy.mock.calls[0][0] as string
-    // Proves the real status-extraction regex ran against the real message the real
-    // provider file threw — would fail if that regex logic were broken, not just if a
-    // key leaked.
-    const parsed = JSON.parse(logged) as { provider: string; model: string; status: string; message: string }
-    expect(parsed.provider).toBe('grok')
-    expect(parsed.model).toBe('grok-4')
-    expect(parsed.status).toBe('401')
-    expect(parsed.message).toContain('Grok API error 401')
+    expect(JSON.parse(logged)).toEqual({
+      event: 'provider_call_failed',
+      provider: 'grok',
+      model: 'grok-4',
+      keySource: 'own',
+      code: 'key_rejected',
+      status: 400,
+      providerCode: 'invalid-argument',
+      message: 'Incorrect API key provided. You can obtain an API key from https://console.x.ai.',
+    })
     expect(logged).not.toContain(realSecretKey)
 
     consoleErrorSpy.mockRestore()
   })
 
-  it('sends a Discord alert with sanitized failure details and never the raw API key, registered via ctx.waitUntil', async () => {
-    const realSecretKey = 'xai-real-secret-should-never-reach-discord-11223'
+  describe('key + passage echo (Step A test a): neither reaches the log, Discord, or the response', () => {
+    const realSecretKey = 'sk-or-v1-REAL-SECRET-echoed-by-provider-0123456789'
+    // >=40 chars and part of the prompt (it's the chunk text).
+    const passage = 'PASSAGE-MARKER-zq81-confidential-clause-about-indemnity-terms'
     const discordWebhookUrl = 'https://discord.com/api/webhooks/1/token'
-    const fetchSpy = vi.fn().mockImplementation(async (url: string) => {
-      if (url === discordWebhookUrl) return { ok: true, status: 204, text: async () => '' }
-      return { ok: false, status: 401, text: async () => 'Incorrect API key provided: xai-****...fake9999' }
+
+    async function run(endpoint: '/answer' | '/models', body: unknown) {
+      // 503 so the own-key failure is provider_unavailable and Discord fires.
+      const fetchSpy = vi.fn().mockImplementation(async (url: string) => {
+        if (url === discordWebhookUrl) return { ok: true, status: 204, text: async () => '' }
+        return {
+          ok: false,
+          status: 503,
+          text: async () => JSON.stringify({ error: { message: `Upstream failed for key ${realSecretKey} on input "${passage}"` } }),
+        }
+      })
+      vi.stubGlobal('fetch', fetchSpy)
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const res = await worker.fetch(request(endpoint, body), makeEnv({ DISCORD_WEBHOOK_URL: discordWebhookUrl }), makeCtx())
+      await flushWaitUntil()
+      const discordCall = fetchSpy.mock.calls.find(([url]) => url === discordWebhookUrl)
+      const out = {
+        status: res.status,
+        responseText: await res.text(),
+        logged: consoleErrorSpy.mock.calls.map((c) => String(c[0])).join('\n'),
+        discordBody: discordCall ? String((discordCall[1] as RequestInit).body) : undefined,
+      }
+      consoleErrorSpy.mockRestore()
+      return out
+    }
+
+    it('/answer', async () => {
+      expect(passage.length).toBeGreaterThanOrEqual(40)
+      const out = await run('/answer', {
+        ...byokBody,
+        provider: 'openrouter',
+        model: 'openai/gpt-4o-mini',
+        apiKey: realSecretKey,
+        chunks: [{ text: passage, page: 1, score: 0.9, documentId: 'doc-1' }],
+      })
+      expect(out.status).toBe(502)
+      expect(out.discordBody).toBeDefined()
+      for (const sink of [out.responseText, out.logged, out.discordBody!]) {
+        expect(sink).not.toContain(realSecretKey)
+        expect(sink).not.toContain(passage)
+      }
+      // The echo guard, not just the key scrub, is what kept the passage out.
+      expect(out.logged).toContain('[withheld: echoed request content]')
     })
-    vi.stubGlobal('fetch', fetchSpy)
-    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-    const res = await worker.fetch(
-      answerRequest({ ...byokBody, provider: 'grok', model: 'grok-4', apiKey: realSecretKey }),
-      makeEnv({ DISCORD_WEBHOOK_URL: discordWebhookUrl }), makeCtx()
-    )
-    expect(res.status).toBe(502)
-    await flushWaitUntil()
-
-    const discordCall = fetchSpy.mock.calls.find(([url]) => url === discordWebhookUrl)
-    expect(discordCall).toBeDefined()
-    const [, init] = discordCall!
-    const body = (init as RequestInit).body as string
-    expect(body).not.toContain(realSecretKey)
-    const parsed = JSON.parse(body) as { embeds: Array<{ fields: Array<{ name: string; value: string }> }> }
-    const fields = Object.fromEntries(parsed.embeds[0].fields.map((f) => [f.name, f.value]))
-    expect(fields.Provider).toBe('grok')
-    expect(fields.Model).toBe('grok-4')
-    expect(fields.Status).toBe('401')
-    expect(fields.Message).toContain('Grok API error 401')
-
-    consoleErrorSpy.mockRestore()
+    it('/models', async () => {
+      const out = await run('/models', { provider: 'openrouter', apiKey: realSecretKey })
+      expect(out.status).toBe(502)
+      expect(out.discordBody).toBeDefined()
+      for (const sink of [out.responseText, out.logged, out.discordBody!]) {
+        expect(sink).not.toContain(realSecretKey)
+      }
+      expect(out.logged).toContain('[redacted]')
+    })
   })
 
   it('suppresses a second Discord alert for the same provider+endpoint within the window', async () => {
@@ -671,12 +711,12 @@ describe('worker fetch handler — /models', () => {
     expect((init as RequestInit).headers).toMatchObject({ Authorization: 'Bearer user-key' })
   })
 
-  it('logs a structured, key-free entry and returns a sanitized message when a /models provider call fails (exercises the real error shape and status-extraction regex, not a hand-built error)', async () => {
+  it('logs a structured, key-free entry and returns key_rejected when OpenRouter /key rejects the key', async () => {
     const realSecretKey = 'sk-or-real-secret-should-never-appear-in-logs-97531'
     const fetchSpy = vi.fn().mockResolvedValue({
       ok: false,
-      status: 403,
-      text: async () => 'Access denied for key: sk-or-****...fake1111',
+      status: 401,
+      text: async () => JSON.stringify({ error: { message: 'User not found.', code: 401 } }),
     })
     vi.stubGlobal('fetch', fetchSpy)
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -684,28 +724,24 @@ describe('worker fetch handler — /models', () => {
     const res = await worker.fetch(modelsRequest({ provider: 'openrouter', apiKey: realSecretKey }), makeEnv(), makeCtx())
 
     expect(res.status).toBe(502)
-    const data = (await res.json()) as { error: string }
-    expect(data.error).toBe("This provider's model list isn't available yet. Please try Gemini or OpenAI for now — we're working on it.")
-    expect(data.error).not.toContain(realSecretKey)
+    expect(await res.json()).toEqual({ error: KEY_REJECTED_COPY, code: 'key_rejected' })
+    expect(fetchSpy).toHaveBeenCalledTimes(1) // stopped at /key, never fetched the public catalog
 
     expect(consoleErrorSpy).toHaveBeenCalledTimes(1)
     const logged = consoleErrorSpy.mock.calls[0][0] as string
-    const parsed = JSON.parse(logged) as { provider: string; model: string | null; status: string; message: string }
-    expect(parsed.provider).toBe('openrouter')
-    expect(parsed.model).toBeNull()
-    expect(parsed.status).toBe('403')
-    expect(parsed.message).toContain('OpenRouter API error 403')
+    const parsed = JSON.parse(logged) as Record<string, unknown>
+    expect(parsed).toMatchObject({ provider: 'openrouter', model: null, keySource: 'own', code: 'key_rejected', status: 401, message: 'User not found.' })
     expect(logged).not.toContain(realSecretKey)
 
     consoleErrorSpy.mockRestore()
   })
 
-  it('sends a Discord alert for a /models failure with sanitized details, model null, and never the raw API key', async () => {
+  it('sends a Discord alert for an unclassified /models failure with sanitized details, model null, and never the raw API key', async () => {
     const realSecretKey = 'sk-or-real-secret-should-never-reach-discord-44556'
     const discordWebhookUrl = 'https://discord.com/api/webhooks/1/token'
     const fetchSpy = vi.fn().mockImplementation(async (url: string) => {
       if (url === discordWebhookUrl) return { ok: true, status: 204, text: async () => '' }
-      return { ok: false, status: 403, text: async () => 'Access denied for key: sk-or-****...fake1111' }
+      return { ok: false, status: 503, text: async () => JSON.stringify({ error: { message: `overloaded (${realSecretKey})` } }) }
     })
     vi.stubGlobal('fetch', fetchSpy)
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -726,8 +762,10 @@ describe('worker fetch handler — /models', () => {
     const fields = Object.fromEntries(parsed.embeds[0].fields.map((f) => [f.name, f.value]))
     expect(fields.Provider).toBe('openrouter')
     expect(fields.Model).toBe('n/a')
-    expect(fields.Status).toBe('403')
-    expect(fields.Message).toContain('OpenRouter API error 403')
+    expect(fields.Status).toBe('503')
+    expect(fields.Code).toBe('provider_unavailable')
+    expect(fields.Tier).toBe('own')
+    expect(fields.Message).toBe('overloaded ([redacted])')
 
     consoleErrorSpy.mockRestore()
   })
@@ -739,10 +777,11 @@ describe('worker fetch handler — /models', () => {
 
   it('returns 502 with a sanitized message when the provider call fails', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 401, text: async () => 'invalid key' }))
-    const res = await worker.fetch(modelsRequest({ provider: 'gemini', apiKey: 'bad-key' }), makeEnv(), makeCtx())
+    const res = await worker.fetch(modelsRequest({ provider: 'gemini', apiKey: 'bad-key-123' }), makeEnv(), makeCtx())
     expect(res.status).toBe(502)
-    const data = (await res.json()) as { error: string }
-    expect(data.error).toBe("This provider's model list isn't available yet. Please try Gemini or OpenAI for now — we're working on it.")
+    const data = (await res.json()) as { error: string; code: string }
+    expect(data.error).toBe(KEY_REJECTED_COPY)
+    expect(data.code).toBe('key_rejected')
     expect(data.error).not.toContain('invalid key')
   })
 
@@ -977,6 +1016,190 @@ describe('worker fetch handler — /answer, Gemini-native grounding (Milestone 1
       enableWebSearch: true,
     }
     const res = await worker.fetch(answerRequest(nonGeminiByokBody), makeEnv(), makeCtx())
+    expect(res.status).toBe(400)
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe('provider failure classification (Step A): status → code, client copy, and Discord gating', () => {
+  const discordWebhookUrl = 'https://discord.com/api/webhooks/1/token'
+  const MODEL_FOR: Record<string, string> = {
+    gemini: 'gemini-3.5-pro',
+    openai: 'gpt-4o-mini',
+    anthropic: 'claude-sonnet-4-5',
+    grok: 'grok-4',
+    openrouter: 'openai/gpt-4o-mini',
+  }
+
+  async function failWith(tier: 'shared' | 'own', provider: string, status: number, body: unknown) {
+    const fetchSpy = vi.fn().mockImplementation(async (url: string) => {
+      if (url === discordWebhookUrl) return { ok: true, status: 204, text: async () => '' }
+      return { ok: false, status, text: async () => JSON.stringify(body) }
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const reqBody = tier === 'shared' ? validBody : { ...byokBody, provider, model: MODEL_FOR[provider] }
+    const res = await worker.fetch(answerRequest(reqBody), makeEnv({ DISCORD_WEBHOOK_URL: discordWebhookUrl }), makeCtx())
+    await flushWaitUntil()
+    consoleErrorSpy.mockRestore()
+    return {
+      status: res.status,
+      json: (await res.json()) as Record<string, unknown>,
+      alerted: fetchSpy.mock.calls.some(([url]) => url === discordWebhookUrl),
+    }
+  }
+
+  const msg = (message: string) => ({ error: { message } })
+
+  it.each([
+    // tier,   provider,     status, body,                                                                                     code,                    source,    copy,                        alerts
+    ['shared', 'gemini',     429, { error: { code: 429, status: 'RESOURCE_EXHAUSTED', message: 'Quota exceeded' } },          'provider_rate_limited', 'shared',  SHARED_RATE_LIMITED_COPY,    true],
+    ['shared', 'gemini',     400, { error: { code: 400, message: 'API key not valid.', details: [{ reason: 'API_KEY_INVALID' }] } }, 'provider_unavailable', undefined, SHARED_UNAVAILABLE_COPY,   true],
+    ['shared', 'gemini',     403, { error: { code: 403, status: 'PERMISSION_DENIED', message: 'denied' } },                   'provider_unavailable',  undefined, SHARED_UNAVAILABLE_COPY,     true],
+    ['shared', 'gemini',     503, { error: { code: 503, status: 'UNAVAILABLE', message: 'overloaded' } },                     'provider_unavailable',  undefined, SHARED_UNAVAILABLE_COPY,     true],
+    ['own',    'gemini',     400, { error: { code: 400, message: 'API key not valid.', details: [{ reason: 'API_KEY_INVALID' }] } }, 'key_rejected',       undefined, KEY_REJECTED_COPY,           false],
+    ['own',    'openai',     401, { error: { type: 'invalid_request_error', code: 'invalid_api_key', message: 'Incorrect API key' } }, 'key_rejected',  undefined, KEY_REJECTED_COPY,           false],
+    ['own',    'anthropic',  401, { type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } },  'key_rejected',          undefined, KEY_REJECTED_COPY,           false],
+    ['own',    'openai',     403, msg('Project does not have access'),                                                        'key_rejected',          undefined, KEY_REJECTED_COPY,           false],
+    ['own',    'grok',       400, { code: 'invalid-argument', error: 'Incorrect API key provided.' },                         'key_rejected',          undefined, KEY_REJECTED_COPY,           false],
+    ['own',    'openai',     429, { error: { code: 'rate_limit_exceeded', message: 'Rate limit reached' } },                  'provider_rate_limited', 'own',     OWN_RATE_LIMITED_COPY,       false],
+    ['own',    'openrouter', 402, { error: { code: 402, message: 'Insufficient credits' } },                                  'provider_rate_limited', 'own',     OWN_RATE_LIMITED_COPY,       false],
+    ['own',    'openai',     400, msg("Unsupported parameter: 'messages'"),                                                   'request_rejected',      undefined, REQUEST_REJECTED_COPY,       false],
+    ['own',    'openai',     404, { error: { code: 'model_not_found', message: 'The api key cannot use model x' } },          'request_rejected',      undefined, REQUEST_REJECTED_COPY,       false],
+    ['own',    'openai',     413, msg('Request too large'),                                                                   'request_rejected',      undefined, REQUEST_REJECTED_COPY,       false],
+    ['own',    'anthropic',  400, { type: 'error', error: { type: 'invalid_request_error', message: 'max_tokens too large' } }, 'request_rejected',     undefined, REQUEST_REJECTED_COPY,       true],
+    ['own',    'openrouter', 404, msg('No endpoints found for model'),                                                        'request_rejected',      undefined, REQUEST_REJECTED_COPY,       true],
+    ['own',    'grok',       422, msg('Unprocessable'),                                                                       'request_rejected',      undefined, REQUEST_REJECTED_COPY,       true],
+    ['own',    'openai',     500, msg('server error'),                                                                        'provider_unavailable',  undefined, PROVIDER_UNAVAILABLE_COPY,   true],
+    ['own',    'anthropic',  529, { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } },              'provider_unavailable',  undefined, PROVIDER_UNAVAILABLE_COPY,   true],
+    ['own',    'openai',     418, msg('teapot'),                                                                              'provider_unavailable',  undefined, PROVIDER_UNAVAILABLE_COPY,   true],
+    ['own',    'grok',       418, msg('teapot'),                                                                              'provider_unavailable',  undefined, EXPERIMENTAL_ANSWER_COPY,    true],
+  ] as const)(
+    '%s %s %i → %s',
+    async (tier, provider, status, body, code, source, copy, alerts) => {
+      const out = await failWith(tier, provider, status, body)
+      expect(out.status).toBe(502)
+      expect(out.json).toEqual(source === undefined ? { error: copy, code } : { error: copy, code, source })
+      expect(out.alerted).toBe(alerts)
+    },
+  )
+
+  it.each([
+    ['grok', EXPERIMENTAL_ANSWER_COPY],
+    ['openai', PROVIDER_UNAVAILABLE_COPY],
+  ])('a network failure (fetch rejects) on %s is unclassified provider_unavailable and alerts', async (provider, copy) => {
+    const fetchSpy = vi.fn().mockImplementation(async (url: string) => {
+      if (url === discordWebhookUrl) return { ok: true, status: 204, text: async () => '' }
+      throw new TypeError('Network connection lost.')
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const res = await worker.fetch(
+      answerRequest({ ...byokBody, provider, model: MODEL_FOR[provider] }),
+      makeEnv({ DISCORD_WEBHOOK_URL: discordWebhookUrl }),
+      makeCtx(),
+    )
+    await flushWaitUntil()
+    expect(res.status).toBe(502)
+    expect(await res.json()).toEqual({ error: copy, code: 'provider_unavailable' })
+    expect(JSON.parse(consoleErrorSpy.mock.calls[0][0] as string)).toMatchObject({ status: null, message: 'Network connection lost.' })
+    expect(fetchSpy.mock.calls.some(([url]) => url === discordWebhookUrl)).toBe(true)
+    consoleErrorSpy.mockRestore()
+  })
+
+  it('uses the Experimental /models copy for an unclassified /models failure on an Experimental provider', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 418, text: async () => '' }))
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const res = await worker.fetch(request('/models', { provider: 'grok', apiKey: 'xai-user-key-123' }), makeEnv(), makeCtx())
+    expect(await res.json()).toEqual({ error: EXPERIMENTAL_MODELS_COPY, code: 'provider_unavailable' })
+    consoleErrorSpy.mockRestore()
+  })
+
+  it('a shared 429 then a shared 503 on /answer within the window both alert (rate limiting has its own slot)', async () => {
+    const env = makeEnv({ DISCORD_WEBHOOK_URL: discordWebhookUrl })
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    let providerStatus = 429
+    const fetchSpy = vi.fn().mockImplementation(async (url: string) =>
+      url === discordWebhookUrl
+        ? { ok: true, status: 204, text: async () => '' }
+        : { ok: false, status: providerStatus, text: async () => '' },
+    )
+    vi.stubGlobal('fetch', fetchSpy)
+
+    await worker.fetch(answerRequest(validBody), env, makeCtx())
+    await flushWaitUntil()
+    providerStatus = 503
+    await worker.fetch(answerRequest(validBody), env, makeCtx())
+    await flushWaitUntil()
+
+    const alerts = fetchSpy.mock.calls.filter(([url]) => url === discordWebhookUrl)
+    expect(alerts).toHaveLength(2)
+    const codes = alerts.map(([, init]) => {
+      const body = JSON.parse(String((init as RequestInit).body)) as { embeds: Array<{ fields: Array<{ name: string; value: string }> }> }
+      return body.embeds[0].fields.find((f) => f.name === 'Code')?.value
+    })
+    expect(codes).toEqual(['provider_rate_limited', 'provider_unavailable'])
+    consoleErrorSpy.mockRestore()
+  })
+
+  it('suppresses a shared-tier rate-limit alert for 6h in its own slot, and other alerts for 10 min', async () => {
+    const puts: { key: string; ttl?: number }[] = []
+    const store: Record<string, string> = {}
+    const kv: KVLike = {
+      get: async (key) => store[key] ?? null,
+      put: async (key, value, options) => {
+        store[key] = value
+        puts.push({ key, ttl: options?.expirationTtl })
+      },
+    }
+    const env = makeEnv({ DISCORD_WEBHOOK_URL: discordWebhookUrl, RATE_LIMIT_KV: kv as unknown as Env['RATE_LIMIT_KV'] })
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const failingFetch = (status: number) =>
+      vi.fn().mockImplementation(async (url: string) =>
+        url === discordWebhookUrl ? { ok: true, status: 204, text: async () => '' } : { ok: false, status, text: async () => '' },
+      )
+
+    vi.stubGlobal('fetch', failingFetch(429))
+    await worker.fetch(answerRequest(validBody), env, makeCtx())
+    vi.stubGlobal('fetch', failingFetch(503))
+    await worker.fetch(answerRequest({ ...byokBody, provider: 'openai', model: 'gpt-4o-mini' }), env, makeCtx())
+    await flushWaitUntil()
+
+    const discordPuts = puts.filter((p) => p.key.startsWith('discord-notify:'))
+    expect(discordPuts).toEqual([
+      { key: 'discord-notify:gemini:answer:shared-ratelimit', ttl: 21600 },
+      { key: 'discord-notify:openai:answer:own', ttl: 600 },
+    ])
+    consoleErrorSpy.mockRestore()
+  })
+})
+
+describe('BYOK key validation end-to-end (Step A tests b and e)', () => {
+  it.each([
+    ['a newline', 'sk-abcdef\n12345'],
+    ['a non-latin1 char', 'sk-abcdefĀ-12345'],
+  ])('rejects a key containing %s with 400 on /answer and /models, never reaching fetch', async (_label, apiKey) => {
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+    const answer = await worker.fetch(answerRequest({ ...byokBody, provider: 'openai', model: 'gpt-4o-mini', apiKey }), makeEnv(), makeCtx())
+    const models = await worker.fetch(request('/models', { provider: 'openai', apiKey }), makeEnv(), makeCtx())
+    expect(answer.status).toBe(400)
+    expect(models.status).toBe(400)
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['missing', {}],
+    ['empty', { apiKey: '' }],
+  ])('keySource own with a %s apiKey → 400, and env.GEMINI_API_KEY is never sent', async (_label, keyField) => {
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+    const { apiKey: _omit, ...withoutKey } = byokBody
+    const res = await worker.fetch(
+      answerRequest({ ...withoutKey, ...keyField }),
+      makeEnv({ GEMINI_API_KEY: 'ENV-SHARED-KEY-must-not-be-used' }),
+      makeCtx(),
+    )
     expect(res.status).toBe(400)
     expect(fetchSpy).not.toHaveBeenCalled()
   })

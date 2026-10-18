@@ -28,7 +28,7 @@ describe('callGrok', () => {
     expect(body.messages[0].content).toBe('What is x?')
   })
 
-  it('throws with the status and body when Grok returns a non-2xx response', async () => {
+  it('throws a ProviderError carrying the status when Grok returns a non-2xx response', async () => {
     const fetchImpl = mockFetch({ ok: false, status: 429, textBody: 'quota exceeded' })
     await expect(callGrok(fetchImpl, 'key', 'grok-4', 'q')).rejects.toThrow(/429/)
   })
@@ -39,14 +39,20 @@ describe('callGrok', () => {
   })
 
   it('never includes the raw API key in a thrown error message', async () => {
-    const fetchImpl = mockFetch({ ok: false, status: 401, textBody: 'invalid API key' })
     const secretKey = 'xai-super-secret-value-should-never-leak-12345'
+    // The provider body echoes the key back — the exact-key scrub must remove it.
+    const fetchImpl = mockFetch({
+      ok: false,
+      status: 401,
+      textBody: JSON.stringify({ error: { message: `invalid API key: ${secretKey}` } }),
+    })
     try {
       await callGrok(fetchImpl, secretKey, 'grok-4', 'q')
       expect.unreachable('callGrok should have thrown')
     } catch (err) {
       expect(err).toBeInstanceOf(Error)
       expect((err as Error).message).not.toContain(secretKey)
+      expect((err as Error).message).toContain('[redacted]')
     }
   })
 })
@@ -71,20 +77,26 @@ describe('listGrokModels', () => {
     expect(await listGrokModels(fetchImpl, 'key')).toEqual([])
   })
 
-  it('throws with the status and body on a non-2xx response', async () => {
+  it('throws a ProviderError carrying the status on a non-2xx response', async () => {
     const fetchImpl = mockFetch({ ok: false, status: 403, textBody: 'permission denied' })
     await expect(listGrokModels(fetchImpl, 'key')).rejects.toThrow(/403/)
   })
 
   it('never includes the raw API key in a thrown error message', async () => {
-    const fetchImpl = mockFetch({ ok: false, status: 401, textBody: 'invalid API key' })
     const secretKey = 'xai-another-secret-value-should-never-leak-67890'
+    // The provider body echoes the key back — the exact-key scrub must remove it.
+    const fetchImpl = mockFetch({
+      ok: false,
+      status: 401,
+      textBody: JSON.stringify({ error: { message: `invalid API key: ${secretKey}` } }),
+    })
     try {
       await listGrokModels(fetchImpl, secretKey)
       expect.unreachable('listGrokModels should have thrown')
     } catch (err) {
       expect(err).toBeInstanceOf(Error)
       expect((err as Error).message).not.toContain(secretKey)
+      expect((err as Error).message).toContain('[redacted]')
     }
   })
 })

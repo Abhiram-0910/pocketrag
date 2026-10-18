@@ -1,4 +1,11 @@
-import { validateAnswerRequest, validateModelsRequest, validateOcrRequest } from './validate'
+import {
+  validateAnswerRequest,
+  validateModelsRequest,
+  validateOcrRequest,
+  EXPERIMENTAL_PROVIDERS,
+  type KeySource,
+  type SupportedProvider,
+} from './validate'
 import { buildPrompt } from './prompt'
 import { checkGrounding } from './grounding'
 import { assignDocLabels } from './labels'
@@ -14,89 +21,231 @@ import { callOpenAI, listOpenAIModels } from './providers/openai'
 import { callAnthropic, listAnthropicModels } from './providers/anthropic'
 import { callGrok, listGrokModels } from './providers/grok'
 import { callOpenRouter, listOpenRouterModels } from './providers/openrouter'
+import { ProviderError, redactKeys } from './providers/errors'
 import { corsHeaders, resolveCorsOrigin } from './cors'
-import { sendDiscordAlert, shouldNotify, type DiscordEndpoint } from './discord'
+import {
+  sendDiscordAlert,
+  shouldNotify,
+  DISCORD_SHARED_RATE_LIMIT_WINDOW_SECONDS,
+  DISCORD_SUPPRESS_WINDOW_SECONDS,
+  type DiscordEndpoint,
+} from './discord'
 
 const RATE_LIMIT_MESSAGE = "You've hit today's request limit. Please try again tomorrow."
-// Sanitized client-facing messages for a provider-call failure — the real reason (raw
-// provider error text, which could be a confusing or unexpected third-party string)
-// goes to logProviderError below instead, never straight to the client.
+// Client-facing copy per failure code. The provider's own text (safeMessage) never goes
+// to the client — only to logProviderError/Discord below, already scrubbed. The two
+// "isn't fully supported yet" strings are reserved for an Experimental provider's
+// unclassified failure (one we can't explain from status/providerCode).
 const ANSWER_UNAVAILABLE_MESSAGE =
   "This provider isn't fully supported yet. Please try Gemini or OpenAI for now — we're working on it."
 const MODELS_UNAVAILABLE_MESSAGE =
   "This provider's model list isn't available yet. Please try Gemini or OpenAI for now — we're working on it."
+const KEY_REJECTED_MESSAGE =
+  "The provider rejected your API key. Check that it's correct, active, and has access to this model."
+const OWN_RATE_LIMITED_MESSAGE =
+  'Your provider account hit its rate limit, quota, or credit balance. Wait a moment or check your plan.'
+const SHARED_RATE_LIMITED_MESSAGE =
+  'The free shared tier is at capacity right now. Try again later, or use your own API key.'
+const REQUEST_REJECTED_MESSAGE =
+  'The provider rejected this request. The selected model may not be available to your key; try another.'
+const PROVIDER_UNAVAILABLE_MESSAGE = "The provider couldn't respond right now. Please try again in a moment."
+const SHARED_UNAVAILABLE_MESSAGE =
+  "The free tier couldn't respond right now. Try again in a moment, or use your own API key."
 const OCR_UNAVAILABLE_MESSAGE = "OCR isn't available right now. Please try again in a moment."
 
-// `status` is pulled from the "<Provider> API error <status>: <body>" shape every
-// provider file already throws, rather than adding a custom error class. Shared by
-// logProviderError and the Discord notifier below so both read the same extraction.
-function extractFailureDetails(err: unknown): { status: string | null; message: string } {
-  const message = err instanceof Error ? err.message : 'unknown error'
-  const status = message.match(/error (\d{3}):/)?.[1] ?? null
-  return { status, message }
+type FailureCode = 'key_rejected' | 'provider_rate_limited' | 'request_rejected' | 'provider_unavailable'
+
+interface ProviderFailure {
+  provider: SupportedProvider
+  model: string | null
+  keySource: KeySource
+  code: FailureCode
+  status: number | null
+  providerCode?: string
+  safeMessage: string
+  // True when nothing about the failure maps to a known cause (not a ProviderError, or
+  // a status outside the table below) — the only case that gets the Experimental copy.
+  unclassified: boolean
+}
+
+// A 400 is a bad key on Gemini (API_KEY_INVALID) and Grok (message only — its code is
+// a generic "invalid-argument"), both confirmed live with fake keys 2026-10-18.
+const KEY_REJECTED_PROVIDER_CODES = new Set(['API_KEY_INVALID', 'invalid_api_key'])
+const API_KEY_MESSAGE_PATTERN = /\bapi key\b/i
+const MAX_UNCLASSIFIED_MESSAGE_LENGTH = 200
+
+function classifyStatus(
+  keySource: KeySource,
+  status: number,
+  providerCode: string | undefined,
+  safeMessage: string,
+): { code: FailureCode; unclassified: boolean } {
+  // Shared tier: the key is ours, so the user is never told "your key"/"your request"
+  // was rejected — only capacity (429) or plain unavailability.
+  if (keySource === 'shared') {
+    return status === 429
+      ? { code: 'provider_rate_limited', unclassified: false }
+      : { code: 'provider_unavailable', unclassified: status < 500 }
+  }
+  if (providerCode !== undefined && KEY_REJECTED_PROVIDER_CODES.has(providerCode)) {
+    return { code: 'key_rejected', unclassified: false }
+  }
+  if (status === 401 || status === 403) return { code: 'key_rejected', unclassified: false }
+  // Fallback for providers with no key-specific code; safeMessage is already key-scrubbed.
+  if (status === 400 && API_KEY_MESSAGE_PATTERN.test(safeMessage)) return { code: 'key_rejected', unclassified: false }
+  if (status === 429 || status === 402) return { code: 'provider_rate_limited', unclassified: false }
+  if (status === 400 || status === 404 || status === 413 || status === 422) {
+    return { code: 'request_rejected', unclassified: false }
+  }
+  if (status >= 500) return { code: 'provider_unavailable', unclassified: false }
+  return { code: 'provider_unavailable', unclassified: true }
+}
+
+function classify(err: unknown, provider: SupportedProvider, model: string | null, keySource: KeySource): ProviderFailure {
+  if (!(err instanceof ProviderError)) {
+    // Network failure, unexpected response shape, empty answer text — no status to go on.
+    const message = err instanceof Error ? err.message : 'unknown error'
+    return {
+      provider,
+      model,
+      keySource,
+      code: 'provider_unavailable',
+      status: null,
+      safeMessage: message.slice(0, MAX_UNCLASSIFIED_MESSAGE_LENGTH),
+      unclassified: true,
+    }
+  }
+  const { code, unclassified } = classifyStatus(keySource, err.status, err.providerCode, err.safeMessage)
+  return {
+    provider,
+    model,
+    keySource,
+    code,
+    status: err.status,
+    providerCode: err.providerCode,
+    safeMessage: err.safeMessage,
+    unclassified,
+  }
+}
+
+function failureMessage(failure: ProviderFailure, endpoint: 'answer' | 'models'): string {
+  if (failure.unclassified && EXPERIMENTAL_PROVIDERS.includes(failure.provider)) {
+    return endpoint === 'answer' ? ANSWER_UNAVAILABLE_MESSAGE : MODELS_UNAVAILABLE_MESSAGE
+  }
+  switch (failure.code) {
+    case 'key_rejected':
+      return KEY_REJECTED_MESSAGE
+    case 'provider_rate_limited':
+      return failure.keySource === 'shared' ? SHARED_RATE_LIMITED_MESSAGE : OWN_RATE_LIMITED_MESSAGE
+    case 'request_rejected':
+      return REQUEST_REJECTED_MESSAGE
+    default:
+      return failure.keySource === 'shared' ? SHARED_UNAVAILABLE_MESSAGE : PROVIDER_UNAVAILABLE_MESSAGE
+  }
+}
+
+// Status stays 502 for every provider failure (the frontend's errorTaxonomy keys off
+// it); `code` and, for rate limits, `source` are additive fields.
+function failureResponse(failure: ProviderFailure, endpoint: 'answer' | 'models', origin: string | null): Response {
+  return json(
+    {
+      error: failureMessage(failure, endpoint),
+      code: failure.code,
+      ...(failure.code === 'provider_rate_limited' ? { source: failure.keySource } : {}),
+    },
+    502,
+    origin,
+  )
 }
 
 /**
- * Structured, key-free failure log for a provider call — lands in Cloudflare Workers
- * Logs automatically, no new infra. `err.message` is already proven key-free by each
- * provider's own two key-leak tests, but this call site gets its own dedicated test
- * too (see index.test.ts) since it's a new place that could regress independently of
- * those.
+ * Structured failure log for a provider call — lands in Cloudflare Workers Logs. Takes
+ * only the classified ProviderFailure: no `err`, no apiKey. safeMessage was already
+ * exact-key-scrubbed in the provider file; redactKeys is the pattern-based backstop.
  */
-function logProviderError(provider: string, model: string | null, err: unknown): void {
-  const { status, message } = extractFailureDetails(err)
-  console.error(JSON.stringify({ event: 'provider_call_failed', provider, model, status, message }))
+function logProviderError(failure: ProviderFailure): void {
+  console.error(
+    JSON.stringify({
+      event: 'provider_call_failed',
+      provider: failure.provider,
+      model: failure.model,
+      keySource: failure.keySource,
+      code: failure.code,
+      status: failure.status,
+      providerCode: failure.providerCode === undefined ? undefined : redactKeys(failure.providerCode),
+      message: redactKeys(failure.safeMessage),
+    }),
+  )
 }
 
-// Fire-and-forget Discord alert, suppressed to one per (provider, endpoint) per
-// suppression window (see discord.ts — /answer and /models are tracked independently
-// since they can fail independently). Inert (no KV read, no fetch) when the secret
-// isn't set, so this is safe to deploy before DISCORD_WEBHOOK_URL exists. Registered
-// via ctx.waitUntil so the Workers runtime doesn't tear it down after the response is
-// sent — sendDiscordAlert itself never throws, so this never surfaces to the caller.
+// Shared-tier failures always alert (our key, our problem). Own-key failures alert only
+// when they might be ours to fix: provider_unavailable, or a request_rejected from an
+// Experimental provider (our request shape is unproven there). A user's own bad key or
+// exhausted quota/credit is theirs, not an incident.
+function shouldAlert(failure: ProviderFailure): boolean {
+  if (failure.keySource === 'shared') return true
+  if (failure.code === 'provider_unavailable') return true
+  return failure.code === 'request_rejected' && EXPERIMENTAL_PROVIDERS.includes(failure.provider)
+}
+
+// Fire-and-forget Discord alert, suppressed to one per (provider, endpoint, slot) per
+// window (see discord.ts) — shared-tier rate limiting has its own slot with a 6h window,
+// everything else uses the shared/own slot with 10 min. Inert (no KV read, no fetch) when the secret isn't set. Registered via
+// ctx.waitUntil so the runtime doesn't tear it down after the response is sent —
+// sendDiscordAlert itself never throws, so this never surfaces to the caller.
 function notifyDiscordOfFailure(
   ctx: ExecutionContext,
   env: Env,
-  provider: string,
-  model: string | null,
-  err: unknown,
+  failure: ProviderFailure,
   endpoint: DiscordEndpoint,
 ): void {
-  if (!env.DISCORD_WEBHOOK_URL) return
-  const { status, message } = extractFailureDetails(err)
+  if (!env.DISCORD_WEBHOOK_URL || !shouldAlert(failure)) return
+  const sharedRateLimit = failure.keySource === 'shared' && failure.code === 'provider_rate_limited'
+  const slot = sharedRateLimit ? 'shared-ratelimit' : failure.keySource
+  const window = sharedRateLimit ? DISCORD_SHARED_RATE_LIMIT_WINDOW_SECONDS : DISCORD_SUPPRESS_WINDOW_SECONDS
   ctx.waitUntil(
-    shouldNotify(env.RATE_LIMIT_KV, provider, endpoint).then((notify) =>
-      notify ? sendDiscordAlert(fetch, env.DISCORD_WEBHOOK_URL, { provider, model, status, message }) : undefined,
+    shouldNotify(env.RATE_LIMIT_KV, failure.provider, endpoint, slot, window).then((notify) =>
+      notify
+        ? sendDiscordAlert(fetch, env.DISCORD_WEBHOOK_URL, {
+            provider: failure.provider,
+            model: failure.model,
+            status: failure.status === null ? null : String(failure.status),
+            message: redactKeys(failure.safeMessage),
+            tier: failure.keySource,
+            code: failure.code,
+            providerCode: failure.providerCode,
+          })
+        : undefined,
     ),
   )
 }
 
 /**
  * Milestone 9 Phase A: a deliberately narrower failure logger for /ocr, separate from
- * logProviderError above. logProviderError logs err.message verbatim — safe for
- * /answer and /models, where nothing sent to a provider is content the user would
- * consider private, but /ocr sends real note content (a full image, not a snippet),
- * and some providers' error bodies echo back fragments of the request on a 400. This
- * function has no `err`/`message` parameter to forward at all, so there's no field
- * a future edit could accidentally start logging — only `status`, extracted the same
- * way extractFailureDetails does.
+ * logProviderError above. logProviderError logs the provider's scrubbed safeMessage —
+ * fine for /answer and /models, which send only snippets and have the prompt echo
+ * guard — but /ocr sends real note content (a full image, not a snippet), and some
+ * providers' error bodies echo back fragments of the request on a 400. This function
+ * has no `err`/`message` parameter to forward at all, so there's no field a future
+ * edit could accidentally start logging — only `status`, read from ProviderError.status.
  */
 function logOcrFailure(status: string | null): void {
   console.error(JSON.stringify({ event: 'ocr_call_failed', status }))
 }
 
 // Same "no raw message field to forward" restriction as logOcrFailure above, applied
-// to the Discord alert — a fixed generic message, never extractFailureDetails(err).message.
+// to the Discord alert — a fixed generic message, never the provider's safeMessage.
 function notifyDiscordOfOcrFailure(ctx: ExecutionContext, env: Env, status: string | null): void {
   if (!env.DISCORD_WEBHOOK_URL) return
   ctx.waitUntil(
-    shouldNotify(env.RATE_LIMIT_KV, 'gemini', 'ocr').then((notify) =>
+    shouldNotify(env.RATE_LIMIT_KV, 'gemini', 'ocr', 'shared').then((notify) =>
       notify
         ? sendDiscordAlert(fetch, env.DISCORD_WEBHOOK_URL, {
             provider: 'gemini',
             model: DEFAULT_SHARED_MODEL,
             status,
             message: 'OCR request failed.',
+            tier: 'shared',
           })
         : undefined,
     ),
@@ -226,9 +375,10 @@ async function handleAnswer(
       origin,
     )
   } catch (err) {
-    logProviderError(provider, model, err)
-    notifyDiscordOfFailure(ctx, env, provider, model, err, 'answer')
-    return json({ error: ANSWER_UNAVAILABLE_MESSAGE }, 502, origin)
+    const failure = classify(err, provider, model, validation.keySource)
+    logProviderError(failure)
+    notifyDiscordOfFailure(ctx, env, failure, 'answer')
+    return failureResponse(failure, 'answer', origin)
   }
 }
 
@@ -280,9 +430,10 @@ async function handleModels(
     }
     return json({ models }, 200, origin)
   } catch (err) {
-    logProviderError(validation.provider, null, err)
-    notifyDiscordOfFailure(ctx, env, validation.provider, null, err, 'models')
-    return json({ error: MODELS_UNAVAILABLE_MESSAGE }, 502, origin)
+    const failure = classify(err, validation.provider, null, 'own')
+    logProviderError(failure)
+    notifyDiscordOfFailure(ctx, env, failure, 'models')
+    return failureResponse(failure, 'models', origin)
   }
 }
 
@@ -319,7 +470,7 @@ async function handleOcr(
     })
     return json({ text }, 200, origin)
   } catch (err) {
-    const { status } = extractFailureDetails(err)
+    const status = err instanceof ProviderError ? String(err.status) : null
     logOcrFailure(status)
     notifyDiscordOfOcrFailure(ctx, env, status)
     return json({ error: OCR_UNAVAILABLE_MESSAGE }, 502, origin)

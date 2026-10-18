@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { OPENROUTER_MODEL_IDS } from './fixtures/openrouterModelIds'
 import {
+  EXPERIMENTAL_PROVIDERS,
+  SUPPORTED_PROVIDERS,
   MAX_API_KEY_LENGTH,
   MAX_CHUNKS,
   MAX_CHUNK_TEXT_LENGTH,
@@ -648,5 +651,90 @@ describe('validateOcrRequest', () => {
     if (result.ok) {
       expect(Object.keys(result)).toEqual(['ok', 'mimeType', 'base64'])
     }
+  })
+})
+
+describe('apiKey pattern (printable ASCII, 8-200, no spaces) — both validators', () => {
+  const answerWithKey = (apiKey: string) =>
+    validateAnswerRequest({ question: 'q', chunks: [validChunk], keySource: 'own', apiKey, provider: 'openai', model: 'gpt-4o-mini' })
+  const modelsWithKey = (apiKey: string) => validateModelsRequest({ provider: 'openai', apiKey })
+
+  it.each([
+    ['a newline', 'sk-abcdef\n12345'],
+    ['a carriage return', 'sk-abcdef\r12345'],
+    ['a space', 'sk-abcdef 12345'],
+    ['a non-latin1 char', 'sk-abcdef\u0100-12345'],
+    ['a latin1-but-non-ASCII char', 'sk-abcdef\u00e9-12345'],
+    ['an emoji', 'sk-abcdef-\u{1F511}-12345'],
+    ['7 chars (under the minimum)', 'sk-1234'],
+    ['201 chars (over the maximum)', 'k'.repeat(201)],
+  ])('rejects a key with %s', (_label, apiKey) => {
+    expect(answerWithKey(apiKey).ok).toBe(false)
+    expect(modelsWithKey(apiKey).ok).toBe(false)
+  })
+
+  it('accepts keys at both length bounds and with real-world punctuation', () => {
+    for (const apiKey of ['k'.repeat(8), 'k'.repeat(MAX_API_KEY_LENGTH), 'sk-proj-Ab_9-xY.z~!', 'AIzaSyA-b_c']) {
+      expect(answerWithKey(apiKey).ok).toBe(true)
+      expect(modelsWithKey(apiKey).ok).toBe(true)
+    }
+  })
+})
+
+describe('model pattern (provider-aware)', () => {
+  const withModel = (provider: string, model: string) =>
+    validateAnswerRequest({ question: 'q', chunks: [validChunk], keySource: 'own', apiKey: 'my-real-key', provider, model })
+
+  it.each(['gemini-3.5-flash-lite', 'gemini-2.0-flash-001', 'learnlm_2.0'])('accepts Gemini model %s', (model) => {
+    expect(withModel('gemini', model).ok).toBe(true)
+  })
+
+  it.each([
+    ['a slash (URL path segment)', 'models/../../v1/x'],
+    ['a colon (would rewrite the :generateContent method)', 'gemini-pro:streamGenerateContent'],
+    ['a query string', 'gemini-pro?alt=sse'],
+    ['a fragment', 'gemini-pro#x'],
+    ['a percent-encoding', 'gemini%2Fpro'],
+    ['a tilde', '~gemini-latest'],
+    ['".."', 'gemini..pro'],
+    ['a space', 'gemini pro'],
+  ])('rejects a Gemini model with %s', (_label, model) => {
+    expect(withModel('gemini', model).ok).toBe(false)
+  })
+
+  it.each(['openai/gpt-4o-mini', 'meta-llama/llama-3.3-70b-instruct:free', '~openai/gpt-mini-latest', 'gpt-4.1', 'claude-sonnet-4-5'])(
+    'accepts non-Gemini model %s',
+    (model) => {
+      for (const provider of ['openai', 'anthropic', 'grok', 'openrouter']) {
+        expect(withModel(provider, model).ok).toBe(true)
+      }
+    },
+  )
+
+  it.each([
+    ['".."', 'openai/../gpt-4o'],
+    ['a space', 'gpt 4o'],
+    ['a query string', 'gpt-4o?x=1'],
+    ['a fragment', 'gpt-4o#x'],
+    ['a newline', 'gpt-4o\n'],
+    ['129 chars', 'm'.repeat(129)],
+  ])('rejects a non-Gemini model with %s', (_label, model) => {
+    for (const provider of ['openai', 'anthropic', 'grok', 'openrouter']) {
+      expect(withModel(provider, model).ok).toBe(false)
+    }
+  })
+
+  it('accepts every one of the 471 live OpenRouter model ids (2026-10-18 snapshot)', () => {
+    expect(OPENROUTER_MODEL_IDS).toHaveLength(471)
+    const rejected = OPENROUTER_MODEL_IDS.filter((model) => !withModel('openrouter', model).ok)
+    expect(rejected).toEqual([])
+  })
+})
+
+describe('EXPERIMENTAL_PROVIDERS', () => {
+  it('is a subset of SUPPORTED_PROVIDERS and excludes the two proven providers', () => {
+    for (const p of EXPERIMENTAL_PROVIDERS) expect(SUPPORTED_PROVIDERS).toContain(p)
+    expect(EXPERIMENTAL_PROVIDERS).not.toContain('gemini')
+    expect(EXPERIMENTAL_PROVIDERS).not.toContain('openai')
   })
 })

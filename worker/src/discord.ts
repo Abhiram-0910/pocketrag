@@ -1,15 +1,28 @@
 import type { KVLike } from './rateLimit'
+import { redactKeys } from './providers/errors'
+
+export type DiscordTier = 'shared' | 'own'
+// Suppression slot in the KV key. Shared-tier rate limiting gets its own slot so its 6h
+// window can't swallow a shared-tier 5xx alert for the same provider+endpoint.
+export type DiscordSuppressionSlot = DiscordTier | 'shared-ratelimit'
 
 export interface DiscordFailurePayload {
   provider: string
   model: string | null
   status: string | null
   message: string
+  tier: DiscordTier
+  // Our classification (index.ts's ErrorCode) and the provider's own error code — both
+  // optional since /ocr's deliberately narrow alert carries neither.
+  code?: string
+  providerCode?: string
 }
 
 const DISCORD_COLOR_RED = 0xed4245
 const MAX_FIELD_LENGTH = 1000
 export const DISCORD_SUPPRESS_WINDOW_SECONDS = 600 // one alert per provider per 10 min
+// Shared-tier quota exhaustion is a daily condition, not an incident — one alert per 6h.
+export const DISCORD_SHARED_RATE_LIMIT_WINDOW_SECONDS = 6 * 60 * 60
 
 export function buildDiscordPayload(payload: DiscordFailurePayload, timestamp: string): unknown {
   return {
@@ -21,7 +34,11 @@ export function buildDiscordPayload(payload: DiscordFailurePayload, timestamp: s
           { name: 'Provider', value: payload.provider, inline: true },
           { name: 'Model', value: payload.model ?? 'n/a', inline: true },
           { name: 'Status', value: payload.status ?? 'unknown', inline: true },
-          { name: 'Message', value: payload.message.slice(0, MAX_FIELD_LENGTH) },
+          { name: 'Code', value: payload.code ?? 'n/a', inline: true },
+          { name: 'Provider code', value: payload.providerCode ? redactKeys(payload.providerCode) : 'n/a', inline: true },
+          { name: 'Tier', value: payload.tier, inline: true },
+          // redactKeys is a backstop at the sink: index.ts already redacts before calling.
+          { name: 'Message', value: redactKeys(payload.message).slice(0, MAX_FIELD_LENGTH) },
         ],
         timestamp,
       },
@@ -62,16 +79,24 @@ export type DiscordEndpoint = 'answer' | 'models' | 'ocr'
 // anti-spam, not a security boundary. Switch to a Durable Object if exact accounting
 // matters.
 //
-// Keyed per (provider, endpoint) rather than provider alone: /answer and /models hit
+// Keyed per (provider, endpoint, slot) rather than provider alone: /answer and /models hit
 // different provider endpoints and can fail independently (e.g. a model-list shape
 // change while chat completions still works). Sharing one window risks a /models
 // failure silently suppressing a later, more user-impacting /answer failure for the
-// same provider. Nothing is lost from the record either way — Workers Logs still
+// same provider. The slot (shared / own / shared-ratelimit) is in the key so an own-key
+// failure can't suppress a shared-tier alert for the same provider+endpoint (or vice
+// versa), and a 6h shared rate-limit window can't suppress a shared 5xx. Nothing is lost from the record either way — Workers Logs still
 // captures every failure on both endpoints unsuppressed — this only throttles the
 // Discord alert itself, one per (provider, endpoint) per window.
-export async function shouldNotify(kv: KVLike, provider: string, endpoint: DiscordEndpoint): Promise<boolean> {
-  const key = `discord-notify:${provider}:${endpoint}`
+export async function shouldNotify(
+  kv: KVLike,
+  provider: string,
+  endpoint: DiscordEndpoint,
+  slot: DiscordSuppressionSlot,
+  windowSeconds: number = DISCORD_SUPPRESS_WINDOW_SECONDS,
+): Promise<boolean> {
+  const key = `discord-notify:${provider}:${endpoint}:${slot}`
   if (await kv.get(key)) return false
-  await kv.put(key, '1', { expirationTtl: DISCORD_SUPPRESS_WINDOW_SECONDS })
+  await kv.put(key, '1', { expirationTtl: windowSeconds })
   return true
 }

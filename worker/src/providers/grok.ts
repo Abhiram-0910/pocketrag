@@ -1,3 +1,5 @@
+import { providerError } from './errors'
+
 const API_BASE = 'https://api.x.ai/v1'
 
 interface GrokChatResponse {
@@ -26,10 +28,7 @@ export async function callGrok(
     }),
   })
 
-  if (!response.ok) {
-    const body = await response.text()
-    throw new Error(`Grok API error ${response.status}: ${body}`)
-  }
+  if (!response.ok) throw await providerError('Grok', response, apiKey, prompt)
 
   const data = (await response.json()) as GrokChatResponse
   const text = data.choices?.[0]?.message?.content
@@ -58,10 +57,7 @@ export async function listGrokModels(fetchImpl: typeof fetch, apiKey: string): P
     headers: { Authorization: `Bearer ${apiKey}` },
   })
 
-  if (!response.ok) {
-    const body = await response.text()
-    throw new Error(`Grok API error ${response.status}: ${body}`)
-  }
+  if (!response.ok) throw await providerError('Grok', response, apiKey)
 
   const data = (await response.json()) as GrokModelsListResponse
   return (data.models ?? [])
