@@ -1,4 +1,7 @@
 @import "tailwindcss";
+/* Tailwind scans every non-ignored file for class names; e2e/ fixtures contain third-party
+   markup (e.g. the Gemini widget's class="container") that must not become utilities. */
+@source not "../e2e";
 
 /* Self-hosted (not Google Fonts CDN) to avoid a third-party request on every load —
    consistent with this app's local-first/no-external-calls posture. Variable font,

@@ -11,6 +11,9 @@ import { chunkText, type Tokenizer } from '../lib/chunker'
 import { resolveBackend } from './backend'
 import type { EmbeddedChunk, RerankCandidate, RerankScore, WorkerRequest, WorkerResponse } from './embedding.types'
 
+// transformers.js loads ONNX Runtime from jsDelivr at a pinned version path; the CSP
+// restricts it to that path, but the files themselves aren't integrity-checked (see ortPin.ts).
+
 const MODEL_ID = 'Xenova/all-MiniLM-L6-v2'
 // Smaller of the two common MS MARCO cross-encoder sizes (~16MB q8 vs. ~23MB for
 // -L-6-v2, checked against the real published ONNX file sizes) — this app already

@@ -1,0 +1,11 @@
+# Cloudflare Pages response headers. The CSP is defined exactly once, here under /*:
+# Pages comma-joins a header set by more than one matching rule, which for CSP means two
+# policies. Report-only for now.
+# The jsDelivr path must match src/workers/ortPin.ts (ortPin.test.ts checks).
+/*
+  Content-Security-Policy-Report-Only: default-src 'none'; script-src 'self' 'wasm-unsafe-eval' blob:; style-src 'self'; img-src 'self'; font-src 'self'; connect-src https://pocketrag-answer.abhiram-dev.workers.dev https://huggingface.co https://*.huggingface.co https://*.hf.co https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0-dev.20260416-b7804b056c/dist/; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; report-uri /__csp-report
+  X-Frame-Options: DENY
+  Referrer-Policy: no-referrer
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), hid=(), midi=(), display-capture=(), browsing-topics=()
+  Cross-Origin-Opener-Policy: same-origin
+  ! Access-Control-Allow-Origin
