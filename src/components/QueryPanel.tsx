@@ -127,6 +127,9 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
   const [busy, setBusy] = useState(false)
   const [awaitingAnswer, setAwaitingAnswer] = useState(false)
   const queryInputRef = useRef<HTMLInputElement>(null)
+  // Focus target after a retry when the question input can't take focus (disabled — e.g.
+  // a restored conversation with no document selected): never leave focus on <body>.
+  const answerAreaRef = useRef<HTMLDivElement>(null)
   const [error, setError] = useState<string | null>(null)
   const [scope, setScope] = useState<'document' | 'all'>('document')
   const [rerankModelProgress, setRerankModelProgress] = useState<number | null>(null)
@@ -480,9 +483,12 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
       pendingWebSearch?.turnId === turnId ? pendingWebSearch.enabled : leaf.webSearchRequested && isGeminiEffective
     await runAnswerAttempt(turnId, context, leaf.question, leafSources.chunks, wasLive, keyConfig, image, enableWebSearch)
     // The banner holding "Try again" unmounts when the retry starts, dropping focus to
-    // <body>; the input is disabled while busy, so re-enable it first, then focus it.
+    // <body>; the input is disabled while busy, so re-enable it first, then focus it —
+    // or the answer area, if the input stays disabled.
     flushSync(() => setBusy(false))
-    queryInputRef.current?.focus()
+    const input = queryInputRef.current
+    if (input && !input.disabled) input.focus()
+    else answerAreaRef.current?.focus()
   }, [leaf, leafSources, keyConfig, liveTurnId, retryTurn, pendingImage, pendingWebSearch, isGeminiEffective, runAnswerAttempt])
 
   // When the same request can't be rebuilt (interrupted, or its cited chunks are gone):
@@ -737,63 +743,89 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
         </StatusBanner>
       )}
 
-      {leaf?.status === 'answered' && (
-        <div className="mt-4 space-y-2 rounded border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
-          {showLeafQuestion && <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{leaf.question}</p>}
-          <StatusBanner variant={leaf.groundingWarning ? 'warning' : 'success'}>
-            {leaf.groundingWarning ? UNGROUNDED_TEXT : GROUNDED_TEXT}
-          </StatusBanner>
-          {leaf.imageIncluded && (
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              🖼️ A page image was included in this request.
-            </p>
-          )}
-          {answerText(leaf)}
-          {leaf.docLabels.length > 0 && (
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              {leaf.docLabels.map((d) => `Doc ${d.label} = ${titleFor(d.documentId)}`).join(' · ')}
-            </p>
-          )}
-          {grounded?.webSources && grounded.webSources.length > 0 && (
-            <div className="text-xs text-slate-500 dark:text-slate-400">
-              <p>🌐 Includes results from a live web search:</p>
-              <ul className="ml-4 list-disc">
-                {grounded.webSources.map((source, i) => (
-                  <li key={i}>
-                    <a
-                      href={source.uri}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 underline dark:text-blue-400"
-                    >
-                      {source.title}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {grounded?.searchEntryPointHtml && (
-            // Google's Grounding ToS (ai.google.dev/gemini-api/terms#grounding-with-
-            // google-search) requires displaying this "Search Suggestions" widget
-            // alongside any grounded result shown to an end user. Google's docs never
-            // state this HTML is safe to inject unsanitized (checked directly — see
-            // SECURITY_REVIEW.md), so it's sanitized before render like any other
-            // externally-sourced content reaching this origin's DOM. Kept in memory for
-            // this session only (chatStore.groundedSession), never stored.
-            <div dangerouslySetInnerHTML={{ __html: sanitizeGroundingHtml(grounded.searchEntryPointHtml) }} />
-          )}
-          <TurnReceipt turn={leaf} />
-        </div>
-      )}
+      {/* The current answer, a restored turn's outcome, and this session's live failure
+          region. tabIndex -1: focusable by script only (see handleRetry). */}
+      <div id="answer-area" ref={answerAreaRef} tabIndex={-1} className="focus:outline-none">
+        {leaf?.status === 'answered' && (
+          <div className="mt-4 space-y-2 rounded border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+            {showLeafQuestion && <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{leaf.question}</p>}
+            <StatusBanner variant={leaf.groundingWarning ? 'warning' : 'success'}>
+              {leaf.groundingWarning ? UNGROUNDED_TEXT : GROUNDED_TEXT}
+            </StatusBanner>
+            {leaf.imageIncluded && (
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                🖼️ A page image was included in this request.
+              </p>
+            )}
+            {answerText(leaf)}
+            {leaf.docLabels.length > 0 && (
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {leaf.docLabels.map((d) => `Doc ${d.label} = ${titleFor(d.documentId)}`).join(' · ')}
+              </p>
+            )}
+            {grounded?.webSources && grounded.webSources.length > 0 && (
+              <div className="text-xs text-slate-500 dark:text-slate-400">
+                <p>🌐 Includes results from a live web search:</p>
+                <ul className="ml-4 list-disc">
+                  {grounded.webSources.map((source, i) => (
+                    <li key={i}>
+                      <a
+                        href={source.uri}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 underline dark:text-blue-400"
+                      >
+                        {source.title}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {grounded?.searchEntryPointHtml && (
+              // Google's Grounding ToS (ai.google.dev/gemini-api/terms#grounding-with-
+              // google-search) requires displaying this "Search Suggestions" widget
+              // alongside any grounded result shown to an end user. Google's docs never
+              // state this HTML is safe to inject unsanitized (checked directly — see
+              // SECURITY_REVIEW.md), so it's sanitized before render like any other
+              // externally-sourced content reaching this origin's DOM. Kept in memory for
+              // this session only (chatStore.groundedSession), never stored.
+              <div dangerouslySetInnerHTML={{ __html: sanitizeGroundingHtml(grounded.searchEntryPointHtml) }} />
+            )}
+            <TurnReceipt turn={leaf} />
+          </div>
+        )}
 
-      {leaf !== null && leaf.status !== 'answered' && !isLive && (
-        <div className="mt-4 space-y-2">
-          <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{leaf.question}</p>
-          {restoredOutcome(leaf, true)}
-          <TurnReceipt turn={leaf} />
+        {leaf !== null && leaf.status !== 'answered' && !isLive && (
+          <div className="mt-4 space-y-2">
+            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{leaf.question}</p>
+            {restoredOutcome(leaf, true)}
+            <TurnReceipt turn={leaf} />
+          </div>
+        )}
+
+        <div aria-live="polite" aria-atomic="true">
+          {liveError && (
+            <StatusBanner variant={liveError.severity} className="mt-4" inLiveRegion>
+              <span className="block">{liveError.message}</span>
+              <span className="block">Showing raw matched passages below.</span>
+              {answerAction && (
+                <Button
+                  variant="secondary"
+                  className="mt-2"
+                  onClick={() => (answerAction === 'retry' ? void handleRetry() : onFailureAction?.(answerAction))}
+                >
+                  {FAILURE_ACTION_LABELS[answerAction]}
+                </Button>
+              )}
+            </StatusBanner>
+          )}
         </div>
-      )}
+
+        {/* This session's own failed, timed-out or in-flight answer: its receipt sits under
+            the live region (the banner above it is what gets announced). */}
+        {leaf !== null && leaf.status !== 'answered' && isLive && leaf.egress.length > 0 && <TurnReceipt turn={leaf} />}
+      </div>
 
       {pastTurns.length > 0 && (
         <details className="mt-4">
@@ -859,28 +891,6 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
           </ul>
         </details>
       )}
-
-      <div aria-live="polite" aria-atomic="true">
-        {liveError && (
-          <StatusBanner variant={liveError.severity} className="mt-4" inLiveRegion>
-            <span className="block">{liveError.message}</span>
-            <span className="block">Showing raw matched passages below.</span>
-            {answerAction && (
-              <Button
-                variant="secondary"
-                className="mt-2"
-                onClick={() => (answerAction === 'retry' ? void handleRetry() : onFailureAction?.(answerAction))}
-              >
-                {FAILURE_ACTION_LABELS[answerAction]}
-              </Button>
-            )}
-          </StatusBanner>
-        )}
-      </div>
-
-      {/* This session's own failed, timed-out or in-flight answer: its receipt sits under
-          the live region (the banner above it is what gets announced). */}
-      {leaf !== null && leaf.status !== 'answered' && isLive && leaf.egress.length > 0 && <TurnReceipt turn={leaf} />}
 
       {leafSources && leafSources.chunks.length > 0 && (
         <details className="mt-4" open={leaf?.status !== 'answered'}>
