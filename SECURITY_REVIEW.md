@@ -312,8 +312,8 @@ ignored).
 | `provider` (must be one of 5 known values) | Checked against `SUPPORTED_PROVIDERS.includes()` before any dispatch | `provider: 'evil-provider'` → `400`, never reached the `switch` dispatch |
 | `image` (shared-tier only) | Rejected outright if present on a BYOK request | BYOK + `image` → `400` |
 | `enableWebSearch` (BYOK+gemini only) | Rejected outright on shared tier or non-gemini BYOK | Both variants → `400` |
-| `model` (arbitrary string, cap 128 chars) | **No allowlist** — passed straight into the provider's own API call as the model id | Not a PocketRAG-side risk: this only ever reaches the *user's own* provider account using the *user's own* key (BYOK), so an arbitrary model string just means their own request to their own account fails or targets an unexpected model on their own dime — not a cross-user or server-side risk. No enforcement gap relative to the actual trust boundary. |
-| `apiKey` (BYOK, cap 200 chars, non-empty) | Only ever reaches the specific provider's own hardcoded `API_BASE` (never client-influenceable) via that provider's dedicated wrapper function | Provider allowlist (above) prevents `apiKey` from ever being routed to an unintended endpoint — the pairing of (validated `provider` → fixed `API_BASE` per provider file) means a client can't use its own key against a URL of its choosing |
+| `model` (BYOK, pattern-checked per provider — Step A, `85a925d`) | `GEMINI_MODEL_PATTERN` (`^[A-Za-z0-9._-]{1,128}$`) for Gemini, which puts the model in the URL path (`models/<model>:generateContent`) — no `/`, `:`, `?`, `#`, `%`. `MODEL_PATTERN` (`^[A-Za-z0-9._:/~-]{1,128}$`) for the other four, which put it in a JSON body where `/`, `:`, and OpenRouter's `~` alias prefix are real id characters. `..` is rejected for **every** provider before either pattern runs. Still not an allowlist of model ids: the user's own key on the user's own account decides what exists, so an unknown-but-well-formed id just fails at the provider (`request_rejected`). `worker/src/fixtures/openrouterModelIds.ts` (471-id snapshot of OpenRouter's public catalog, 2026-10-18, test-only) proves `MODEL_PATTERN` doesn't reject a real id | Live probes against `b612f443` (2026-10-18): path traversal (`..`) and non-ASCII model ids → `400` at validation, never reached a provider; a well-formed id passed validation and failed at the provider → `502` |
+| `apiKey` (BYOK, `API_KEY_PATTERN`) | `^[\x21-\x7E]{8,200}$` — printable ASCII, no spaces, 8-200 chars. The key goes into an HTTP header; a newline or non-latin1 char makes `fetch()` throw a `TypeError` whose message can carry the header value (the key) into our own logs, so it's rejected before any fetch. The validation error never echoes the value. Only ever reaches the specific provider's own hardcoded `API_BASE` (never client-influenceable) via that provider's dedicated wrapper function | Provider allowlist (above) prevents `apiKey` from ever being routed to an unintended endpoint — the pairing of (validated `provider` → fixed `API_BASE` per provider file) means a client can't use its own key against a URL of its choosing. Newline/non-ASCII keys → `400` live (2026-10-18) |
 | `mimeType` (OCR, exact allowlist) | Checked against `OCR_ALLOWED_MIME_TYPES`, exact match not a wildcard | Disallowed mimeType with extraneous `keySource`/`apiKey` fields present → `400`, confirming those extra fields are simply never read (not silently accepted then ignored downstream — genuinely absent from the type) |
 
 - **Verdict: PASS on all fields checked.** Every client-originating field that could
@@ -323,6 +323,48 @@ ignored).
   session (this was the section flagged as highest-value in the approved plan,
   precisely because it's where "the frontend wouldn't send this" vs. "the server
   doesn't trust that it won't" gaps tend to hide).
+
+### Step A update (2026-10-18, `85a925d`, deployed `b612f443`)
+
+**Model lists.** OpenAI's `/models` filtering (`worker/src/providers/openai.ts`) is a
+**denylist**, not an allowlist: `NON_CHAT_MODEL_PATTERN` drops embedding, moderation,
+audio/TTS/transcribe/realtime, image/DALL-E/Sora, legacy completion
+(`davinci`/`babbage`/`instruct`) ids and the Responses-API-only `o1-pro`/`o3-pro`/
+`gpt-5-pro`/`gpt-5-codex` families. Anything new OpenAI ships passes through until
+it's added. `codex-mini-latest` and `*-deep-research` are **unverified** — their docs
+don't say whether Chat Completions works — and are deliberately not listed.
+OpenRouter's `/models` is a public catalog that returns 200 for any key (see §1), so
+`listOpenRouterModels` first calls `GET /key`, which returns 401 for a fake key
+(confirmed live 2026-10-18); a bad key now fails at model fetch instead of
+showing a full model list and failing on the first `/answer`.
+
+**Error handling.** A provider's error body never reaches the client and is never
+stored whole:
+
+1. **Scrubbed at source** (`worker/src/providers/errors.ts`'s `providerError()`, the
+   only way provider files throw): the body is parsed for its message and code, then
+   dropped. The message is (a) exact-key scrubbed (`replaceAll(apiKey, '[redacted]')`)
+   *before* truncation so a cut can't stop the key matching, then (b) capped at 200
+   chars, then (c) run through the prompt-echo guard: if any 20-char window of the
+   truncated text appears in the prompt, the whole message becomes
+   `[withheld: echoed request content]`. The guard samples at stride 5, so an echo
+   shorter than 24 chars, or one cut at the 200-char edge, can slip through. That's
+   acceptable for log hygiene; the client never sees this text anyway. The provider
+   code is capped at 64 chars, must match `^[\w.:-]+$`, and is dropped if it
+   contains the key.
+2. **`redactKeys` backstop at both sinks.** `logProviderError` (Workers Logs) and
+   `notifyDiscordOfFailure` (Discord embed) run the scrubbed message through a
+   pattern redactor (`sk-`/`xai-` prefixed keys including `sk-ant-`/`sk-or-`,
+   `AIza…`, `Bearer …`) that catches key-shaped strings that aren't the exact key
+   sent, e.g. OpenAI's masked `sk-abcd***wxyz` echo. Neither sink is passed `err`
+   or `apiKey`, only the classified failure.
+3. **Client sees only fixed copy.** The response body is
+   `{error, code, source?}`: `error` comes from a fixed copy table keyed by
+   failure code (see ARCHITECTURE.md), never provider text. HTTP status stays 502.
+
+Live check against `b612f443`: fake keys on all 5 providers × `/answer` + `/models`
+(10 requests) all returned 502 `key_rejected` with the fixed copy, with no trace of
+the fake key or a planted prompt marker in any response.
 
 ---
 

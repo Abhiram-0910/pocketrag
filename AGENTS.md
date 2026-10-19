@@ -39,6 +39,33 @@ error text. 60s timeout + manual retry still there as a demo-day safety net.
 
 ---
 
+## Standing Rules — Worker provider errors (Step A, `85a925d`)
+
+- **Provider files throw only via `providerError()`** (`worker/src/providers/errors.ts`).
+  Never interpolate a response body (or `await response.text()`) into an `Error`
+  message — `providerError()` parses, scrubs, caps, and echo-guards it, then drops it.
+- **Never log `err` or `apiKey`.** Log provider failures only through
+  `logProviderError(failure)` in `worker/src/index.ts`, which takes the classified
+  `ProviderFailure` and applies `redactKeys`. Same for Discord: pass the failure, not
+  the error.
+- **Promoting an Experimental provider means editing BOTH**
+  `worker/src/validate.ts`'s `EXPERIMENTAL_PROVIDERS` and the same-named array in
+  `src/components/ByokPanel.tsx` (kept separate because exporting it breaks Fast Refresh).
+  `src/components/experimentalProviders.test.ts` fails if they drift.
+- **New provider checklist:**
+  1. Throw via `providerError()` on every non-2xx (chat and model-list calls).
+  2. Decide model-id validation: if the provider's ids don't fit `MODEL_PATTERN`,
+     snapshot its real catalog into `worker/src/fixtures/` as a test-only fixture
+     (like `openrouterModelIds.ts`); if its `/models` returns non-chat models, add a
+     denylist (like OpenAI's `NON_CHAT_MODEL_PATTERN`) and note which ids are
+     unverified.
+  3. Add a key-detection test using the provider's **real** bad-key response shape
+     (captured live with a fake key), so `classify()` maps it to `key_rejected`. If
+     it has no key-specific code, check whether the 400 message matches
+     `/\bapi key\b/i` or the status is 401/403.
+
+---
+
 ## Session Log
 
 ### Session 1 — 2026-07-24

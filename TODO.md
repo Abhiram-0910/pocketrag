@@ -6,6 +6,41 @@ Read this at the start of every session to know what to work on next.
 ---
 
 ## 🔴 Current Sprint
+
+### Worker hardening + error UX (Steps A-D)
+- [x] **Step A** — provider failure classification (`key_rejected` /
+      `provider_rate_limited` / `request_rejected` / `provider_unavailable`), error
+      bodies scrubbed at source (`providerError()`), `redactKeys` backstop at log +
+      Discord, key/model pattern validation, OpenAI non-chat denylist, OpenRouter
+      `GET /key` gate, tier-aware Discord gating. Commit `85a925d`; Worker deployed as
+      `b612f443` (rollback target: prior version `7cc4bd27`). See ARCHITECTURE.md
+      (classification table) and SECURITY_REVIEW.md §6 (Step A update).
+- [ ] **Step B** — frontend per-code messages from the Worker's `code`/`source`
+      fields; a "check your key" action on `key_rejected`; stop auto-selecting
+      `fetched[0]` as the model for OpenAI/OpenRouter.
+- [ ] **Step C** — Pages `_headers` with a CSP (report-only first, then enforce);
+      serve ONNX wasm locally via `wasmPaths`; narrow `img-src`; bump DOMPurify.
+- [ ] **Step D** — server-issued `retryAfterSeconds` + `date` on rate-limit responses
+      and a live countdown in the UI, for our own buckets only (not provider limits).
+- [ ] Egress ledger: one documented list of every host the app and Worker contact.
+- [ ] Shared-Gemini free-tier data-use disclosure in the UI and README (free-tier
+      Gemini may use inputs to improve Google's products).
+- [ ] Discord: create an Admin server and rotate the webhook (the old webhook is
+      compromised), `wrangler secret put DISCORD_WEBHOOK_URL`, then do a positive
+      check that a real alert arrives.
+- [ ] Grok bad-key detection relies only on the message regex `/\bapi key\b/i` (its
+      code is a generic `invalid-argument`) — breaks silently if xAI rewords it.
+- [ ] Anthropic / Grok / OpenRouter success paths still unverified (no working key).
+- [ ] `index.html` title / meta description / Open Graph tags.
+- [ ] Privacy and terms pages.
+- [ ] IndexedDB export (documents + conversations).
+- [ ] Client-side error monitoring.
+- [ ] CI + E2E tests.
+- [ ] a11y: `aria-live` for answer/status updates, autofill handling, a proper
+      label on the API-key input.
+- [ ] PWA (manifest + offline shell).
+
+### Earlier sprint notes
 Milestone 6 (multi-document, bulk upload, cross-document retrieval, restore-on-reload),
 the deferred "delete a persisted document" scope, **Milestone 7a (BYOK, Gemini-only)**,
 and now the first slice of **Milestone 7b (BYOK, OpenAI added as a second provider)**
@@ -334,8 +369,8 @@ detection mechanism), and **BYOK success-path verification for
 Anthropic/Grok/OpenRouter** (all three are code-complete and live with a
 verified failure path; a real successful answer/model-fetch call remains
 unverified for lack of a working test key — flip out of
-`EXPERIMENTAL_PROVIDERS` once one is available, no other code change
-needed). Gemini's web search grounding success path (Milestone 12,
+`EXPERIMENTAL_PROVIDERS` once one is available; since Step A that means both
+the Worker's and ByokPanel's copies, see AGENTS.md Standing Rules). Gemini's web search grounding success path (Milestone 12,
 Experimental) remains similarly gated on a billing-linked API key, same
 honest-scope standard, documented in README.md/ARCHITECTURE.md rather than
 silently assumed fixed.

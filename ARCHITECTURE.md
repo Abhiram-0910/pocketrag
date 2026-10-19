@@ -84,13 +84,14 @@ pocketrag/
 | `src/lib/pdfExport.ts` | `buildConversationPdf()` — jsPDF conversation export with real manual page-break logic (`ensureSpace()`) |
 | `src/lib/sanitizeHtml.ts` | DOMPurify wrapper for Gemini grounding's `searchEntryPointHtml` before it reaches `dangerouslySetInnerHTML` (Session 27 security fix) |
 | `worker/src/index.ts` | Request router: `POST /answer`, `POST /models`, `POST /ocr` — CORS → rate limit → validate → dispatch to the selected provider → groundedness check (answer only) → JSON response |
-| `worker/src/validate.ts` | Caps chunk count (5), per-chunk text length (2000 chars), history/doc-label array sizes, and OCR file size/MIME type server-side — never trusts the client |
+| `worker/src/validate.ts` | Caps chunk count (5), per-chunk text length (2000 chars), history/doc-label array sizes, and OCR file size/MIME type server-side; pattern-checks BYOK `apiKey` (`API_KEY_PATTERN`) and `model` (`GEMINI_MODEL_PATTERN` / `MODEL_PATTERN`, `..` rejected for all) — never trusts the client |
 | `worker/src/prompt.ts` | Grounded-QA prompt: answer only from passages, cite `(Doc N, page M)`, admit gaps |
 | `worker/src/labels.ts` | `assignDocLabels()` — `Doc N` ↔ documentId map, frozen per conversation via an `existing` param (see Key Architectural Decisions) |
 | `worker/src/grounding.ts` | `checkGrounding()` — citation-level groundedness heuristic over `(Doc N, page)` pairs |
 | `worker/src/rateLimit.ts` | KV counter-per-IP-per-day — independent buckets per tier/endpoint (shared `/answer`, BYOK, `/ocr`) |
 | `worker/src/providers/*.ts` | One file per BYOK provider (gemini, openai, anthropic, grok, openrouter) — each a thin, injectable-`fetch` wrapper around that provider's chat + model-list endpoints, same two-key-leak-test discipline |
-| `worker/src/discord.ts` | Fire-and-forget (`ctx.waitUntil`) sanitized failure alerts to an optional webhook, suppressed per `(provider, endpoint)` per 10-minute window |
+| `worker/src/providers/errors.ts` | `providerError()` — the only way provider files throw: parses a non-2xx body for message/code, exact-key scrubs, caps at 200 chars, applies the prompt-echo guard, then drops the body. Also `redactKeys()`, the pattern backstop used at the log and Discord sinks |
+| `worker/src/discord.ts` | Fire-and-forget (`ctx.waitUntil`) sanitized failure alerts to an optional webhook, suppressed per `(provider, endpoint, slot)` — 10 min for `shared`/`own`, 6 h for `shared-ratelimit` |
 
 ---
 
@@ -311,6 +312,27 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
   docs rather than assuming "under the limit" was good enough, then chose the
   lower-risk mitigation (loud build failure before the real cap) over a
   higher-risk, unverified binary swap.
+- **Provider failures are classified, not passed through (Step A, `85a925d`).**
+  `worker/src/index.ts`'s `classify()` turns a `ProviderError` (status + sanitized
+  provider code + scrubbed message) into one of four codes, and the client gets a
+  fixed string for that code — never provider text. HTTP status stays **502** for
+  every provider failure (the frontend's `errorTaxonomy.ts` keys off it); `code`, and
+  `source` (`shared`|`own`) on rate limits, are additive JSON fields the frontend
+  doesn't consume yet (Step B). Checked in order:
+
+  | Tier | Status / signal | `code` | Client copy |
+  |---|---|---|---|
+  | shared | 429 | `provider_rate_limited` (`source: shared`) | "The free shared tier is at capacity right now. Try again later, or use your own API key." |
+  | shared | anything else, incl. network/shape errors | `provider_unavailable` | "The free tier couldn't respond right now. Try again in a moment, or use your own API key." |
+  | own | provider code `API_KEY_INVALID` / `invalid_api_key`, or 401 / 403, or 400 whose message matches `/\bapi key\b/i` | `key_rejected` | "The provider rejected your API key. Check that it's correct, active, and has access to this model." |
+  | own | 429 / 402 | `provider_rate_limited` (`source: own`) | "Your provider account hit its rate limit, quota, or credit balance. Wait a moment or check your plan." |
+  | own | 400 / 404 / 413 / 422 | `request_rejected` | "The provider rejected this request. The selected model may not be available to your key; try another." |
+  | own | ≥ 500 | `provider_unavailable` | "The provider couldn't respond right now. Please try again in a moment." |
+  | own | any other status, or no status (network failure, bad response shape, empty answer) | `provider_unavailable`, *unclassified* | Same as above — except on an `EXPERIMENTAL_PROVIDERS` provider, where it's "This provider isn't fully supported yet…" (`/answer`) / "This provider's model list isn't available yet…" (`/models`) |
+
+  The shared tier never says "your key" or "your request" — the key is ours. `/models`
+  is always classified as `own`. Our own per-IP rate limit is separate: it returns
+  429 before any provider call.
 
 ---
 
@@ -331,17 +353,26 @@ DISCORD_WEBHOOK_URL=
 
 `DISCORD_WEBHOOK_URL` is optional — the Worker checks it for truthiness before doing
 anything, so the notification system stays fully inert (no KV read, no fetch) until
-the secret is set. When set, every provider-call failure across all 5 BYOK providers
-(`worker/src/index.ts`'s `notifyDiscordOfFailure`, called from both `/answer` and
-`/models`'s catch blocks) posts a sanitized embed (provider, model, status, message —
-same already-key-free string `logProviderError` uses, never the raw error/key) to the
+the secret is set. When set, a provider-call failure from `/answer` or `/models`
+(`worker/src/index.ts`'s `notifyDiscordOfFailure`) posts a sanitized embed (provider,
+model, status, tier, failure `code`, provider code, and the same scrubbed message
+`logProviderError` uses, passed through `redactKeys` — never the raw error/key) to the
 webhook, registered via `ctx.waitUntil` so it survives after the response is sent
-without blocking or delaying it. Suppressed to one alert per (provider, endpoint) per
-10-minute window (`discord-notify:<provider>:<answer|models>` in the existing
-`RATE_LIMIT_KV`, see `worker/src/discord.ts`) so a real outage or abuse burst doesn't
-spam the channel — `/answer` and `/models` are tracked independently since they hit
-different provider endpoints and can fail on their own (a `/models` failure never
-suppresses a subsequent `/answer` alert for the same provider, or vice versa).
+without blocking or delaying it. Gating (`shouldAlert`, Step A):
+
+- **Shared tier always alerts** — our key, our problem.
+- **Own key alerts only when it might be ours to fix:** `provider_unavailable`, or
+  `request_rejected` on an `EXPERIMENTAL_PROVIDERS` provider (our request shape is
+  unproven there). A user's bad key or exhausted quota is theirs, not an incident.
+
+Suppression is one alert per (provider, endpoint, slot) per window
+(`discord-notify:<provider>:<answer|models>:<slot>` in the existing `RATE_LIMIT_KV`,
+see `worker/src/discord.ts`). Slots: `shared` and `own` use a 10-minute window;
+`shared-ratelimit` (shared-tier `provider_rate_limited`) uses 6 h, since free-tier
+quota exhaustion is a daily condition, and having its own slot means it never
+suppresses a different shared-tier failure. `/answer` and `/models` are tracked
+independently (a `/models` failure never suppresses a subsequent `/answer` alert for
+the same provider, or vice versa).
 
 **Live production:**
 - Frontend: `https://pocketrag.pages.dev` (Cloudflare Pages, project `pocketrag`,
