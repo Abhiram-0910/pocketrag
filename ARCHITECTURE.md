@@ -26,7 +26,8 @@ Keep this updated as the project evolves.
 pocketrag/
 ├── src/
 │   ├── components/          # DropZone, DocumentList, QueryPanel, ByokPanel, NotesDropZone,
-│   │                         # LandingPage, ui/Button, ui/StatusBanner
+│   │                         # ConversationList, Receipts, LandingPage, ui/Button,
+│   │                         # ui/StatusBanner
 │   ├── lib/                  # Pure logic — retrieval (retrieval.ts, bm25.ts, reranker.ts,
 │   │                          # similarity.ts, conversation.ts), ingestion (pdf.ts, chunker.ts,
 │   │                          # pageRender.ts, sessionFiles.ts), persistence (db.ts,
@@ -66,7 +67,7 @@ pocketrag/
 | `src/lib/retrieval.ts` | `rankChunks()` — pure cosine-ranking over an array of `{embedding}` objects, generic over the chunk shape |
 | `src/lib/db.ts` | IndexedDB via `idb`: `documents` + `chunks` object stores, `documentId` index on chunks. `saveDocument()`, `getChunksForDocument()` (this-document scope), `getAllChunks()` (all-documents scope), `getAllDocuments()` (restore-on-reload), `deleteDocument()` (atomic readwrite over both stores, via the `documentId` index). `requestPersistOnce()` asks for `navigator.storage.persist()` once per session, on the first document or chat-turn save. A failed open isn't cached, so the next call retries |
 | `src/lib/historyDb.ts` | Chat history in its own IndexedDB database, `pocketrag-history` (see Key Architectural Decisions): `conversations` + `turns` stores, turns linked into a tree by `parentId`. `saveTurn()` (turn + conversation in one transaction, grounded answer dropped), `getConversations()`, `getTurns()`, `deleteConversation()`, `deleteAllHistory()`, `sweepInterruptedTurns()` |
-| `src/store/chatStore.ts` | Zustand store over `historyDb.ts`: `startTurn()` persists the turn as `pending` and returns the `history` / `docLabels` / blend question for its request; `settleTurn()`, `retryTurn()`, `appendEgress()`, `selectBranch()`, deletes. An in-flight map lets a request settle and save after the user switches conversations. Grounded results live only in its in-memory `groundedSession` map. Not wired into the UI yet (Phase 2b) |
+| `src/store/chatStore.ts` | Zustand store over `historyDb.ts`: `startTurn()` persists the turn as `pending` and returns the `history` / `docLabels` / blend question for its request; `settleTurn()`, `retryTurn()`, `appendEgress()`, `selectBranch()`, deletes. An in-flight map lets a request settle and save after the user switches conversations. Grounded results live only in its in-memory `groundedSession` map. `restore()` lists conversations and opens the most recent one |
 | `src/lib/egress.ts` | The one place the app makes network requests: `egressFetch()` (Worker calls) and `downloadFetch()` (transformers.js `env.fetch`). Records each request (host, payload categories and counts, bytes, timing, outcome) to an `onRecord` sink — a turn's `appendEgress` for an answer — or the session log (capped at 200, never takes answers). `egress.bypass.test.ts` fails on a raw `fetch(` / XHR / beacon / WebSocket / EventSource anywhere else in `src/` |
 | `src/lib/receipts.ts` | Plain-language text for the Receipts view: contents ("3 passages from your documents"), status, size, duration, destinations, the one-line total per answer. Pure |
 | `src/lib/allowedDestinations.ts` | `connect-src`'s destinations with plain labels, for the Receipts limits section — a compiled copy; `allowedDestinations.test.ts` fails if it drifts from `public/_headers` |
@@ -77,7 +78,9 @@ pocketrag/
 | `src/store/documentStore.ts` | Zustand store: `documents: DocEntry[]` (per-document id/fileName/status/progress/chunkCount), `selectedId`, plus session-global backend + model-progress. Actions: add/update/remove/restore/select |
 | `src/components/DropZone.tsx` | Drag-and-drop + browse; queues a whole batch up front, then embeds one document at a time. `processFile` resolves (never rejects) on ready or error so one bad file can't block the rest. Auto-selects the first ready doc |
 | `src/components/DocumentList.tsx` | The multi-document library: one row per doc with live status, click-to-select (ready docs only), ✕ to dismiss an error row, inline two-step "Delete permanently?" confirm on ready rows (destructive — calls `deleteDocument()` then `removeDocument()`; failure keeps the row with a brief inline error) |
-| `src/components/QueryPanel.tsx` | Scope toggle (this doc / all docs) → embed query → rank the scoped chunk pool from IndexedDB → POST to the Worker → composed answer as primary result, `Doc N = fileName` legend, raw ranked chunks as collapsible "Sources," visible failure note (not silent fallback) if the Worker call fails |
+| `src/components/QueryPanel.tsx` | Scope toggle (this doc / all docs) → embed query → rank the scoped chunk pool from IndexedDB → `chatStore.startTurn` → POST to the Worker → composed answer as primary result, `Doc N = fileName` legend, raw ranked chunks as collapsible "Sources," visible failure note (not silent fallback) if the Worker call fails. Renders the open conversation's linear path from `chatStore` (Phase 2b): the leaf as the current answer, earlier turns under "Conversation"; restored failures/timeouts/interruptions outside the live region; storage banners; a Receipt on every answer and "This session" at the end |
+| `src/components/ConversationList.tsx` | Saved conversations: open, New conversation, delete one, delete all history, Delete everything (documents + history, model cache kept). Left rail from `lg` up, a disclosure below that; focus moves to the next row / the heading / the question input after each action |
+| `src/components/Receipts.tsx` | `TurnReceipt` (per answer: one row per request, retries included, total, the limits statement and allowed destinations) and `SessionReceipts` (downloads, OCR uploads, model-list checks). Rows carry `data-egress-id` / `data-host` / `data-final-host` for the e2e reconciliation |
 | `src/components/ByokPanel.tsx` | BYOK provider picker (all 5), key input, live model-list fetch, "(Experimental)" labeling for the 3 unverified providers — key is request-scoped component state only, never persisted |
 | `src/components/NotesDropZone.tsx` | Notes-tab drop zone — per-file OCR consent prompt before anything uploads, no "remember my choice" shortcut |
 | `src/components/LandingPage.tsx` | First-visit-only landing screen, gated by `landingVisitSetting.ts`'s localStorage flag |
@@ -88,8 +91,8 @@ pocketrag/
 | `src/lib/answerRequest.ts` | `attemptAnswer()` — one answer attempt wrapped in an `AbortController` ~60s timeout, discriminated `{outcome}` return instead of throwing |
 | `src/lib/errorTaxonomy.ts` | Maps every failure (rate-limit, provider-unavailable, network, corrupt-pdf, webgpu-unsupported, unknown) to a severity + plain-language message |
 | `src/lib/apiError.ts` | `WorkerRequestError` + `parseWorkerErrorResponse` (status-gated `resetAt` / `code` / `source`), `FAILURE_CODES` (parity-tested against `worker/src/failureCodes.ts`), `failureAction()` |
-| `e2e/step-b-failures.cjs` | Manual Playwright run (global install, not a dependency) against `vite preview`, route-mocked: each failure code's banner, action, focus target, and live-region placement |
-| `e2e/step-c-csp.cjs` | Manual Playwright run against any server that applies `public/_headers` (`wrangler pages dev`, a preview, or production): 12 app flows with Worker calls mocked, CSP reports read off the `report-uri` request; exits 1 on any violation except the allowlisted Gemini-widget `<style>` |
+| `e2e/step-b-failures.cjs` | Manual Playwright run (global install, not a dependency) against `vite preview`, route-mocked: each failure code's banner, action, focus target, and live-region placement; restored timed-out / failed / interrupted turns in extra tabs (outside every live region, retry adds a receipt row); one live `/models` call in its own route-free tab |
+| `e2e/step-c-csp.cjs` | Manual Playwright run against any server that applies `public/_headers` (`wrangler pages dev`, a preview, or production): 15 app flows with Worker calls mocked (incl. chat history, grounded-history exclusion, deletes, model cache kept after Delete everything), CSP reports read off the `report-uri` request, and every cross-origin request reconciled against the Receipt / This-session rows; exits 1 on any violation except the allowlisted Gemini-widget `<style>`, or any unmatched request |
 | `public/_headers` | Cloudflare Pages response headers: the enforced CSP (defined once, under `/*`) and the other security headers — see Key Architectural Decisions (Step C) |
 | `src/workers/ortPin.ts` | The pinned ONNX Runtime version, its jsDelivr `dist/` path (must equal `_headers`' `connect-src` entry), and the recorded sha384 of each runtime file; `ortPin.test.ts` keeps all of it in step with `node_modules` and `_headers` |
 | `src/lib/diagramHeuristic.ts`, `src/lib/pageRender.ts`, `src/lib/sessionFiles.ts` | Diagram-aware Q&A (Milestone 10): lexical diagram-likely detection, on-demand page-image rendering, and the session-only (never persisted) raw-`File` cache page rendering needs |
@@ -531,6 +534,40 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
   `PROVIDER_HOSTS` (`models.ts`), which `providers.test.ts` pins to each provider file's
   exported `API_BASE` — that hop is the Worker's own report, not something the browser
   observes.
+- **Chat history UI and Receipts (Phase 2b, Pages preview `41d6f8c8` only — production
+  Pages has NOT been redeployed; it still runs `8c992a01`).**
+  - **Linear history.** `QueryPanel` shows the open conversation's active path; the
+    tree and its branch ops exist in the store but have no UI yet. Every request's
+    `history` comes from `chatStore` (never a grounded answer) — which also stops the
+    old in-session behavior of sending grounded answers upstream. "Clear conversation"
+    became "New conversation": the old one stays in the list until deleted.
+  - **Restore on load** opens the most recent conversation without moving focus. A turn
+    restored from an earlier session renders its stored failure / timeout /
+    interruption *outside* the always-mounted live regions (`StatusBanner inLiveRegion`
+    drops the role), so opening a conversation announces nothing stale; only this
+    session's live turn uses the live region. A restored rate-limit failure shows the
+    Worker's stored message without the stale "Resets at" time.
+  - **Restored retry** rebuilds the request from the turn's citations
+    (`getChunksByIds`), without a page image (never stored); if a cited chunk is gone,
+    the action becomes "Ask again" (the question goes back in the input).
+  - **Session-only UI state is keyed by turn id** (live failure banner, timeout banner,
+    Sources, pending image / web-search choice), so switching conversations hides it
+    without any reset logic.
+  - **Focus never drops to `<body>`:** after Try again → the question input, or the
+    answer area (`#answer-area`, `tabIndex=-1`) when the input is disabled; after
+    delete-one → the next row (or the previous, else the list heading); after delete all
+    / Delete everything → the list heading; after New conversation → the question input.
+  - **Delete everything** clears the documents DB and the history DB (two databases, so
+    two operations; a partial failure says which part failed), keeps the Cache API model
+    files and the localStorage settings, and is disabled while any document is still
+    being processed.
+  - **Receipts** (`Receipts.tsx`): a native `<details>` per answer whose summary is the
+    one-line total ("2 requests · 2 destinations · 6.2 kB sent"); one `<ol>` row per
+    request with a `<dl>` of To / Served by / Then to (+ model) / Sent / Size; a
+    double-rule total; the limits statement verbatim once per panel, with the allowed
+    destinations from `allowedDestinations.ts`. Receipt-like styling inside the existing
+    tokens (dashed rules, `tabular-nums`, uppercase micro-labels), no new fonts or
+    dependencies.
 
 ---
 

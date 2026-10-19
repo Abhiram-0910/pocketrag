@@ -94,7 +94,7 @@ provider error text; the UI shows it verbatim with a per-code action (Step B). 6
   Tailwind's `.container` utility to the production CSS. After a build, `dist/`'s CSS
   hash should only change when app styles change.
 
-## Standing Rules — chat history and egress (Phase 1 `36ef802` / `3b81d47`, Phase 2a)
+## Standing Rules — chat history and egress (Phase 1 `36ef802` / `3b81d47`, Phase 2a, 2b)
 
 - **Every outbound request goes through `src/lib/egress.ts`** — `egressFetch()` for
   Worker calls, `downloadFetch()` as transformers.js's `env.fetch`. Never call `fetch`,
@@ -119,6 +119,16 @@ provider error text; the UI shows it verbatim with a per-code action (Step B). 6
   `src/lib/providers.test.ts` fails otherwise. **Changing `connect-src`** in
   `public/_headers` means updating `src/lib/allowedDestinations.ts` too
   (`allowedDestinations.test.ts`).
+- **Receipt and This-session rows keep `data-egress-id`, `data-host`, `data-final-host`.**
+  `e2e/step-c-csp.cjs` reconciles every cross-origin request against them; a request
+  with no row fails the run. A new `EgressPurpose` needs a `PURPOSE_LABEL` in
+  `Receipts.tsx`.
+- **A restored (earlier-session) failure renders outside the live regions**; only this
+  session's live turn uses them. **Focus never drops to `<body>`** — when the usual
+  target is disabled or gone, use the fallback (`#answer-area`, the list heading).
+- **e2e: keep the live `/models` check in its own route-free tab.** On the long-lived,
+  route-mocked main page that real request intermittently never completed in Chromium
+  (in-flight in the app's own log for 30s+; curl answered in ~1s).
 - **Local `wrangler pages dev` needs `--compatibility-date=2026-07-29`** with the
   installed wrangler 4.114.0: without it, wrangler defaults to today's date, which its
   bundled workerd doesn't support, and the server never starts (step-c then fails every
@@ -3727,6 +3737,37 @@ parity test in the client-echo commit, after the Worker exported `API_BASE`.
 `groundedText` was renamed `groundedSession` (it holds more than text now). Until
 Phase 2b, the live `QueryPanel` passes no `onEgress`, so its answer requests aren't
 recorded anywhere (nothing displayed them before).
+
+### Session 34 — 2026-10-19 (Claude Code)
+**Goal:** Phase 2b — the chat-history UI and Receipts, e2e extensions, a Pages *preview*
+deploy. **Production Pages was NOT redeployed** (still `8c992a01`); the copy changes
+(landing page + README) await approval and are not committed.
+
+**Built:** `830ed48` QueryPanel on `chatStore` (linear history, restore auto-opens the
+latest conversation, restored outcomes outside the live region, restored retry from
+citations, storage banners, New conversation), `ConversationList.tsx`, the
+document-delete citing-turns count, App rail layout. `7dd2306` `Receipts.tsx` +
+tests. `b1339ef` focus fix found by the new e2e (retry in a restored conversation with
+no document selected dropped focus to `<body>`; now the answer area). `ca947ac` e2e:
+step-b restored/timed-out/interrupted checks and a route-free live tab; step-c history
+flows and the request ↔ ledger reconciliation.
+
+**Preview:** `https://phase2.pocketrag.pages.dev` (deployment
+`41d6f8c8-b817-457f-b94d-4036bc9029f9`, Environment Preview, branch `phase2`; the
+production branch is `main`). Preview origins fail the Worker's CORS for live calls, so
+the preview is mocked-only. Screenshots (not in the repo): `~/NewProjects/pocketrag-shots/`.
+
+**Verification:** frontend 255/255 (was 244), Worker 331/331 (unchanged), `tsc`/`oxlint` clean
+both sides (the `titleFor` warning is gone), build passes the size guard, CSS
+`index-BDvXQpZ6.css` → `index-D0F1Nrn-.css`, `git diff 6158529 -- public/_headers` empty.
+step-b (Chromium) `exit=0` twice in a row; step-c Chromium and Firefox `exit=0`, 15/15
+flows, 25/25 requests reconciled, 0 unexpected CSP violations. The preview serves the
+same bundle as this tree's build (`index-DtFf0Qyf.js`, `index-D0F1Nrn-.css`).
+
+**Deviations:** an extra code commit (`b1339ef`, the focus fix). Conversation rows show
+the date, not a turn count. On mobile the conversation list sits under the header, not
+directly above the question box. The live `/models` e2e check moved to its own tab after
+an intermittent hang on the main page (root cause not pinned down — see the e2e comment).
 
 ---
 

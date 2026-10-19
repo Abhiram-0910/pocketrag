@@ -69,21 +69,21 @@ Read this at the start of every session to know what to work on next.
       switch, grounded entries freed on any conversation's delete. Worker deployed
       `483afdc9` (rollback target `b612f443-ed53-44e0-8cce-1877c8b7ce2b`); Pages not
       redeployed.
-- [ ] **Phase 2b** — the UI, per the approved Phase 2 plan: `QueryPanel` onto
-      `chatStore` (restore on load, linear history, `onEgress` → `appendEgress`,
-      echoed `model` → `settleTurn`, Step B behaviors kept, drop its own
-      `SENT_HISTORY_TURNS`), `ConversationList.tsx` (open, delete-one, delete-all,
-      "Delete everything"), the document-delete confirm count, storage banners, the
-      Receipts and This-session views, then Pages preview → production.
-  - [ ] Until then, the live `QueryPanel` still sends grounded answers as in-session
-        `history`, and its answer requests aren't recorded (no `onEgress`).
-  - [ ] e2e: step-b (failed turns restored with copy + action, retry adds a record,
-        timed-out / interrupted states); step-c (history flows; reconcile every
-        observed cross-origin request against the Receipts, `hf.co` hops matching a
-        `huggingface.co` record, `OPTIONS` preflights paired with a POST) on Chromium
-        and Firefox.
-  - [ ] Copy: landing page + README egress claims (wording table in the Phase 2 plan,
-        awaiting approval).
+- [x] **Phase 2b** — chat-history UI + Receipts + e2e (`830ed48`, `7dd2306`, `b1339ef`,
+      `ca947ac`), deployed to a Pages **preview only**: `https://phase2.pocketrag.pages.dev`
+      (`41d6f8c8`). Step-b and step-c (Chromium + Firefox) green; every observed request
+      reconciled to a Receipt row.
+- [ ] **Production Pages deploy** — awaiting approval. Production still runs `8c992a01`,
+      which sends grounded answers as in-session `history` and records no answer egress.
+      Rollback target once deployed: `8c992a01-829a-4b8c-9a05-60d5c07d85e8` via the Pages
+      API `.../deployments/8c992a01-829a-4b8c-9a05-60d5c07d85e8/rollback`.
+- [ ] Copy: landing page + README egress claims (wording table in the Phase 2 plan,
+      awaiting approval; not committed).
+- [ ] Not verified yet: real CORS preflights (none observed under route mocks); the
+      `quota` banner with a real `QuotaExceededError` in a browser (Chromium's quota
+      override had no effect; simulated for the screenshot); Safari/WebKit.
+- [ ] e2e: root-cause the live `/models` hang on the long-lived route-mocked page (worked
+      around with a route-free tab).
   - [ ] OpenRouter router ids (`openrouter/auto`): the echo repeats the requested id;
         the actual model is only in OpenRouter's response `model` field (not read).
 - [ ] Deferred (decide later): branching UI (edit / regenerate / sibling switcher — the

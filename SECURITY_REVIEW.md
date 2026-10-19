@@ -514,10 +514,31 @@ to" host, is **the Worker's own report** of what it did — the browser can't ob
 hop to the provider — and the client drops a malformed one (`parseServedBy`). Live check
 against `483afdc9`: one shared-tier `/answer` → `200`, `"provider":"gemini","model":"gemini-3.5-flash-lite"`.
 
-**Not verified:** the in-browser path from a worker `egress` message to the main-thread
-session log (unit-tested with a stubbed `fetch`; the e2e proves only that downloads still
-work through the wrapper — Phase 2b's Receipts e2e will read it back from the UI); Firefox
-and Safari runs of the egress change.
+**Phase 2b update (2026-10-19, Pages preview `41d6f8c8` only; production Pages NOT
+redeployed — still `8c992a01`).** The Receipts UI renders each turn's persisted egress and
+the session log. `e2e/step-c-csp.cjs` now reconciles every cross-origin request the browser
+made against the Receipt / This-session rows read off the DOM (`data-host`,
+`data-final-host`); local `wrangler pages dev`, 15 flows:
+
+| | Chromium (WASM) | Firefox |
+|---|---|---|
+| Observed requests (redirect chains counted once) | 25 (4 `huggingface.co` → `*.hf.co` chains) | 25 (4 chains) |
+| Ledger rows in the DOM | 25, of which 14 recorded inside the embedding worker | 25, 14 from the worker |
+| Matched / unmatched / ledger rows not observed | 25 / 0 / 0 | 25 / 0 / 0 |
+| CORS preflights observed | 0 | 0 |
+| Unexpected CSP violations | 0 | 0 |
+
+That closes the earlier gap: **the worker → main-thread egress path is now verified in a
+real browser** (the worker's download records reach the This-session DOM and match the
+network requests). Playwright's Firefox does surface the dedicated worker's requests too.
+
+**Not verified:** CORS preflights — with the Worker route-mocked, Playwright surfaced no
+`OPTIONS` requests on either browser, so the preflight pairing check ran but had nothing
+to pair; real preflights against the live Worker are not observed by any test. Firefox's
+worker-side CSP *reports* remain unobservable (§7). Safari/WebKit: unverified. The `quota`
+and `blocked` storage banners were only screenshotted with simulated triggers (Chromium's
+quota override had no effect here; `blocked` can't occur at history v1); their store
+handling is unit-tested.
 
 **Verdict: PASS, with the listed gaps.**
 
@@ -535,7 +556,7 @@ and Safari runs of the egress change.
 | 5 | CORS & origin validation | PASS | none |
 | 6 | Client-supplied data reaching a provider without revalidation | PASS | none |
 | 7 | Content-Security-Policy & security headers (Step C) | **ENFORCED — PASS, with listed gaps** | production `8c992a01`; ORT bytes not integrity-checked, Safari unverified, Firefox worker reports unobservable, no production violation collection |
-| 8 | Egress ledger visibility, chat history at rest (Phase 1, 2a) | **PASS, with listed gaps** | Worker echo live (`483afdc9`); history/egress frontend not deployed; CORS preflights and navigations not recorded; navigations/WebRTC outside CSP; history plaintext at rest; worker→log path not browser-verified |
+| 8 | Egress ledger visibility, chat history at rest (Phase 1, 2a, 2b) | **PASS, with listed gaps** | Worker echo live (`483afdc9`); history + Receipts UI on a Pages preview only (production not redeployed); every observed request reconciled to a ledger row on Chromium and Firefox; CORS preflights not recorded and not observed under mocks; navigations/WebRTC outside CSP; history plaintext at rest; Safari unverified |
 
 **Status: audit complete, both gaps found this session are fixed, verified, and
 committed (`9ace2ff`).** Nothing outstanding from the approved plan. Re-confirmed

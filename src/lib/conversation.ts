@@ -22,8 +22,8 @@ export function buildRetrievalQuery(previousQuestion: string | null, question: s
 // Turns form a tree through parentId: editing or regenerating a turn adds a sibling under
 // the same parent, and a conversation shows one root-to-leaf path at a time.
 
-// How many prior turns go upstream as `history`. Same value as QueryPanel's
-// SENT_HISTORY_TURNS, which keeps its own copy until QueryPanel moves onto chatStore.
+// How many prior turns go upstream as `history` (the Worker re-caps to MAX_HISTORY_TURNS
+// regardless — worker/src/validate.ts).
 export const SENT_HISTORY_TURNS = 3
 
 type TreeTurn = Pick<TurnRecord, 'id' | 'parentId' | 'createdAt'>
