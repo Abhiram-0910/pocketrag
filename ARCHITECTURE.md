@@ -36,7 +36,10 @@ pocketrag/
 │   │                          # diagramImageSetting.ts, webSearchSetting.ts,
 │   │                          # landingVisitSetting.ts), export (pdfExport.ts)
 │   ├── store/                # documentStore.ts (Zustand)
-│   └── workers/              # embedding.worker.ts, backend.ts, embedding.types.ts
+│   └── workers/              # embedding.worker.ts, backend.ts, embedding.types.ts,
+│                              # ortPin.ts (pinned ONNX Runtime version + jsDelivr path)
+├── public/                   # favicon, self-hosted fonts, _headers (CSP + security headers)
+├── e2e/                      # Manual Playwright checks (global install, not a dependency)
 ├── worker/                   # Cloudflare Worker — separate npm project, separate deploy
 │   └── src/                  # index.ts, validate.ts, prompt.ts, labels.ts, grounding.ts,
 │                              # rateLimit.ts, cors.ts, discord.ts,
@@ -80,6 +83,9 @@ pocketrag/
 | `src/lib/errorTaxonomy.ts` | Maps every failure (rate-limit, provider-unavailable, network, corrupt-pdf, webgpu-unsupported, unknown) to a severity + plain-language message |
 | `src/lib/apiError.ts` | `WorkerRequestError` + `parseWorkerErrorResponse` (status-gated `resetAt` / `code` / `source`), `FAILURE_CODES` (parity-tested against `worker/src/failureCodes.ts`), `failureAction()` |
 | `e2e/step-b-failures.cjs` | Manual Playwright run (global install, not a dependency) against `vite preview`, route-mocked: each failure code's banner, action, focus target, and live-region placement |
+| `e2e/step-c-csp.cjs` | Manual Playwright run against any server that applies `public/_headers` (`wrangler pages dev`, a preview, or production): 12 app flows with Worker calls mocked, CSP reports read off the `report-uri` request; exits 1 on any violation except the allowlisted Gemini-widget `<style>` |
+| `public/_headers` | Cloudflare Pages response headers: the enforced CSP (defined once, under `/*`) and the other security headers — see Key Architectural Decisions (Step C) |
+| `src/workers/ortPin.ts` | The pinned ONNX Runtime version, its jsDelivr `dist/` path (must equal `_headers`' `connect-src` entry), and the recorded sha384 of each runtime file; `ortPin.test.ts` keeps all of it in step with `node_modules` and `_headers` |
 | `src/lib/diagramHeuristic.ts`, `src/lib/pageRender.ts`, `src/lib/sessionFiles.ts` | Diagram-aware Q&A (Milestone 10): lexical diagram-likely detection, on-demand page-image rendering, and the session-only (never persisted) raw-`File` cache page rendering needs |
 | `src/lib/diagramImageSetting.ts`, `src/lib/webSearchSetting.ts`, `src/lib/landingVisitSetting.ts` | Opt-in localStorage flags (diagram image sending, Gemini web-search grounding, landing-page-seen) — all default OFF/unset, same read-once-at-mount pattern |
 | `src/lib/ocrRequest.ts` | Client-side call to the Worker's `/ocr` endpoint for Notes-tab transcription |
@@ -310,10 +316,11 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
   upload matches how the Worker was already deployed — one tool, one pattern, no
   GitHub integration to set up for a project this size.
 - **`scripts/check-bundle-size.mjs` build-time guard, not a WASM-shrinking fix:**
-  see Known Technical Debt below — checked exact numbers against actual Cloudflare
-  docs rather than assuming "under the limit" was good enough, then chose the
-  lower-risk mitigation (loud build failure before the real cap) over a
-  higher-risk, unverified binary swap.
+  checked exact numbers against actual Cloudflare docs rather than assuming "under
+  the limit" was good enough, then chose the lower-risk mitigation (loud build failure
+  before the real cap) over a higher-risk, unverified binary swap. Step C later found
+  that the 22.48 MiB wasm it was guarding was never fetched at runtime and stopped
+  emitting it (see the Step C entry); the guard stays as a backstop for any asset.
 - **Provider failures are classified, not passed through (Step A, `85a925d`).**
   `worker/src/index.ts`'s `classify()` turns a `ProviderError` (status + sanitized
   provider code + scrubbed message) into one of four codes, and the client gets a
@@ -359,6 +366,58 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
   placeholder and no key config, so Search stays disabled until the user picks. No
   provider's list order is a safe default (OpenAI/OpenRouter/Grok are unordered or
   include models that can't answer; Anthropic's newest-first would pick the priciest).
+- **Enforced Content-Security-Policy (Step C, `2146f71` + `41931e3`, production
+  `8c992a01`).** `public/_headers` sends one policy under `/*`. Every source below was
+  measured, not assumed: a Playwright run of every flow under a deliberately strict
+  report-only policy logged each request and each violation (including the ones raised
+  inside the workers, which only reach `report-uri`), then the final policy was run
+  report-only on a preview, enforced on the preview, then enforced in production.
+  - `default-src 'none'` — everything not listed below is refused.
+  - `script-src 'self' 'wasm-unsafe-eval' blob:` — `'self'` for the bundles and both
+    workers; `'wasm-unsafe-eval'` because ONNX Runtime compiles its wasm (measured
+    `wasm-eval` violation); `blob:` because transformers.js fetches ORT's `.mjs` and
+    imports it from a `blob:` URL (`loadWasmFactory`). No `'unsafe-inline'`/`'unsafe-eval'`:
+    `dist/` has no inline script and no `eval`/`new Function`.
+  - `style-src 'self'` — Tailwind is a static file and the app sets no `style`
+    attributes. Kept strict deliberately: React mirrors the BYOK API key into the
+    input's `value` *attribute*, so injected CSS (e.g. `input[value^="sk-a"]` with a
+    background URL) could leak it; strict `style-src` plus `img-src`/`font-src`
+    `'self'` closes that path. The only report is Chromium flagging the Gemini
+    search-suggestions widget's leading `<style>` while DOMPurify parses it — which
+    DOMPurify then drops anyway, so nothing renders differently.
+  - `img-src 'self'` (the favicon is the app's only image), `font-src 'self'`
+    (self-hosted Inter), `worker-src 'self'` (the embedding and pdf.js workers are
+    same-origin URL workers; no `blob:` workers).
+  - `connect-src` — the Worker origin; `https://huggingface.co` plus `https://*.hf.co`
+    (model files redirect to Hugging Face's CDN, e.g. `us.aws.cdn.hf.co`; removing it
+    breaks embedding, and the violation report only names the pre-redirect
+    `huggingface.co` URL); `https://*.huggingface.co` as a hedge for Hugging Face's
+    older LFS CDN; and jsDelivr restricted to the exact ORT version path
+    `https://cdn.jsdelivr.net/npm/onnxruntime-web@<ORT_VERSION>/dist/` (from
+    `src/workers/ortPin.ts`). No `'self'`: the app makes no same-origin fetch.
+  - `object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
+    and `report-uri /__csp-report` (a path nothing serves; it exists so the e2e can
+    read reports — production violations are not collected).
+  - Other headers: `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` (replacing
+    Pages' default `strict-origin-when-cross-origin`; nothing reads the Referer),
+    `Permissions-Policy` denying camera/mic/geolocation/payment/usb/serial/hid/midi/
+    display-capture/browsing-topics, `Cross-Origin-Opener-Policy: same-origin`, and
+    `! Access-Control-Allow-Origin` removing Pages' default `*` (nothing of ours is
+    loaded cross-origin). `X-Content-Type-Options: nosniff` is Pages' default.
+  - No COEP: cross-origin isolation (and with it threaded wasm) is a separate
+    experiment, not part of this policy; COOP alone doesn't isolate the page, so ORT
+    still runs single-threaded on the WASM path.
+  - The CSP is defined exactly once: Pages comma-joins a header set by two matching
+    rules, which for CSP would mean two policies enforced together.
+- **ONNX Runtime stays on jsDelivr, at a pinned path (Step C).** transformers.js sets
+  onnxruntime-web's `wasmPaths` to jsDelivr itself. Self-hosting was rejected: today's
+  asyncify wasm (22.48 MiB) would fit, but transformers.js 4.3.x brings ORT 1.31 whose
+  asyncify wasm is 25.62 MiB — over Pages' 25 MiB per-file cap — so self-hosting would
+  block every future upgrade. Instead `vite.config.ts` resolves onnxruntime-web with the
+  `onnxruntime-web-use-extern-wasm` export condition, which drops the bundle entry's
+  `new URL()` fallback that made Vite emit an unused 22.48 MiB wasm into `dist/` (the
+  largest `dist/` file is now pdf.js's 2.12 MiB worker). The jsDelivr files are not
+  integrity-checked at runtime — see SECURITY_REVIEW.md §7 for why SRI was dropped.
 
 ---
 
@@ -414,17 +473,11 @@ directly reachable from here now.
 ---
 
 ## Known Technical Debt
-- [ ] `embedding.worker.ts` bundles onnxruntime-web's WASM runtime (22.47 MiB) —
-      already loaded lazily (separate chunk, fetched only when the Worker is first
-      used, not at page load), but the file itself is large: 10.1% headroom under
-      Cloudflare Pages' 25 MiB per-file hard limit. Investigated forcing a smaller
-      onnxruntime-web variant (13/14 MiB alternatives exist) — deferred deliberately,
-      not a shortcut: the smaller variants may lack async interop our dual
-      WebGPU/WASM pipeline needs, and onnxruntime-web's published bundle hardcodes
-      the variant choice rather than exposing a safe switch. `scripts/check-bundle-size.mjs`
-      (build-time guard, fails at 24 MiB) is the interim mitigation — it makes a
-      future onnxruntime-web version bump fail loudly at build time instead of
-      silently breaking a deploy, but doesn't reduce the size itself.
+- [x] ~~`embedding.worker.ts` bundles onnxruntime-web's WASM runtime (22.47 MiB)~~ —
+      resolved in Step C: that file was emitted into `dist/` but never fetched
+      (transformers.js loads ORT from jsDelivr), and the extern-wasm resolve condition
+      now stops emitting it. Remaining size risk moved to upgrades: transformers.js
+      4.3.x's ORT wasm (25.62 MiB) can't be self-hosted on Pages, hence the exact pin.
 - [ ] `resolveBackend()`'s `webgpu` and `wasm-failed` states are unit-tested with a
       mocked GPU but have not been exercised against real WebGPU hardware (this dev
       sandbox has no GPU) — re-verify when real hardware is available.

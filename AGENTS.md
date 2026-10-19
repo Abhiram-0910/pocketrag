@@ -73,6 +73,27 @@ provider error text; the UI shows it verbatim with a per-code action (Step B). 6
   copy in `src/lib/apiError.ts` (plus a `failureAction` case). The frontend never
   imports Worker code; `src/lib/failureCodes.test.ts` fails if the two drift.
 
+## Standing Rules — CSP and the ONNX Runtime pin (Step C, `2146f71` / `41931e3`)
+
+- **Bumping `@huggingface/transformers` or `onnxruntime-web` means updating BOTH**
+  `src/workers/ortPin.ts` (`ORT_VERSION` + the recorded sha384 table) and the jsDelivr
+  path in `public/_headers`' `connect-src`. `src/workers/ortPin.test.ts` fails if the
+  installed version, the table, or the header drift apart.
+- **transformers.js stays pinned exactly** (no caret). 4.3.x brings an ORT whose
+  asyncify wasm is 25.62 MiB — over Pages' 25 MiB per-file cap — and a caret range lets
+  `npm audit fix` or a lockfile-less install pull it in.
+- **The CSP is defined exactly once, under `/*` in `public/_headers`.** Pages
+  comma-joins a header set by two matching rules, which for CSP means two policies.
+- **Never add `'unsafe-inline'` or `'unsafe-eval'`.** `style-src 'self'` is what keeps
+  injected CSS from reading the API key React mirrors into the input's `value`
+  attribute. A new external host goes into the narrowest directive, with the
+  measurement that justifies it recorded in ARCHITECTURE.md (Step C).
+- **Tailwind v4 scans every non-ignored file for class names.** Keep third-party
+  markup in fixtures (e2e/, test data) out of the build with `@source not` in
+  `src/index.css` — the Gemini widget fixture's `class="container"` once added
+  Tailwind's `.container` utility to the production CSS. After a build, `dist/`'s CSS
+  hash should only change when app styles change.
+
 ---
 
 ## Session Log

@@ -368,6 +368,63 @@ the fake key or a planted prompt marker in any response.
 
 ---
 
+## 7. Content-Security-Policy and security headers (Step C, 2026-10-19)
+
+Commits `047a197` (DOMPurify 3.4.17, transformers.js pinned to exactly 4.2.0),
+`2146f71` (report-only CSP + headers, ORT path pin, CSP e2e), `41931e3` (enforce).
+Rolled out report-only on a Pages preview, then enforced on the preview
+(`733f90e8`), then enforced in production (`8c992a01`; rollback target `f7043c66`).
+The policy and the measurement behind each directive are in ARCHITECTURE.md (Step C).
+
+**Claim:** the enforced CSP blocks exfiltration to unlisted hosts, injected inline
+script, remote images and framing, without breaking any app flow.
+
+**Method:** `e2e/step-c-csp.cjs` (12 flows, Worker calls mocked, reports read off the
+`report-uri` request) on the preview and in production, plus attack controls run from
+the page context (Chromium).
+
+| Control | Preview (enforced, `733f90e8`) | Production (`8c992a01`) |
+|---|---|---|
+| (a) `fetch('https://example.com')` | rejected (`TypeError: Failed to fetch`); report `connect-src` blocked `https://example.com/` | same |
+| (b) `fetch` to the Worker origin | 200 (mocked) | live: BYOK OpenAI with a fake key → real Worker 502 `key_rejected`, "Check your key" banner, focus to the key input |
+| (c) inline `<script>` setting `window.__pwned` | not executed (`undefined`); report `script-src-elem` `inline` | same |
+| (d) `<img src="https://example.com/x.png">` | not loaded; report `img-src`; request failed `csp` | not run |
+| (e) framed from a second origin | refused; report `frame-ancestors`; frame ends on `chrome-error://chromewebdata/` | not run |
+| e2e, Chromium (WASM) | 12/12 flows, 0 unexpected violations | 12/12, 0 unexpected |
+| e2e, Chromium (WebGPU via SwiftShader) | 12/12, 0 unexpected | not run |
+| e2e, Firefox 153 | 12/12, 0 unexpected | 12/12, 0 unexpected |
+
+The only allowlisted report is Chromium's `style-src-elem` for the Gemini
+search-suggestions widget's leading `<style>`, raised while DOMPurify parses it;
+DOMPurify drops that `<style>` anyway, so nothing renders differently.
+
+**Not protected / not verified:**
+- **ONNX Runtime bytes on jsDelivr are not integrity-checked at runtime.** SRI was
+  implemented and dropped: with a corrupted hash, onnxruntime-web re-fetched the
+  `.wasm` through `XMLHttpRequest` and re-imported the `.mjs` with `import()`, and
+  neither can carry a hash — embedding still completed in 3 of 4 corrupted-hash cases
+  (only a corrupted `.mjs` under the enforced CSP failed, because `script-src` blocks
+  the cross-origin import). A compromised file at the pinned jsDelivr path would run
+  in the embedding worker with this origin's privileges (including IndexedDB); the
+  enforced `connect-src` limits where it could send data to our Worker, Hugging Face,
+  and that same jsDelivr path.
+- **Safari/WebKit: unverified.** Playwright's WebKit needs system libraries not
+  installed here. Safari also loads a different ORT pair (`ort-wasm-simd-threaded.{mjs,wasm}`).
+- **Firefox worker-side violations are unobservable.** Firefox does enforce the
+  policy inside the worker (a deliberately strict policy broke embedding there), but
+  its worker reports never surface to Playwright, so Firefox's "0 violations" covers
+  the page only.
+- **No production violation collection.** `report-uri /__csp-report` points at a path
+  nothing serves; real users' violations are not recorded.
+
+**Verdict: ENFORCED, PASS** for the controls above, with the gaps listed.
+
+DOMPurify 3.4.17 also landed here: the two advisories against 3.4.14
+(GHSA-p98j-92pf-mc4p, GHSA-6688-9rhm-gjv2) affect only `IN_PLACE` mode, which this app
+doesn't use (`sanitize(string)`); bumped anyway.
+
+---
+
 ## Summary
 
 | # | Area | Verdict | Action |
@@ -379,6 +436,7 @@ the fake key or a planted prompt marker in any response.
 | 4 | Dependency/supply-chain | **GAP FOUND — FIXED** (`pdfjs-dist` 6.1.200 → 6.2.108) | upgraded, full test suite green, live-verified end to end with a real PDF including diagram detection; 6 other findings triaged not-reachable |
 | 5 | CORS & origin validation | PASS | none |
 | 6 | Client-supplied data reaching a provider without revalidation | PASS | none |
+| 7 | Content-Security-Policy & security headers (Step C) | **ENFORCED — PASS, with listed gaps** | production `8c992a01`; ORT bytes not integrity-checked, Safari unverified, Firefox worker reports unobservable, no production violation collection |
 
 **Status: audit complete, both gaps found this session are fixed, verified, and
 committed (`9ace2ff`).** Nothing outstanding from the approved plan. Re-confirmed

@@ -22,8 +22,36 @@ Read this at the start of every session to know what to work on next.
       `FAILURE_CODES` parity test; `e2e/step-b-failures.cjs`. Commit `32e3d09`; Pages
       deployed as `f7043c66` (rollback target: `869ce49a`). See ARCHITECTURE.md (Step B
       entries) and AGENTS.md (Step B standing rules).
-- [ ] **Step C** — Pages `_headers` with a CSP (report-only first, then enforce);
-      serve ONNX wasm locally via `wasmPaths`; narrow `img-src`; bump DOMPurify.
+- [x] **Step C** — enforced CSP + security headers in `public/_headers` (report-only
+      on a preview, then enforced on the preview, then production); `img-src 'self'`;
+      DOMPurify 3.4.17 + memoized sanitizer; transformers.js pinned to exactly 4.2.0;
+      ONNX Runtime kept on jsDelivr at a pinned path (self-hosting rejected: 4.3.x wasm
+      is 25.62 MiB > Pages' cap) and the unused 22.48 MiB wasm no longer emitted; SRI
+      tried and dropped (can't fail closed); `e2e/step-c-csp.cjs`. Commits `047a197`,
+      `2146f71`, `41931e3`; production deployed as `8c992a01` (rollback target:
+      `f7043c66`, via the Pages API `.../deployments/f7043c66-…/rollback`). See
+      ARCHITECTURE.md (Step C), SECURITY_REVIEW.md §7, AGENTS.md (Step C rules).
+- [ ] Toolchain bump commit: root vitest >= 4.1.11 plus a vite/postcss/nanoid/
+      source-map-js refresh; worker wrangler 4.151.1 (+ vitest >= 4.1.11). Compare
+      `wrangler deploy --dry-run` output before/after; don't redeploy the Worker unless
+      it changed.
+- [ ] Pin the Hugging Face model revisions to the observed commit SHAs instead of
+      `main`: `751bff37182d3f1213fa05d7196b954e230abad9` (Xenova/all-MiniLM-L6-v2,
+      embedder), `b84c4fa7efd7b4801931e75773c940f002a494f5`
+      (Xenova/ms-marco-MiniLM-L-2-v2, reranker).
+- [ ] Gemini search suggestions: resolve the ToS question before promoting web search
+      (terms say not to modify Search Suggestions without written permission, and
+      DOMPurify currently strips Google's leading `<style>`, so the widget renders
+      unstyled); also stop persisting `searchEntryPointHtml`.
+- [ ] Friendly error when the embedding model/runtime download fails — Firefox showed
+      the raw `can't access property "tokenizer_class", s is undefined` as the document
+      status when a model host was blocked.
+- [ ] Safari verification (Playwright WebKit needs system libraries here; Safari loads
+      a different ORT pair, `ort-wasm-simd-threaded.{mjs,wasm}`).
+- [ ] Optional: make the API-key input uncontrolled, so React stops mirroring the key
+      into the `value` attribute.
+- [ ] COOP/COEP cross-origin-isolation experiment for threaded wasm (our cross-origin
+      loads are all CORS fetches, so COEP may not break them — untested).
 - [ ] **Step D** — server-issued `retryAfterSeconds` + `date` on rate-limit responses
       and a live countdown in the UI, for our own buckets only (not provider limits).
   - [ ] Decide whether shared-tier provider failures refund the per-IP quota: today
@@ -33,6 +61,10 @@ Read this at the start of every session to know what to work on next.
       route, status, latency, per answer)
 - [ ] Shared-Gemini free-tier data-use disclosure in the UI and README (free-tier
       Gemini may use inputs to improve Google's products).
+  - [ ] Reword the landing copy and README egress claims at the same time: more than
+        "small passages" leaves the browser (question, conversation history, opt-in
+        page images, OCR files), Hugging Face and jsDelivr see the user's IP when the
+        model/runtime downloads, and the shared tier goes through our Worker.
 - [ ] Discord: create an Admin server and rotate the webhook (the old webhook is
       compromised), `wrangler secret put DISCORD_WEBHOOK_URL`, then do a positive
       check that a real alert arrives.
@@ -43,8 +75,11 @@ Read this at the start of every session to know what to work on next.
 - [ ] Privacy and terms pages.
 - [ ] IndexedDB export (documents + conversations).
 - [ ] Client-side error monitoring.
+  - [ ] Client-side CSP violation collection (today `report-uri /__csp-report` points at
+        nothing, so production violations aren't recorded).
 - [ ] CI + E2E tests.
-  - [ ] Wire `e2e/step-b-failures.cjs` into CI when the CI item lands.
+  - [ ] Wire `e2e/step-b-failures.cjs` and `e2e/step-c-csp.cjs` into CI when the CI
+        item lands.
 - [ ] a11y: `aria-live` for the answer itself and other status updates (failure
       banners done in Step B), autofill handling. (API-key input label done in Step B.)
 - [ ] Verify the `aria-live` announcements with a real screen reader (NVDA/Narrator);
