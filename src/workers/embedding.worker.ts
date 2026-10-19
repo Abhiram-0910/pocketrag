@@ -1,6 +1,7 @@
 import {
   AutoModelForSequenceClassification,
   AutoTokenizer,
+  env,
   pipeline,
   type FeatureExtractionPipeline,
   type PreTrainedModel,
@@ -8,6 +9,7 @@ import {
   type ProgressInfo,
 } from '@huggingface/transformers'
 import { chunkText, type Tokenizer } from '../lib/chunker'
+import { downloadFetch } from '../lib/egress'
 import { resolveBackend } from './backend'
 import type { EmbeddedChunk, RerankCandidate, RerankScore, WorkerRequest, WorkerResponse } from './embedding.types'
 
@@ -34,6 +36,10 @@ const ctx = self as unknown as WorkerScope
 function post(message: WorkerResponse) {
   ctx.postMessage(message)
 }
+
+// Every model file and ONNX Runtime download goes through egress.ts, which reports it to
+// the main thread's egress log. egress.bypass.test.ts checks this assignment stays.
+env.fetch = downloadFetch(RERANK_MODEL_ID, (record) => post({ type: 'egress', record }))
 
 function onModelProgress(info: ProgressInfo) {
   if (info.status === 'progress_total') {

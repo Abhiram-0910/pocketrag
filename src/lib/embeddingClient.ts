@@ -1,9 +1,17 @@
 import type { PageInput, RerankCandidate, WorkerRequest, WorkerResponse } from '../workers/embedding.types'
+import { recordEgress } from './egress'
 
 let worker: Worker | null = null
 
 function getWorker(): Worker {
-  worker ??= new Worker(new URL('../workers/embedding.worker.ts', import.meta.url), { type: 'module' })
+  if (!worker) {
+    worker = new Worker(new URL('../workers/embedding.worker.ts', import.meta.url), { type: 'module' })
+    // The onmessage handlers below are swapped on every call, so egress records get their
+    // own listener — a download can land while any of them is installed.
+    worker.addEventListener('message', (event: MessageEvent<WorkerResponse>) => {
+      if (event.data.type === 'egress') recordEgress(event.data.record)
+    })
+  }
   return worker
 }
 
@@ -45,6 +53,7 @@ export function embedDocument(pages: PageInput[], handlers: EmbedDocumentHandler
         handlers.onError(msg)
         break
       case 'query-embedding':
+      case 'egress':
         break
     }
   }
@@ -84,6 +93,7 @@ export function embedQuery(text: string, handlers: EmbedQueryHandlers): void {
       case 'chunked':
       case 'embed-progress':
       case 'result':
+      case 'egress':
         break
     }
   }
@@ -124,6 +134,7 @@ export function rerankChunks(query: string, candidates: RerankCandidate[], handl
       case 'embed-progress':
       case 'result':
       case 'query-embedding':
+      case 'egress':
         break
     }
   }

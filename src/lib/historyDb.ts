@@ -1,6 +1,7 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
 import type { DocLabel } from './answerRequest'
 import type { FailureCode, FailureSource } from './apiError'
+import type { EgressRecord } from './egress'
 import type { ErrorTaxonomyType } from './errorTaxonomy'
 import type { Provider } from './models'
 import { requestPersistOnce } from './db'
@@ -66,6 +67,9 @@ export interface TurnRecord {
   // here on purpose: the Gemini terms don't let us store them.
   webGrounded: boolean
   failure: TurnFailure | null
+  // Every request made for this turn, retries included — what the Receipts view will show.
+  // Always [] for now: records go to egress.ts's session log until the UI is wired.
+  egress: EgressRecord[]
 }
 
 interface HistoryDB extends DBSchema {

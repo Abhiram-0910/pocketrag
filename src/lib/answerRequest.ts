@@ -1,4 +1,5 @@
 import { WorkerRequestError, parseWorkerErrorResponse, type FailureCode, type FailureSource } from './apiError'
+import { egressFetch } from './egress'
 
 // The Worker owns Doc N labelling and returns this label→documentId map so the client
 // can resolve real titles for the legend/Sources (documentId → fileName lives locally).
@@ -160,15 +161,17 @@ export const fetchAnswerFromWorker: FetchAnswerFn = async (
   if (!API_BASE_URL) {
     throw new Error('Answer generation is not configured yet (VITE_API_BASE_URL is unset).')
   }
-  const res = await fetch(`${API_BASE_URL}/answer`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    // `image`/`enableWebSearch` are undefined whenever their respective gate didn't
-    // fire — JSON.stringify drops an undefined-valued key entirely, so the Worker sees
-    // no field at all on an ordinary request, not an explicit `null`/`false`.
-    body: JSON.stringify({ question, chunks, ...keyConfig, docLabels, history, image, enableWebSearch }),
-    signal,
-  })
+  const res = await egressFetch(
+    `${API_BASE_URL}/answer`,
+    {
+      // `image`/`enableWebSearch` are undefined whenever their respective gate didn't
+      // fire — JSON.stringify drops an undefined-valued key entirely, so the Worker sees
+      // no field at all on an ordinary request, not an explicit `null`/`false`.
+      json: { question, chunks, ...keyConfig, docLabels, history, image, enableWebSearch },
+      signal,
+    },
+    { purpose: 'answer', upstream: keyConfig.keySource === 'own' ? keyConfig.provider : 'gemini' },
+  )
   if (!res.ok) {
     throw await parseWorkerErrorResponse(res, `Answer request failed (${res.status}).`)
   }

@@ -26,6 +26,7 @@ export function makeTurn(overrides: Partial<TurnRecord> = {}): TurnRecord {
     webSearchRequested: false,
     webGrounded: false,
     failure: null,
+    egress: [],
     ...overrides,
   }
 }

@@ -1,4 +1,5 @@
 import { parseWorkerErrorResponse } from './apiError'
+import { egressFetch } from './egress'
 
 export interface ModelInfo {
   id: string
@@ -38,11 +39,7 @@ export const fetchModelsFromWorker: FetchModelsFn = async (provider, apiKey) => 
   if (!API_BASE_URL) {
     throw new Error('Model listing is not configured yet (VITE_API_BASE_URL is unset).')
   }
-  const res = await fetch(`${API_BASE_URL}/models`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ provider, apiKey }),
-  })
+  const res = await egressFetch(`${API_BASE_URL}/models`, { json: { provider, apiKey } }, { purpose: 'models', upstream: provider })
   if (!res.ok) {
     throw await parseWorkerErrorResponse(res, `Model list request failed (${res.status}).`)
   }

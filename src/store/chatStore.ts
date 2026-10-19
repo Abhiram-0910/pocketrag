@@ -165,6 +165,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         webSearchRequested: input.webSearchRequested,
         webGrounded: false,
         failure: null,
+        egress: [],
       }
       if (!existing) set({ turns: [] })
       // Written as 'pending' before the request goes out, so a tab that dies mid-request

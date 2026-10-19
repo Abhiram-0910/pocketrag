@@ -1,4 +1,5 @@
 import { WorkerRequestError, parseWorkerErrorResponse } from './apiError'
+import { egressFetch } from './egress'
 
 export interface OcrResponse {
   text: string
@@ -45,12 +46,8 @@ export const fetchOcrFromWorker: FetchOcrFn = async (mimeType, base64, signal) =
   if (!API_BASE_URL) {
     throw new Error('OCR is not configured yet (VITE_API_BASE_URL is unset).')
   }
-  const res = await fetch(`${API_BASE_URL}/ocr`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mimeType, base64 }),
-    signal,
-  })
+  // /ocr always uses the shared Gemini key (worker/src/index.ts).
+  const res = await egressFetch(`${API_BASE_URL}/ocr`, { json: { mimeType, base64 }, signal }, { purpose: 'ocr', upstream: 'gemini' })
   if (!res.ok) {
     throw await parseWorkerErrorResponse(res, `OCR request failed (${res.status}).`)
   }

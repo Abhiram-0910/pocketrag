@@ -1,3 +1,5 @@
+import type { EgressRecord } from '../lib/egress'
+
 export type BackendState = 'webgpu' | 'wasm-unavailable' | 'wasm-failed'
 
 export interface EmbeddedChunk {
@@ -40,3 +42,5 @@ export type WorkerResponse =
   | { type: 'query-embedding'; embedding: number[] }
   | { type: 'rerank-result'; scores: RerankScore[] }
   | { type: 'error'; message: string }
+  // A model/runtime download, for the main thread's egress log (embeddingClient.ts).
+  | { type: 'egress'; record: EgressRecord }
