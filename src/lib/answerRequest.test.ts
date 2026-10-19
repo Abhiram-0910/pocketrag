@@ -57,6 +57,7 @@ describe('attemptAnswer', () => {
       [],
       undefined,
       undefined,
+      undefined,
     )
   })
 
@@ -75,6 +76,7 @@ describe('attemptAnswer', () => {
       [],
       undefined,
       undefined,
+      undefined,
     )
 
     await attemptAnswer(fetchAnswer, 'q', CHUNKS, SHARED_CONFIG, 60_000)
@@ -85,6 +87,7 @@ describe('attemptAnswer', () => {
       expect.any(AbortSignal),
       [],
       [],
+      undefined,
       undefined,
       undefined,
     )
@@ -106,6 +109,7 @@ describe('attemptAnswer', () => {
       history,
       undefined,
       undefined,
+      undefined,
     )
 
     await attemptAnswer(fetchAnswer, 'q', CHUNKS, SHARED_CONFIG, 60_000)
@@ -116,6 +120,7 @@ describe('attemptAnswer', () => {
       expect.any(AbortSignal),
       [],
       [],
+      undefined,
       undefined,
       undefined,
     )
@@ -137,6 +142,7 @@ describe('attemptAnswer', () => {
       [],
       image,
       undefined,
+      undefined,
     )
 
     await attemptAnswer(fetchAnswer, 'q', CHUNKS, SHARED_CONFIG, 60_000)
@@ -147,6 +153,7 @@ describe('attemptAnswer', () => {
       expect.any(AbortSignal),
       [],
       [],
+      undefined,
       undefined,
       undefined,
     )
@@ -168,6 +175,7 @@ describe('attemptAnswer', () => {
         [],
         undefined,
         true,
+        undefined,
       )
 
       await attemptAnswer(fetchAnswer, 'q', CHUNKS, SHARED_CONFIG, 60_000)
@@ -178,6 +186,7 @@ describe('attemptAnswer', () => {
         expect.any(AbortSignal),
         [],
         [],
+        undefined,
         undefined,
         undefined,
       )

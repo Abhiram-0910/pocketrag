@@ -34,6 +34,9 @@ export interface EgressRecord {
   upstream: Provider | null
   method: string
   categories: PayloadCategory[]
+  // How many of each, for plain-language receipts ("3 passages"): array length, distinct
+  // document ids across chunks and docLabels, 1 for anything else.
+  counts: Partial<Record<PayloadCategory, number>>
   // UTF-8 bytes of the request body. Headers aren't counted (BYOK's key is in the body).
   bytesSent: number
   startedAt: number
@@ -75,13 +78,23 @@ function isEmpty(value: unknown): boolean {
   return value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0)
 }
 
+function documentIdsIn(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item) => (typeof item?.documentId === 'string' ? [item.documentId] : []))
+}
+
 /**
- * The data categories a JSON request body carries. A key not in KEY_CATEGORIES throws
- * outside production, so a new request field can't ship without a ledger decision; in
- * production the request still goes out and the record says 'uncategorized'.
+ * The data categories a JSON request body carries, and how many of each. A key not in
+ * KEY_CATEGORIES throws outside production, so a new request field can't ship without a
+ * ledger decision; in production the request still goes out and the record says
+ * 'uncategorized'.
  */
-export function payloadCategories(body: Record<string, unknown>, mode: string = import.meta.env.MODE): PayloadCategory[] {
-  const found = new Set<PayloadCategory>()
+export function describePayload(
+  body: Record<string, unknown>,
+  mode: string = import.meta.env.MODE,
+): Pick<EgressRecord, 'categories' | 'counts'> {
+  const counts: Partial<Record<PayloadCategory, number>> = {}
+  const documentIds = new Set<string>()
   for (const [key, value] of Object.entries(body)) {
     // JSON.stringify drops undefined-valued keys, so they're never sent.
     if (value === undefined) continue
@@ -89,23 +102,65 @@ export function payloadCategories(body: Record<string, unknown>, mode: string = 
       if (mode !== 'production') {
         throw new Error(`Request body key "${key}" has no payload category — add it to KEY_CATEGORIES in src/lib/egress.ts.`)
       }
-      found.add('uncategorized')
+      counts.uncategorized = (counts.uncategorized ?? 0) + 1
       continue
     }
-    if (!isEmpty(value)) for (const category of KEY_CATEGORIES[key]) found.add(category)
+    if (isEmpty(value)) continue
+    for (const category of KEY_CATEGORIES[key]) {
+      if (category === 'document-ids') documentIdsIn(value).forEach((id) => documentIds.add(id))
+      else counts[category] = (counts[category] ?? 0) + (Array.isArray(value) ? value.length : 1)
+    }
   }
-  return found.size === 0 ? ['none'] : CATEGORY_ORDER.filter((c) => found.has(c))
+  if (documentIds.size > 0) counts['document-ids'] = documentIds.size
+  const categories = CATEGORY_ORDER.filter((c) => counts[c] !== undefined)
+  return categories.length === 0 ? { categories: ['none'], counts: {} } : { categories, counts }
 }
 
-// The session's egress so far. ponytail: memory only and unbounded; per-turn persistence
-// (TurnRecord.egress) is wired with the history UI.
-export const sessionEgressLog: EgressRecord[] = []
+/** Just the categories — see describePayload. */
+export function payloadCategories(body: Record<string, unknown>, mode: string = import.meta.env.MODE): PayloadCategory[] {
+  return describePayload(body, mode).categories
+}
 
-/** Adds a record, or replaces the earlier copy of the same request (in-flight → settled). */
+// The session log: everything that isn't one answer's request — model and runtime
+// downloads, OCR uploads, model-list checks. Memory only (gone after a reload). Capped so a
+// long session can't grow it without bound; the oldest record goes first, and `dropped`
+// says how many went.
+export const MAX_SESSION_EGRESS = 200
+
+export interface SessionEgress {
+  records: readonly EgressRecord[]
+  dropped: number
+}
+
+// Replaced (never mutated) on every change, so it works as a useSyncExternalStore snapshot.
+let session: SessionEgress = { records: [], dropped: 0 }
+const listeners = new Set<() => void>()
+
+export function getSessionEgress(): SessionEgress {
+  return session
+}
+
+export function subscribeSessionEgress(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => listeners.delete(listener)
+}
+
+/**
+ * Adds a record to the session log, or replaces the earlier copy of the same request
+ * (in-flight → settled). An 'answer' record never goes here: answers are recorded on their
+ * turn (chatStore.appendEgress, via egressFetch's onRecord), so nothing is listed twice.
+ */
 export function recordEgress(record: EgressRecord): void {
-  const i = sessionEgressLog.findIndex((r) => r.id === record.id)
-  if (i === -1) sessionEgressLog.push(record)
-  else sessionEgressLog[i] = record
+  if (record.purpose === 'answer') return
+  const i = session.records.findIndex((r) => r.id === record.id)
+  let records = i === -1 ? [...session.records, record] : session.records.map((r, j) => (j === i ? record : r))
+  let dropped = session.dropped
+  if (records.length > MAX_SESSION_EGRESS) {
+    dropped += records.length - MAX_SESSION_EGRESS
+    records = records.slice(-MAX_SESSION_EGRESS)
+  }
+  session = { records, dropped }
+  for (const listener of listeners) listener()
 }
 
 function isAbortError(err: unknown): boolean {
@@ -140,7 +195,7 @@ function newRecord(
   via: EgressRecord['via'],
   upstream: Provider | null,
   method: string,
-  categories: PayloadCategory[],
+  payload: Pick<EgressRecord, 'categories' | 'counts'>,
   bytesSent: number,
 ): EgressRecord {
   return {
@@ -151,7 +206,7 @@ function newRecord(
     via,
     upstream,
     method,
-    categories,
+    ...payload,
     bytesSent,
     startedAt: Date.now(),
     durationMs: null,
@@ -160,11 +215,13 @@ function newRecord(
   }
 }
 
-/** A JSON POST to our Worker, recorded in the session egress log. */
+/** A JSON POST to our Worker. Each record goes to `onRecord` — a turn's appendEgress for
+ * an answer — or by default to the session log. */
 export function egressFetch(
   url: string,
   init: { json: Record<string, unknown>; signal?: AbortSignal },
   meta: { purpose: 'answer' | 'models' | 'ocr'; upstream: Provider },
+  onRecord: (record: EgressRecord) => void = recordEgress,
 ): Promise<Response> {
   const body = JSON.stringify(init.json)
   const record = newRecord(
@@ -173,10 +230,10 @@ export function egressFetch(
     'worker',
     meta.upstream,
     'POST',
-    payloadCategories(init.json),
+    describePayload(init.json),
     new TextEncoder().encode(body).byteLength,
   )
-  return send(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal: init.signal }, record, recordEgress)
+  return send(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal: init.signal }, record, onRecord)
 }
 
 /**
@@ -193,7 +250,7 @@ export function downloadFetch(rerankModelId: string, emit: (record: EgressRecord
         : url.includes(rerankModelId)
           ? 'rerank-model-download'
           : 'embed-model-download'
-    const record = newRecord(url, purpose, 'direct', null, init?.method ?? 'GET', ['none'], 0)
+    const record = newRecord(url, purpose, 'direct', null, init?.method ?? 'GET', { categories: ['none'], counts: {} }, 0)
     return send(url, init ?? {}, record, emit)
   }
 }

@@ -35,6 +35,7 @@ const egressRecord = (id: string, overrides: Partial<EgressRecord> = {}): Egress
   upstream: 'gemini',
   method: 'POST',
   categories: ['question'],
+  counts: { question: 1 },
   bytesSent: 10,
   startedAt: 1,
   durationMs: null,

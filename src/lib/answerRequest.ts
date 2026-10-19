@@ -1,5 +1,5 @@
 import { WorkerRequestError, parseWorkerErrorResponse, type FailureCode, type FailureSource } from './apiError'
-import { egressFetch } from './egress'
+import { egressFetch, type EgressRecord } from './egress'
 
 // The Worker owns Doc N labelling and returns this label→documentId map so the client
 // can resolve real titles for the legend/Sources (documentId → fileName lives locally).
@@ -79,6 +79,9 @@ export type FetchAnswerFn = (
   // shared tier and for BYOK requests that chose provider 'gemini', rejected outright
   // for every other BYOK provider.
   enableWebSearch?: boolean,
+  // Where this request's egress records go — the turn's chatStore.appendEgress. Without
+  // it an answer request isn't recorded (egress.ts keeps answers out of the session log).
+  onEgress?: (record: EgressRecord) => void,
 ) => Promise<AnswerResponse>
 
 export type AnswerAttemptResult =
@@ -115,6 +118,7 @@ export async function attemptAnswer(
   history: HistoryTurn[] = [],
   image?: ImageAttachment,
   enableWebSearch?: boolean,
+  onEgress?: (record: EgressRecord) => void,
 ): Promise<AnswerAttemptResult> {
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
@@ -125,7 +129,7 @@ export async function attemptAnswer(
       docLabels: responseDocLabels,
       webSources,
       searchEntryPointHtml,
-    } = await fetchAnswer(question, chunks, keyConfig, controller.signal, docLabels, history, image, enableWebSearch)
+    } = await fetchAnswer(question, chunks, keyConfig, controller.signal, docLabels, history, image, enableWebSearch, onEgress)
     return { outcome: 'success', answer, groundingWarning, docLabels: responseDocLabels, webSources, searchEntryPointHtml }
   } catch (err) {
     if (isAbortError(err)) return { outcome: 'timeout' }
@@ -157,6 +161,7 @@ export const fetchAnswerFromWorker: FetchAnswerFn = async (
   history,
   image,
   enableWebSearch,
+  onEgress,
 ) => {
   if (!API_BASE_URL) {
     throw new Error('Answer generation is not configured yet (VITE_API_BASE_URL is unset).')
@@ -171,6 +176,7 @@ export const fetchAnswerFromWorker: FetchAnswerFn = async (
       signal,
     },
     { purpose: 'answer', upstream: keyConfig.keySource === 'own' ? keyConfig.provider : 'gemini' },
+    onEgress,
   )
   if (!res.ok) {
     throw await parseWorkerErrorResponse(res, `Answer request failed (${res.status}).`)

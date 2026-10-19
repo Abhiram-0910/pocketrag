@@ -8,6 +8,17 @@ export interface ModelInfo {
 
 export type Provider = 'gemini' | 'openai' | 'anthropic' | 'grok' | 'openrouter'
 
+// Where our Worker forwards each provider's requests — the host of that provider file's
+// API_BASE in worker/src/providers/. Receipts show it as "Then to"; it's the Worker's
+// contract, not something the browser can observe.
+export const PROVIDER_HOSTS: Record<Provider, string> = {
+  gemini: 'generativelanguage.googleapis.com',
+  openai: 'api.openai.com',
+  anthropic: 'api.anthropic.com',
+  grok: 'api.x.ai',
+  openrouter: 'openrouter.ai',
+}
+
 // Gemini's /models list isn't filtered by "available to new users" — it can return a
 // since-deprecated model (e.g. gemini-2.5-flash) ahead of working ones, so picking
 // fetched[0] blindly can auto-select a model that 404s on the very first real question.
