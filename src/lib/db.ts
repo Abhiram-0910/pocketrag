@@ -43,6 +43,11 @@ function getDB(): Promise<IDBPDatabase<PocketRagDB>> {
       db.createObjectStore('documents', { keyPath: 'id' })
       db.createObjectStore('chunks', { keyPath: 'id' }).createIndex('documentId', 'documentId')
     },
+  }).catch((err: unknown) => {
+    // Don't cache a failed open (e.g. a VersionError, or storage blocked): the next call
+    // retries instead of every DB call failing for the rest of the session.
+    dbPromise = null
+    throw err
   })
   return dbPromise
 }
@@ -51,11 +56,11 @@ let persistRequested = false
 
 /**
  * Ask the browser to exempt this origin from storage eviction — once per session, on the
- * first successful save. Best-effort: guarded and fire-and-forget so it never throws or
+ * first successful save (of a document here, or of a chat turn in historyDb.ts). Best-effort: guarded and fire-and-forget so it never throws or
  * blocks a save (and stays inert in the Node test env, where navigator.storage is absent).
  * See ARCHITECTURE.md for why (Safari's 7-day proactive eviction, not raw quota).
  */
-function requestPersistOnce(): void {
+export function requestPersistOnce(): void {
   if (persistRequested) return
   persistRequested = true
   if (typeof navigator !== 'undefined' && navigator.storage?.persist) {
