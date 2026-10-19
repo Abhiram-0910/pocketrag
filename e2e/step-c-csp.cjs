@@ -17,6 +17,13 @@
 // real-world embedded-fonts PDF defaults to one Debian/Ubuntu ships (REAL_PDF overrides).
 // Exits 1 if any flow fails, or any violation other than the allowlisted Gemini-widget
 // <style> (see the end of main) or any CSP-blocked request is seen.
+//
+// Phase 2b: chat-history flows, and a reconciliation of every cross-origin request the
+// browser made against the Receipts / This-session rows the app rendered (data-host /
+// data-final-host), read off the DOM — which also proves the embedding worker's download
+// records reach the main thread. A redirect chain (huggingface.co → *.hf.co) is one
+// request; a CORS preflight (OPTIONS) must pair with a POST. Any request with no ledger
+// row fails the run.
 const pw = require('playwright')
 const fs = require('fs')
 const os = require('os')
@@ -98,9 +105,20 @@ async function main() {
   const pageErrors = []
   const ortUrls = new Set()
   const answerBodies = []
+  // Every answer carries the Search Suggestions widget (→ grounded) unless a flow turns it off.
+  let groundedAnswers = true
+  // Cross-origin requests as the browser made them, and the ledger rows the app rendered.
+  const ownOrigin = new URL(APP).origin
+  const observed = []
+  const ledger = new Map()
   let phase = 'start'
   page.on('pageerror', (e) => pageErrors.push(`${phase}: ${String(e).slice(0, 200)}`))
   context.on('request', (r) => r.url().startsWith(ORT_CDN) && ortUrls.add(r.url().split('/').pop()))
+  context.on('request', (r) => {
+    const url = r.url()
+    if (!/^https?:/.test(url) || new URL(url).origin === ownOrigin) return
+    observed.push({ phase, req: r })
+  })
   context.on('requestfailed', (r) => {
     const why = r.failure()?.errorText || ''
     if (/csp|blocked/i.test(why)) cspBlocked.push(`${phase}: ${r.url().slice(0, 100)} ${why}`)
@@ -123,14 +141,30 @@ async function main() {
     const json = (body) => route.fulfill({ status: 200, headers: { ...CORS, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     if (req.url().endsWith('/answer')) {
       const body = JSON.parse(req.postData() || '{}')
-      answerBodies.push({ phase, hasImage: Boolean(body.image) })
+      answerBodies.push({ phase, hasImage: Boolean(body.image), history: body.history || [] })
       const ids = [...new Set((body.chunks || []).map((c) => c.documentId))]
-      return json({ answer: `Mocked answer for ${phase} (Doc 1, page 1).`, groundingWarning: false, docLabels: ids.map((d, i) => ({ label: i + 1, documentId: d })), searchEntryPointHtml: WIDGET })
+      return json({
+        answer: `Mocked answer #${answerBodies.length} for ${phase} (Doc 1, page 1).`,
+        groundingWarning: false,
+        docLabels: ids.map((d, i) => ({ label: i + 1, documentId: d })),
+        ...(groundedAnswers ? { searchEntryPointHtml: WIDGET } : {}),
+      })
     }
     if (req.url().endsWith('/models')) return json({ models: [{ id: 'model-a', displayName: 'model-a' }] })
     if (req.url().endsWith('/ocr')) return json({ text: 'Transcribed notes: the Krebs cycle runs in the mitochondrial matrix.' })
     return route.abort()
   })
+
+  // Union of every Receipt / This-session row rendered so far, by egress id (a later read of
+  // the same request replaces the in-flight copy). Taken before anything that removes rows
+  // from the DOM: a reload (the session log is memory-only) or a delete.
+  async function snapshotLedger() {
+    const rows = await page
+      .locator('[data-egress-id]')
+      .evaluateAll((els) => els.map((el) => ({ id: el.getAttribute('data-egress-id'), host: el.getAttribute('data-host'), finalHost: el.getAttribute('data-final-host') })))
+      .catch(() => [])
+    for (const row of rows) ledger.set(row.id, row)
+  }
 
   const flows = []
   async function flow(name, fn) {
@@ -142,6 +176,7 @@ async function main() {
     } catch (e) {
       flows.push({ flow: name, ok: false, error: String(e).split('\n')[0].slice(0, 200) })
     }
+    await snapshotLedger()
     console.error(`${flows.at(-1).ok ? 'ok  ' : 'FAIL'} ${name} (${Math.round((Date.now() - started) / 1000)}s)`)
   }
 
@@ -152,10 +187,14 @@ async function main() {
       .waitFor({ timeout: 300_000 })
   const queryInput = page.locator('form input[type="text"]')
   async function ask(question, expectPhase) {
+    const n = answerBodies.length + 1
     await queryInput.fill(question)
     await page.getByRole('button', { name: 'Search' }).click()
-    await page.getByText(`Mocked answer for ${expectPhase}`).first().waitFor({ timeout: 300_000 })
+    await page.getByText(`Mocked answer #${n} for ${expectPhase}`).first().waitFor({ timeout: 300_000 })
+    return `Mocked answer #${n} for ${expectPhase}`
   }
+  const focusedId = () => page.evaluate(() => document.activeElement?.id || document.activeElement?.tagName)
+  const nav = page.locator('nav[aria-labelledby="conversations-heading"]')
   const upload = (file) => page.setInputFiles('input[type="file"][accept="application/pdf"]', file)
 
   await flow('landing', async () => {
@@ -204,7 +243,7 @@ async function main() {
   })
   await flow('BYOK models fetch (mocked)', async () => {
     await page.getByLabel('Use your own API key').check()
-    await page.getByLabel('Provider').selectOption('openai')
+    await page.getByLabel('Provider', { exact: true }).selectOption('openai')
     await page.getByLabel('OpenAI API key').fill('sk-fake-stepc-0000000000')
     await page.getByRole('button', { name: 'Fetch models' }).click()
     await page.getByLabel('Model', { exact: true }).waitFor()
@@ -219,23 +258,136 @@ async function main() {
     }
     await page.getByRole('button', { name: 'Documents', exact: true }).click()
   })
+  await flow('history excludes grounded answers (QueryPanel)', async () => {
+    await docButton('eight-pages.pdf').click()
+    groundedAnswers = true
+    const grounded = await ask('Which organelle makes ATP?', 'history excludes grounded answers (QueryPanel)')
+    groundedAnswers = false
+    const plain = await ask('Which organelle builds proteins?', 'history excludes grounded answers (QueryPanel)')
+    await ask('And which one stores DNA?', 'history excludes grounded answers (QueryPanel)')
+    // The request after a grounded answer, and the one after a plain answer.
+    const [afterGrounded, afterPlain] = answerBodies.slice(-2).map((b) => b.history.map((h) => h.answer))
+    const isAnswer = (prefix) => (a) => a.startsWith(`${prefix} (`)
+    if (afterGrounded.some(isAnswer(grounded))) throw new Error('the grounded answer was sent as history')
+    if (!afterPlain.some(isAnswer(plain))) throw new Error('the plain answer was not sent as history')
+    if (afterPlain.some(isAnswer(grounded))) throw new Error('the grounded answer was sent as history (third request)')
+    if ([...afterGrounded, ...afterPlain].some((a) => a.includes('searchEntryPoint'))) throw new Error('widget HTML in history')
+    return { historyAfterGrounded: afterGrounded.length, historyAfterPlain: afterPlain.length }
+  })
   await flow('reload + restore', async () => {
     await page.reload()
     const getStarted = page.getByRole('button', { name: 'Get started' })
     if (await getStarted.isVisible().catch(() => false)) await getStarted.click()
     for (const name of ['eight-pages.pdf', 'chart-report.pdf']) await waitReady(name)
+    // The most recent conversation reopens on its own: its last (plain) answer is back,
+    // and grounded answers before it are placeholders — they were never stored.
+    await page.getByText('And which one stores DNA?').first().waitFor({ timeout: 30_000 })
+    const notRetained = await page.getByText('Web-grounded answer, not retained (Google terms)').count()
+    if (notRetained === 0) throw new Error('no restored grounded turn shown as not retained')
     await docButton('eight-pages.pdf').click()
     await ask('Where is DNA stored?', 'reload + restore')
+    return { restoredNotRetained: notRetained }
   })
   await flow('document deletion', async () => {
     await page.getByRole('button', { name: 'Delete eight-pages.pdf' }).click()
+    const confirm = page.getByText(/chat turns? cites? this document and keeps? (its|their) answers?/).first()
+    await confirm.waitFor({ timeout: 10_000 })
+    const confirmText = (await confirm.innerText()).split('\n')[0]
     await page.getByRole('button', { name: 'Delete', exact: true }).click()
     await docButton('eight-pages.pdf').waitFor({ state: 'detached', timeout: 30_000 })
+    return { confirmText }
+  })
+  await flow('history: new, delete one, delete all (focus)', async () => {
+    await docButton('chart-report.pdf').click()
+    await snapshotLedger()
+    await nav.getByRole('button', { name: 'New conversation' }).click()
+    const afterNew = await focusedId()
+    if (afterNew !== 'question-input') throw new Error(`after New: focus on ${afterNew}`)
+    await ask('What does Figure 1 show?', 'history: new, delete one, delete all (focus)')
+    const rows = nav.locator('li > div > button:not([aria-label])')
+    const before = await rows.count()
+    if (before < 2) throw new Error(`expected 2+ conversations, saw ${before}`)
+    // Delete the newest (first) row: focus lands on the row that took its place.
+    await snapshotLedger()
+    const second = (await rows.nth(1).innerText()).split('\n')[0]
+    await nav.locator('li').first().getByRole('button', { name: /^Delete conversation:/ }).click()
+    await nav.getByRole('button', { name: 'Delete', exact: true }).click()
+    await page.waitForFunction((n) => document.querySelectorAll('nav li > div > button:not([aria-label])').length === n, before - 1)
+    const afterOne = await page.evaluate(() => document.activeElement?.closest('li')?.innerText.split('\n')[0] ?? document.activeElement?.id)
+    if (afterOne !== second) throw new Error(`after delete-one: focus on ${afterOne}, expected ${second}`)
+    await nav.getByRole('button', { name: 'Delete all chat history' }).click()
+    await nav.getByRole('button', { name: 'Delete', exact: true }).click()
+    await nav.getByText('No saved conversations yet.').waitFor()
+    const afterAll = await focusedId()
+    if (afterAll !== 'conversations-heading') throw new Error(`after delete-all: focus on ${afterAll}`)
+    return { conversationsBefore: before, focusAfterNew: afterNew, focusAfterDeleteOne: 'next row', focusAfterDeleteAll: afterAll }
+  })
+  await flow('delete everything (model cache kept)', async () => {
+    await ask('What does the chart compare?', 'delete everything (model cache kept)')
+    await snapshotLedger()
+    await nav.getByRole('button', { name: 'Delete everything' }).click()
+    await nav.getByRole('button', { name: 'Delete', exact: true }).click()
+    await nav.getByText('Deleted all documents and chat history.').waitFor()
+    const focus = await focusedId()
+    if (focus !== 'conversations-heading') throw new Error(`after delete everything: focus on ${focus}`)
+    if (await page.locator('li button', { hasText: /\.(pdf|png)/ }).count()) throw new Error('documents still listed')
+    // Reload so the worker has to load the model again: from the Cache API, not the network.
+    await page.reload()
+    const mark = observed.length
+    await upload(path.join(dir, 'eight-pages.pdf'))
+    await waitReady('eight-pages.pdf')
+    const modelBytes = observed.slice(mark).filter(({ req }) => /\.(onnx|wasm)(\?|$)/.test(req.url()))
+    if (modelBytes.length) throw new Error(`model/runtime re-downloaded: ${modelBytes.map(({ req }) => req.url()).join(', ')}`)
+    return { focusAfter: focus, modelOrRuntimeRequestsAfterReload: modelBytes.length }
   })
 
   phase = 'settle'
   await page.waitForTimeout(2000)
+  await snapshotLedger()
   await browser.close()
+
+  // Reconciliation: every observed request (a redirect chain counts once, from its head)
+  // must match a ledger row with the same host and the chain's final host; each OPTIONS
+  // preflight must pair with an observed POST to the same URL.
+  const heads = observed.filter(({ req }) => !req.redirectedFrom())
+  const finalOf = (req) => {
+    let r = req
+    while (r.redirectedTo()) r = r.redirectedTo()
+    return r
+  }
+  const unused = [...ledger.values()]
+  const unmatched = []
+  const posts = new Map()
+  for (const { req } of heads) if (req.method() === 'POST') posts.set(req.url(), (posts.get(req.url()) || 0) + 1)
+  const preflights = heads.filter(({ req }) => req.method() === 'OPTIONS')
+  const unpairedPreflights = []
+  for (const { req, phase: p } of preflights) {
+    const left = posts.get(req.url()) || 0
+    if (left === 0) unpairedPreflights.push(`${p}: OPTIONS ${req.url()}`)
+  }
+  let redirectChains = 0
+  for (const { req, phase: p } of heads) {
+    if (req.method() === 'OPTIONS') continue
+    const host = new URL(req.url()).host
+    const finalHost = new URL(finalOf(req).url()).host
+    if (finalHost !== host) redirectChains++
+    let i = unused.findIndex((r) => r.host === host && r.finalHost === finalHost)
+    if (i === -1) i = unused.findIndex((r) => r.host === host && r.finalHost === '')
+    if (i === -1) unmatched.push(`${p}: ${req.method()} ${req.url().slice(0, 120)} (final host ${finalHost})`)
+    else unused.splice(i, 1)
+  }
+  const downloadRows = [...ledger.values()].filter((r) => /huggingface\.co|hf\.co|cdn\.jsdelivr\.net/.test(r.host)).length
+  const reconciliation = {
+    observedRequests: heads.length - preflights.length,
+    redirectChains,
+    preflights: preflights.length,
+    ledgerRows: ledger.size,
+    workerDownloadRowsInDom: downloadRows,
+    matched: heads.length - preflights.length - unmatched.length,
+    unmatched,
+    unpairedPreflights,
+    ledgerRowsNotObserved: unused.length,
+  }
 
   // The one known violation: DOMPurify (in the main bundle) parsing the mocked Gemini
   // widget, whose leading <style> trips style-src-elem in Chromium (Firefox doesn't flag
@@ -250,8 +402,8 @@ async function main() {
   const byDirective = {}
   for (const r of unexpected) byDirective[r.directive || 'unparsed'] = (byDirective[r.directive || 'unparsed'] || 0) + 1
   const failed = flows.filter((f) => !f.ok)
-  console.log(JSON.stringify({ browser: BROWSER, webgpu: WEBGPU, app: APP, flows, ortFromJsDelivr: [...ortUrls], allowlistedWidgetStyle: allowlisted.length, violationsByDirective: byDirective, unexpected, cspBlocked, pageErrors }, null, 2))
-  if (failed.length || unexpected.length || cspBlocked.length) process.exit(1)
+  console.log(JSON.stringify({ browser: BROWSER, webgpu: WEBGPU, app: APP, flows, ortFromJsDelivr: [...ortUrls], allowlistedWidgetStyle: allowlisted.length, violationsByDirective: byDirective, unexpected, cspBlocked, pageErrors, reconciliation }, null, 2))
+  if (failed.length || unexpected.length || cspBlocked.length || unmatched.length || unpairedPreflights.length) process.exit(1)
 }
 
 main().catch((e) => {
