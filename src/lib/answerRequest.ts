@@ -1,5 +1,6 @@
 import { WorkerRequestError, parseWorkerErrorResponse, type FailureCode, type FailureSource } from './apiError'
 import { egressFetch, type EgressRecord } from './egress'
+import { PROVIDERS, type Provider } from './models'
 
 // The Worker owns Doc N labelling and returns this label→documentId map so the client
 // can resolve real titles for the legend/Sources (documentId → fileName lives locally).
@@ -36,6 +37,10 @@ export interface AnswerResponse {
   // requires displaying this HTML/CSS "Search Suggestions" widget alongside any grounded
   // result shown to an end user — present only when Gemini actually searched.
   searchEntryPointHtml?: string
+  // The provider and model that answered, echoed by the Worker (absent from an older
+  // Worker, or dropped by fetchAnswerFromWorker when malformed).
+  provider?: Provider
+  model?: string
 }
 
 // Milestone 10 Phase B: at most one page image per request, produced by
@@ -92,6 +97,8 @@ export type AnswerAttemptResult =
       docLabels: DocLabel[]
       webSources?: WebSource[]
       searchEntryPointHtml?: string
+      provider?: Provider
+      model?: string
     }
   | { outcome: 'timeout' }
   | {
@@ -129,8 +136,19 @@ export async function attemptAnswer(
       docLabels: responseDocLabels,
       webSources,
       searchEntryPointHtml,
+      provider,
+      model,
     } = await fetchAnswer(question, chunks, keyConfig, controller.signal, docLabels, history, image, enableWebSearch, onEgress)
-    return { outcome: 'success', answer, groundingWarning, docLabels: responseDocLabels, webSources, searchEntryPointHtml }
+    return {
+      outcome: 'success',
+      answer,
+      groundingWarning,
+      docLabels: responseDocLabels,
+      webSources,
+      searchEntryPointHtml,
+      provider,
+      model,
+    }
   } catch (err) {
     if (isAbortError(err)) return { outcome: 'timeout' }
     if (err instanceof WorkerRequestError) {
@@ -147,6 +165,18 @@ export async function attemptAnswer(
   } finally {
     clearTimeout(timeoutId)
   }
+}
+
+// Same character set as the Worker's MODEL_PATTERN (worker/src/validate.ts).
+const ECHOED_MODEL_PATTERN = /^[A-Za-z0-9._:/~-]{1,128}$/
+
+/** The Worker's {provider, model} echo, kept only when both are well-formed — it ends up
+ * on a receipt, so a malformed value is dropped rather than shown. */
+export function parseServedBy(data: { provider?: unknown; model?: unknown }): { provider: Provider; model: string } | undefined {
+  const { provider, model } = data
+  if (!(PROVIDERS as readonly unknown[]).includes(provider)) return undefined
+  if (typeof model !== 'string' || !ECHOED_MODEL_PATTERN.test(model)) return undefined
+  return { provider: provider as Provider, model }
 }
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL
@@ -181,5 +211,7 @@ export const fetchAnswerFromWorker: FetchAnswerFn = async (
   if (!res.ok) {
     throw await parseWorkerErrorResponse(res, `Answer request failed (${res.status}).`)
   }
-  return (await res.json()) as AnswerResponse
+  const data = (await res.json()) as AnswerResponse
+  const servedBy = parseServedBy(data)
+  return { ...data, provider: servedBy?.provider, model: servedBy?.model }
 }

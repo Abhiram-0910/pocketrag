@@ -6,7 +6,10 @@ export interface ModelInfo {
   displayName: string
 }
 
-export type Provider = 'gemini' | 'openai' | 'anthropic' | 'grok' | 'openrouter'
+// Same list as the Worker's SUPPORTED_PROVIDERS (worker/src/validate.ts) — providers.test.ts
+// fails if they drift. A runtime list so the Worker's provider echo can be checked.
+export const PROVIDERS = ['gemini', 'openai', 'anthropic', 'grok', 'openrouter'] as const
+export type Provider = (typeof PROVIDERS)[number]
 
 // Where our Worker forwards each provider's requests — the host of that provider file's
 // API_BASE in worker/src/providers/. Receipts show it as "Then to"; it's the Worker's
