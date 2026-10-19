@@ -104,3 +104,20 @@ export async function deleteDocument(documentId: string): Promise<void> {
   ])
   await tx.done
 }
+
+/** The chunks with these ids, in the same order; ids no longer stored (document deleted) are skipped. */
+export async function getChunksByIds(ids: string[]): Promise<ChunkRecord[]> {
+  const db = await getDB()
+  const tx = db.transaction('chunks')
+  const chunks = await Promise.all(ids.map((id) => tx.store.get(id)))
+  await tx.done
+  return chunks.filter((chunk): chunk is ChunkRecord => chunk !== undefined)
+}
+
+/** Clears every document and chunk in one transaction ("Delete everything"). Chat history
+ * is a separate database (historyDb.ts) — the caller clears it too. */
+export async function deleteAllDocuments(): Promise<void> {
+  const db = await getDB()
+  const tx = db.transaction(['documents', 'chunks'], 'readwrite')
+  await Promise.all([tx.objectStore('documents').clear(), tx.objectStore('chunks').clear(), tx.done])
+}

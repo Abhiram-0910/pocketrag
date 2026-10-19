@@ -189,3 +189,10 @@ export async function sweepInterruptedTurns(now: number = Date.now()): Promise<n
   await Promise.all([...stale.map((t) => tx.store.put({ ...t, status: 'interrupted' })), tx.done])
   return stale.length
 }
+
+/** How many turns cite a document — for the document-delete confirm. */
+export async function countTurnsCiting(documentId: string): Promise<number> {
+  const db = await getDB()
+  // ponytail: full scan of every turn; a multiEntry index on citation documentIds needs a v2 migration if this gets slow.
+  return (await db.getAll('turns')).filter((t) => t.citations.some((c) => c.documentId === documentId)).length
+}

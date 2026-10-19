@@ -1,5 +1,6 @@
 import { create } from 'zustand'
-import type { DocLabel, HistoryTurn } from '../lib/answerRequest'
+import type { DocLabel, HistoryTurn, WebSource } from '../lib/answerRequest'
+import type { EgressRecord } from '../lib/egress'
 import {
   deleteAllHistory,
   deleteConversation,
@@ -47,17 +48,39 @@ export interface TurnRequestContext {
 }
 
 export type TurnOutcome =
-  | { status: 'answered'; answer: string; groundingWarning: boolean; docLabels: DocLabel[]; webGrounded: boolean }
+  | {
+      status: 'answered'
+      answer: string
+      groundingWarning: boolean
+      docLabels: DocLabel[]
+      webGrounded: boolean
+      // From the Worker's echo; absent from an older Worker. Replaces the model recorded
+      // at startTurn (null on the shared tier) when present.
+      model?: string
+      // Grounded results only — kept in groundedSession, never in the turn record.
+      webSources?: WebSource[]
+      searchEntryPointHtml?: string
+    }
   | { status: 'failed'; failure: TurnFailure }
   | { status: 'timed-out' }
+
+// What this session keeps of a grounded result, for display only. Never written to
+// IndexedDB (the Gemini terms — SECURITY_REVIEW.md §1.1). conversationId lets deleting a
+// conversation free its entries even when it isn't the one open.
+export interface GroundedSessionEntry {
+  conversationId: string
+  answer: string
+  webSources?: WebSource[]
+  searchEntryPointHtml?: string
+}
 
 interface ChatState {
   conversations: ConversationRecord[]
   activeConversationId: string | null
   // The active conversation's turns, exactly as stored (a grounded answer is null here).
   turns: TurnRecord[]
-  // Grounded answer text, by turn id — this session only, never written to IndexedDB.
-  groundedText: Map<string, string>
+  // Grounded results by turn id — this session only.
+  groundedSession: Map<string, GroundedSessionEntry>
   storage: HistoryStorageState
   restore: () => Promise<void>
   openConversation: (id: string) => Promise<void>
@@ -65,6 +88,9 @@ interface ChatState {
   startTurn: (input: NewTurn) => Promise<TurnRequestContext>
   retryTurn: (turnId: string) => Promise<void>
   settleTurn: (turnId: string, outcome: TurnOutcome) => Promise<void>
+  // An egress record for this turn's request (egressFetch's onRecord). Upserts by record
+  // id, so the in-flight copy is replaced by the settled one and each retry adds a row.
+  appendEgress: (turnId: string, record: EgressRecord) => Promise<void>
   selectBranch: (turnId: string) => Promise<void>
   deleteConversation: (id: string) => Promise<void>
   deleteAllHistory: () => Promise<void>
@@ -75,34 +101,48 @@ function storageStateFor(err: unknown): HistoryStorageState {
 }
 
 /** A turn's answer to display: stored text, else this session's grounded text, else null. */
-export function answerFor(state: Pick<ChatState, 'groundedText'>, turn: TurnRecord): string | null {
-  return turn.answer ?? state.groundedText.get(turn.id) ?? null
+export function answerFor(state: Pick<ChatState, 'groundedSession'>, turn: TurnRecord): string | null {
+  return turn.answer ?? state.groundedSession.get(turn.id)?.answer ?? null
 }
 
 export const useChatStore = create<ChatState>((set, get) => {
   onHistoryDbEvent((event) => set({ storage: event === 'blocked' ? 'blocked' : 'outdated' }))
 
-  const activeConversation = () => get().conversations.find((c) => c.id === get().activeConversationId) ?? null
+  // Turns with a request in flight, by id — the latest copy, whichever conversation is
+  // open. A request keeps settling (and saving) after the user switches conversations;
+  // `turns` only ever mirrors the open one.
+  const inflight = new Map<string, TurnRecord>()
+
+  const findTurn = (turnId: string) => inflight.get(turnId) ?? get().turns.find((t) => t.id === turnId)
 
   // Updates a turn and its conversation in memory first, then persists. A failed write
-  // only flips `storage` — the in-memory conversation (and the answer on screen) stays.
+  // only flips `storage` — the in-memory conversation (and the answer on screen) stays;
+  // the next successful write clears a quota/unavailable state again.
   async function commit(conversation: ConversationRecord, turn: TurnRecord) {
+    if (inflight.has(turn.id)) inflight.set(turn.id, turn)
     set((s) => ({
       conversations: [conversation, ...s.conversations.filter((c) => c.id !== conversation.id)],
-      activeConversationId: conversation.id,
-      turns: s.turns.some((t) => t.id === turn.id) ? s.turns.map((t) => (t.id === turn.id ? turn : t)) : [...s.turns, turn],
+      turns:
+        turn.conversationId !== s.activeConversationId
+          ? s.turns
+          : s.turns.some((t) => t.id === turn.id)
+            ? s.turns.map((t) => (t.id === turn.id ? turn : t))
+            : [...s.turns, turn],
     }))
     try {
       await saveTurn(conversation, turn)
+      if (get().storage === 'quota' || get().storage === 'unavailable') set({ storage: 'ok' })
     } catch (err) {
       set({ storage: storageStateFor(err) })
     }
   }
 
-  function updateTurn(turnId: string, patch: (turn: TurnRecord) => TurnRecord) {
-    const turn = get().turns.find((t) => t.id === turnId)
-    const conversation = activeConversation()
-    if (!turn || !conversation) throw new Error(`Unknown turn ${turnId}`)
+  // A no-op if the turn or its conversation is gone (deleted while the request was in
+  // flight) — settling must not bring a deleted conversation back.
+  function updateTurn(turnId: string, patch: (turn: TurnRecord) => TurnRecord): Promise<void> {
+    const turn = findTurn(turnId)
+    const conversation = turn && get().conversations.find((c) => c.id === turn.conversationId)
+    if (!turn || !conversation) return Promise.resolve()
     return commit({ ...conversation, updatedAt: Date.now() }, patch(turn))
   }
 
@@ -110,7 +150,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     conversations: [],
     activeConversationId: null,
     turns: [],
-    groundedText: new Map(),
+    groundedSession: new Map(),
     storage: 'ok',
 
     restore: async () => {
@@ -124,7 +164,8 @@ export const useChatStore = create<ChatState>((set, get) => {
 
     openConversation: async (id) => {
       try {
-        const turns = await getTurns(id)
+        // An in-flight turn's in-memory copy may be ahead of its last write.
+        const turns = (await getTurns(id)).map((t) => inflight.get(t.id) ?? t)
         set({ activeConversationId: id, turns })
       } catch (err) {
         set({ storage: storageStateFor(err) })
@@ -135,7 +176,8 @@ export const useChatStore = create<ChatState>((set, get) => {
 
     startTurn: async (input) => {
       const now = Date.now()
-      const existing = activeConversation()
+      const s = get()
+      const existing = s.conversations.find((c) => c.id === s.activeConversationId) ?? null
       const conversation: ConversationRecord = existing ?? {
         id: crypto.randomUUID(),
         title: input.question.slice(0, TITLE_LENGTH),
@@ -144,7 +186,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         activeLeafId: null,
       }
       const parentId = input.parentId === undefined ? conversation.activeLeafId : input.parentId
-      const path = pathTo(existing ? get().turns : [], parentId)
+      const path = pathTo(existing ? s.turns : [], parentId)
       const turn: TurnRecord = {
         id: crypto.randomUUID(),
         conversationId: conversation.id,
@@ -167,7 +209,8 @@ export const useChatStore = create<ChatState>((set, get) => {
         failure: null,
         egress: [],
       }
-      if (!existing) set({ turns: [] })
+      if (!existing) set({ activeConversationId: conversation.id, turns: [] })
+      inflight.set(turn.id, turn)
       // Written as 'pending' before the request goes out, so a tab that dies mid-request
       // still leaves the turn behind (swept to 'interrupted' on a later load).
       await commit({ ...conversation, updatedAt: now, activeLeafId: turn.id }, turn)
@@ -180,14 +223,25 @@ export const useChatStore = create<ChatState>((set, get) => {
     },
 
     // Retry re-sends the same turn (same question, same chunks), so it reuses the record.
-    retryTurn: (turnId) => updateTurn(turnId, (t) => ({ ...t, status: 'pending', failure: null, completedAt: null })),
+    retryTurn: (turnId) => {
+      const turn = findTurn(turnId)
+      if (turn) inflight.set(turnId, turn)
+      return updateTurn(turnId, (t) => ({ ...t, status: 'pending', failure: null, completedAt: null }))
+    },
 
-    settleTurn: (turnId, outcome) => {
+    settleTurn: async (turnId, outcome) => {
       const completedAt = Date.now()
-      if (outcome.status === 'answered' && outcome.webGrounded) {
-        set((s) => ({ groundedText: new Map(s.groundedText).set(turnId, outcome.answer) }))
+      const turn = findTurn(turnId)
+      if (turn && outcome.status === 'answered' && outcome.webGrounded) {
+        const entry: GroundedSessionEntry = {
+          conversationId: turn.conversationId,
+          answer: outcome.answer,
+          webSources: outcome.webSources,
+          searchEntryPointHtml: outcome.searchEntryPointHtml,
+        }
+        set((s) => ({ groundedSession: new Map(s.groundedSession).set(turnId, entry) }))
       }
-      return updateTurn(turnId, (t) => {
+      await updateTurn(turnId, (t) => {
         switch (outcome.status) {
           case 'answered':
             return {
@@ -196,6 +250,7 @@ export const useChatStore = create<ChatState>((set, get) => {
               answer: outcome.webGrounded ? null : outcome.answer,
               groundingWarning: outcome.groundingWarning,
               docLabels: outcome.docLabels,
+              model: outcome.model ?? t.model,
               webGrounded: outcome.webGrounded,
               failure: null,
               completedAt,
@@ -206,13 +261,23 @@ export const useChatStore = create<ChatState>((set, get) => {
             return { ...t, status: 'timed-out', completedAt }
         }
       })
+      inflight.delete(turnId)
     },
 
+    appendEgress: (turnId, record) =>
+      updateTurn(turnId, (t) => ({
+        ...t,
+        egress: t.egress.some((r) => r.id === record.id)
+          ? t.egress.map((r) => (r.id === record.id ? record : r))
+          : [...t.egress, record],
+      })),
+
     selectBranch: async (turnId) => {
-      const conversation = activeConversation()
+      const s = get()
+      const conversation = s.conversations.find((c) => c.id === s.activeConversationId)
       if (!conversation) return
-      const updated = { ...conversation, activeLeafId: latestLeafUnder(get().turns, turnId) }
-      set((s) => ({ conversations: s.conversations.map((c) => (c.id === updated.id ? updated : c)) }))
+      const updated = { ...conversation, activeLeafId: latestLeafUnder(s.turns, turnId) }
+      set((st) => ({ conversations: st.conversations.map((c) => (c.id === updated.id ? updated : c)) }))
       try {
         await saveConversation(updated)
       } catch (err) {
@@ -224,22 +289,24 @@ export const useChatStore = create<ChatState>((set, get) => {
     // something as deleted while it's still on disk.
     deleteConversation: async (id) => {
       await deleteConversation(id)
+      for (const [turnId, turn] of inflight) if (turn.conversationId === id) inflight.delete(turnId)
       set((s) => {
         const active = s.activeConversationId === id
-        const groundedText = new Map(s.groundedText)
-        if (active) for (const t of s.turns) groundedText.delete(t.id)
+        const groundedSession = new Map(s.groundedSession)
+        for (const [turnId, entry] of groundedSession) if (entry.conversationId === id) groundedSession.delete(turnId)
         return {
           conversations: s.conversations.filter((c) => c.id !== id),
           activeConversationId: active ? null : s.activeConversationId,
           turns: active ? [] : s.turns,
-          groundedText,
+          groundedSession,
         }
       })
     },
 
     deleteAllHistory: async () => {
       await deleteAllHistory()
-      set({ conversations: [], activeConversationId: null, turns: [], groundedText: new Map() })
+      inflight.clear()
+      set({ conversations: [], activeConversationId: null, turns: [], groundedSession: new Map() })
     },
   }
 })

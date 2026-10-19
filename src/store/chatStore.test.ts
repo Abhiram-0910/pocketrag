@@ -2,6 +2,7 @@ import 'fake-indexeddb/auto'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it } from 'vitest'
+import type { EgressRecord } from '../lib/egress'
 import { STALE_PENDING_MS, getTurns, saveTurn } from '../lib/historyDb'
 import { makeConversation, makeTurn } from '../lib/historyFixtures'
 import { answerFor, useChatStore, type NewTurn } from './chatStore'
@@ -23,6 +24,23 @@ const answered = (answer: string, webGrounded = false) => ({
   groundingWarning: false,
   docLabels: [{ label: 1, documentId: 'doc-a' }],
   webGrounded,
+})
+
+const egressRecord = (id: string, overrides: Partial<EgressRecord> = {}): EgressRecord => ({
+  id,
+  purpose: 'answer',
+  host: 'worker.test',
+  finalHost: null,
+  via: 'worker',
+  upstream: 'gemini',
+  method: 'POST',
+  categories: ['question'],
+  bytesSent: 10,
+  startedAt: 1,
+  durationMs: null,
+  httpStatus: null,
+  outcome: 'in-flight',
+  ...overrides,
 })
 
 // A page reload: memory gone, everything comes back from IndexedDB.
@@ -154,7 +172,7 @@ describe('chatStore', () => {
     expect(state.conversations.some((c) => c.id === id)).toBe(false)
     expect(state.activeConversationId).toBeNull()
     expect(state.turns).toEqual([])
-    expect(state.groundedText.has(turnId)).toBe(false)
+    expect(state.groundedSession.has(turnId)).toBe(false)
     expect(await getTurns(id)).toEqual([])
   })
 
@@ -166,5 +184,101 @@ describe('chatStore', () => {
     expect(await getTurns(id)).toEqual([])
     await useChatStore.getState().restore()
     expect(useChatStore.getState().conversations).toEqual([])
+  })
+
+  it('settleTurn after a conversation switch persists the turn and leaves the open conversation alone', async () => {
+    const a = await useChatStore.getState().startTurn(newTurn('Question in A'))
+    const conversationA = useChatStore.getState().activeConversationId as string
+    useChatStore.getState().newConversation()
+    const b = await useChatStore.getState().startTurn(newTurn('Question in B'))
+    await useChatStore.getState().settleTurn(b.turnId, answered('Answer in B'))
+    const turnsInB = useChatStore.getState().turns
+
+    await expect(useChatStore.getState().settleTurn(a.turnId, answered('Answer in A'))).resolves.toBeUndefined()
+
+    expect(useChatStore.getState().turns).toEqual(turnsInB)
+    expect((await getTurns(conversationA))[0]).toMatchObject({ id: a.turnId, status: 'answered', answer: 'Answer in A' })
+    await useChatStore.getState().openConversation(conversationA)
+    expect(useChatStore.getState().turns[0]).toMatchObject({ status: 'answered', answer: 'Answer in A' })
+  })
+
+  it('appendEgress persists for a turn whose conversation is no longer open', async () => {
+    const a = await useChatStore.getState().startTurn(newTurn('Q'))
+    const conversationA = useChatStore.getState().activeConversationId as string
+    useChatStore.getState().newConversation()
+
+    await useChatStore.getState().appendEgress(a.turnId, egressRecord('r1', { outcome: 'ok', httpStatus: 200 }))
+
+    expect((await getTurns(conversationA))[0].egress).toEqual([egressRecord('r1', { outcome: 'ok', httpStatus: 200 })])
+  })
+
+  it('appendEgress replaces the in-flight copy with the settled one, and a retry adds its own record', async () => {
+    const { turnId } = await useChatStore.getState().startTurn(newTurn('Q'))
+    await useChatStore.getState().appendEgress(turnId, egressRecord('r1'))
+    await useChatStore.getState().appendEgress(turnId, egressRecord('r1', { outcome: 'http-error', httpStatus: 502 }))
+    await useChatStore.getState().settleTurn(turnId, {
+      status: 'failed',
+      failure: { kind: 'provider-unavailable', message: 'x', httpStatus: 502, code: 'provider_unavailable' },
+    })
+    await useChatStore.getState().retryTurn(turnId)
+    await useChatStore.getState().appendEgress(turnId, egressRecord('r2', { outcome: 'ok', httpStatus: 200 }))
+    await useChatStore.getState().settleTurn(turnId, answered('A'))
+
+    const [stored] = await getTurns(useChatStore.getState().activeConversationId as string)
+    expect(stored.egress.map((r) => [r.id, r.outcome, r.httpStatus])).toEqual([
+      ['r1', 'http-error', 502],
+      ['r2', 'ok', 200],
+    ])
+    expect(stored.status).toBe('answered')
+  })
+
+  it('a conversation deleted mid-request is not brought back when its turn settles', async () => {
+    const { turnId } = await useChatStore.getState().startTurn(newTurn('Q'))
+    const id = useChatStore.getState().activeConversationId as string
+    await useChatStore.getState().deleteConversation(id)
+
+    await useChatStore.getState().appendEgress(turnId, egressRecord('r1'))
+    await useChatStore.getState().settleTurn(turnId, answered('A'))
+
+    expect(await getTurns(id)).toEqual([])
+    await useChatStore.getState().restore()
+    expect(useChatStore.getState().conversations.some((c) => c.id === id)).toBe(false)
+  })
+
+  it('deleting a non-active conversation frees its grounded session entries', async () => {
+    const a = await useChatStore.getState().startTurn(newTurn('Q in A', { webSearchRequested: true }))
+    await useChatStore.getState().settleTurn(a.turnId, answered('Grounded A', true))
+    const conversationA = useChatStore.getState().activeConversationId as string
+    useChatStore.getState().newConversation()
+    const b = await useChatStore.getState().startTurn(newTurn('Q in B', { webSearchRequested: true }))
+    await useChatStore.getState().settleTurn(b.turnId, answered('Grounded B', true))
+
+    await useChatStore.getState().deleteConversation(conversationA)
+
+    const { groundedSession } = useChatStore.getState()
+    expect(groundedSession.has(a.turnId)).toBe(false)
+    expect(groundedSession.get(b.turnId)?.answer).toBe('Grounded B')
+  })
+
+  it('keeps a grounded turn\'s web sources and Search Suggestions in the session map, never in the record', async () => {
+    const { turnId } = await useChatStore.getState().startTurn(newTurn('Q', { tier: 'own', provider: 'gemini', model: 'm' }))
+    await useChatStore.getState().settleTurn(turnId, {
+      ...answered('Grounded result text', true),
+      webSources: [{ uri: 'https://example.com', title: 'Example' }],
+      searchEntryPointHtml: '<div>chips</div>',
+    })
+
+    expect(useChatStore.getState().groundedSession.get(turnId)).toMatchObject({
+      webSources: [{ uri: 'https://example.com', title: 'Example' }],
+      searchEntryPointHtml: '<div>chips</div>',
+    })
+    const [stored] = await getTurns(useChatStore.getState().activeConversationId as string)
+    expect(JSON.stringify(stored)).not.toMatch(/example\.com|chips|Grounded result text/)
+  })
+
+  it("records the Worker-echoed model on settle, replacing the shared tier's null", async () => {
+    const { turnId } = await useChatStore.getState().startTurn(newTurn('Q'))
+    await useChatStore.getState().settleTurn(turnId, { ...answered('A'), model: 'gemini-3.5-flash-lite' })
+    expect((await getTurns(useChatStore.getState().activeConversationId as string))[0].model).toBe('gemini-3.5-flash-lite')
   })
 })

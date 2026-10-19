@@ -44,4 +44,15 @@ describe('chatStore when a history write fails', () => {
     await useChatStore.getState().startTurn(newTurn)
     expect(useChatStore.getState().storage).toBe('unavailable')
   })
+
+  it('a successful write after a quota error sets storage back to ok', async () => {
+    useChatStore.setState(useChatStore.getInitialState())
+    vi.mocked(saveTurn).mockRejectedValueOnce(new DOMException('The quota has been exceeded.', 'QuotaExceededError'))
+    vi.mocked(saveTurn).mockResolvedValue(undefined)
+
+    const { turnId } = await useChatStore.getState().startTurn(newTurn)
+    expect(useChatStore.getState().storage).toBe('quota')
+    await useChatStore.getState().settleTurn(turnId, { status: 'timed-out' })
+    expect(useChatStore.getState().storage).toBe('ok')
+  })
 })

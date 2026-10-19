@@ -5,6 +5,7 @@ import { getAllChunks, getAllDocuments, saveDocument } from './db'
 import {
   HISTORY_DB_VERSION,
   STALE_PENDING_MS,
+  countTurnsCiting,
   deleteAllHistory,
   deleteConversation,
   getConversations,
@@ -92,6 +93,16 @@ describe('historyDb', () => {
     expect(await getTurns('c-del')).toEqual([])
     expect((await getConversations()).some((c) => c.id === 'c-del')).toBe(false)
     expect((await getTurns('c-keep')).map((t) => t.id)).toEqual(['t-keep'])
+  })
+
+  it('countTurnsCiting counts turns with a citation of that document, across conversations', async () => {
+    const cite = (documentId: string) => [{ chunkId: `${documentId}:0`, documentId, page: 1, rank: 0, score: 1 }]
+    await saveTurn(makeConversation({ id: 'c-cite-1' }), makeTurn({ id: 't-cite-1', conversationId: 'c-cite-1', citations: cite('doc-x') }))
+    await saveTurn(makeConversation({ id: 'c-cite-2' }), makeTurn({ id: 't-cite-2', conversationId: 'c-cite-2', citations: [...cite('doc-y'), ...cite('doc-x')] }))
+    await saveTurn(makeConversation({ id: 'c-cite-2' }), makeTurn({ id: 't-cite-3', conversationId: 'c-cite-2', citations: cite('doc-y') }))
+    expect(await countTurnsCiting('doc-x')).toBe(2)
+    expect(await countTurnsCiting('doc-y')).toBe(2)
+    expect(await countTurnsCiting('doc-none')).toBe(0)
   })
 
   it('deleteAllHistory clears every conversation and turn, and leaves documents alone', async () => {
