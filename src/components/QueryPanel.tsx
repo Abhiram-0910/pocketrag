@@ -20,6 +20,7 @@ import { getSessionFile } from '../lib/sessionFiles'
 import type { TurnRecord } from '../lib/historyDb'
 import { useDocumentStore } from '../store/documentStore'
 import { answerFor, useChatStore, type HistoryStorageState, type TurnKey, type TurnRequestContext } from '../store/chatStore'
+import { SessionReceipts, TurnReceipt } from './Receipts'
 import { StatusBanner } from './ui/StatusBanner'
 import { Button } from './ui/Button'
 
@@ -782,6 +783,7 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
             // this session only (chatStore.groundedSession), never stored.
             <div dangerouslySetInnerHTML={{ __html: sanitizeGroundingHtml(grounded.searchEntryPointHtml) }} />
           )}
+          <TurnReceipt turn={leaf} />
         </div>
       )}
 
@@ -789,6 +791,7 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
         <div className="mt-4 space-y-2">
           <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{leaf.question}</p>
           {restoredOutcome(leaf, true)}
+          <TurnReceipt turn={leaf} />
         </div>
       )}
 
@@ -850,6 +853,7 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
                 ) : (
                   restoredOutcome(turn, false)
                 )}
+                <TurnReceipt turn={turn} />
               </li>
             ))}
           </ul>
@@ -873,6 +877,10 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
           </StatusBanner>
         )}
       </div>
+
+      {/* This session's own failed, timed-out or in-flight answer: its receipt sits under
+          the live region (the banner above it is what gets announced). */}
+      {leaf !== null && leaf.status !== 'answered' && isLive && leaf.egress.length > 0 && <TurnReceipt turn={leaf} />}
 
       {leafSources && leafSources.chunks.length > 0 && (
         <details className="mt-4" open={leaf?.status !== 'answered'}>
@@ -911,6 +919,8 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
           Some sources for this answer came from a document that has since been deleted.
         </p>
       )}
+
+      <SessionReceipts />
     </div>
   )
 }
