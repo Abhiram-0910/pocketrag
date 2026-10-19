@@ -4,16 +4,19 @@ import { NotesDropZone } from './components/NotesDropZone'
 import { DocumentList } from './components/DocumentList'
 import { QueryPanel } from './components/QueryPanel'
 import { ByokPanel, type ByokPanelHandle } from './components/ByokPanel'
+import { ConversationList } from './components/ConversationList'
 import { LandingPage } from './components/LandingPage'
 import { getAllDocuments } from './lib/db'
 import type { KeyConfig } from './lib/answerRequest'
 import { getHasVisitedApp, setHasVisitedApp } from './lib/landingVisitSetting'
+import { useChatStore } from './store/chatStore'
 import { useDocumentStore } from './store/documentStore'
 
 type Tab = 'documents' | 'notes'
 
 function App() {
   const restoreDocuments = useDocumentStore((s) => s.restoreDocuments)
+  const restoreHistory = useChatStore((s) => s.restore)
   const restored = useRef(false)
   // Matches ByokPanel's default (unchecked) state — the shared key until the user
   // opts into BYOK and completes key entry.
@@ -57,7 +60,11 @@ function App() {
         ),
       )
       .catch(() => {})
-  }, [restoreDocuments])
+    // Chat history: lists conversations and opens the most recent one. Nothing is
+    // focused — restoring must not move the user's focus. A failure shows the storage
+    // banner (chatStore.storage), never a crash.
+    void restoreHistory()
+  }, [restoreDocuments, restoreHistory])
 
   if (view === 'landing') {
     return (
@@ -72,44 +79,55 @@ function App() {
     )
   }
 
+  // Below lg: one column, the conversation list as a disclosure under the header. From lg
+  // up: the list becomes a sticky left rail beside the existing max-w-2xl column.
   return (
-    <main className="mx-auto max-w-2xl px-4 py-8 sm:px-8">
-      <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-50">PocketRAG</h1>
-      <p className="mt-1 text-slate-500 dark:text-slate-400">
-        {tab === 'documents' ? 'Drop a PDF, then ask a question about it.' : 'Upload a photo or PDF of handwritten or scanned notes.'}
-      </p>
-      <div className="mt-6 inline-flex overflow-hidden rounded border border-slate-200 text-sm dark:border-slate-700">
-        {(['documents', 'notes'] as const).map((option) => (
-          <button
-            key={option}
-            type="button"
-            onClick={() => setTab(option)}
-            className={`min-h-11 cursor-pointer px-4 transition-colors duration-150 ${
-              tab === option
-                ? 'bg-blue-600 text-white'
-                : 'bg-white text-slate-600 hover:bg-slate-50 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-800'
-            }`}
-          >
-            {option === 'documents' ? 'Documents' : 'Notes'}
-          </button>
-        ))}
+    <div className="mx-auto max-w-2xl px-4 py-8 sm:px-8 lg:max-w-6xl">
+      <header className="lg:ml-[17.5rem]">
+        <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-50">PocketRAG</h1>
+        <p className="mt-1 text-slate-500 dark:text-slate-400">
+          {tab === 'documents' ? 'Drop a PDF, then ask a question about it.' : 'Upload a photo or PDF of handwritten or scanned notes.'}
+        </p>
+      </header>
+      <div className="mt-6 lg:grid lg:grid-cols-[15rem_minmax(0,42rem)] lg:gap-10">
+        <aside className="mb-6 lg:sticky lg:top-8 lg:mb-0 lg:self-start">
+          <ConversationList />
+        </aside>
+        <main className="min-w-0">
+          <div className="inline-flex overflow-hidden rounded border border-slate-200 text-sm dark:border-slate-700">
+            {(['documents', 'notes'] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                onClick={() => setTab(option)}
+                className={`min-h-11 cursor-pointer px-4 transition-colors duration-150 ${
+                  tab === option
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-white text-slate-600 hover:bg-slate-50 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-800'
+                }`}
+              >
+                {option === 'documents' ? 'Documents' : 'Notes'}
+              </button>
+            ))}
+          </div>
+          <div className="mt-6 space-y-6">
+            {tab === 'documents' ? (
+              <>
+                <DropZone />
+                <DocumentList source="document" />
+              </>
+            ) : (
+              <>
+                <NotesDropZone />
+                <DocumentList source="note" />
+              </>
+            )}
+            <ByokPanel ref={byokPanel} onChange={setKeyConfig} />
+            <QueryPanel keyConfig={keyConfig} onFailureAction={(action) => byokPanel.current?.handleFailureAction(action)} />
+          </div>
+        </main>
       </div>
-      <div className="mt-6 space-y-6">
-        {tab === 'documents' ? (
-          <>
-            <DropZone />
-            <DocumentList source="document" />
-          </>
-        ) : (
-          <>
-            <NotesDropZone />
-            <DocumentList source="note" />
-          </>
-        )}
-        <ByokPanel ref={byokPanel} onChange={setKeyConfig} />
-        <QueryPanel keyConfig={keyConfig} onFailureAction={(action) => byokPanel.current?.handleFailureAction(action)} />
-      </div>
-    </main>
+    </div>
   )
 }
 

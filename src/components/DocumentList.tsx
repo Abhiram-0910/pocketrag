@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Trash } from '@phosphor-icons/react'
 import { deleteDocument } from '../lib/db'
+import { countTurnsCiting } from '../lib/historyDb'
 import { forgetSessionFile } from '../lib/sessionFiles'
 import { useDocumentStore, type DocEntry } from '../store/documentStore'
 import { classifyWebgpuFallback } from '../lib/errorTaxonomy'
@@ -53,6 +54,9 @@ export function DocumentList({ source }: DocumentListProps) {
   // brief inline error rather than crashing (deletion is destructive, so no silent retry).
   const [confirmingId, setConfirmingId] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<{ id: string; message: string } | null>(null)
+  // How many saved chat turns cite the document being confirmed (null while counting).
+  // Those turns keep their answers; only the passage text goes with the document.
+  const [citing, setCiting] = useState<{ id: string; count: number | null } | null>(null)
 
   if (documents.length === 0) return null
 
@@ -67,6 +71,25 @@ export function DocumentList({ source }: DocumentListProps) {
       setConfirmingId(null)
       setDeleteError({ id, message: err instanceof Error ? err.message : 'Failed to delete.' })
     }
+  }
+
+  const startConfirm = (id: string) => {
+    setConfirmingId(id)
+    setDeleteError(null)
+    setCiting({ id, count: null })
+    countTurnsCiting(id)
+      .then((count) => setCiting((c) => (c?.id === id ? { id, count } : c)))
+      // History unavailable: confirm without a count rather than block the delete.
+      .catch(() => setCiting((c) => (c?.id === id ? { id, count: 0 } : c)))
+  }
+
+  const confirmText = (id: string) => {
+    const count = citing?.id === id ? citing.count : 0
+    if (count === null) return 'Delete permanently? Checking chat history…'
+    if (count === 0) return 'Delete permanently?'
+    return count === 1
+      ? 'Delete permanently? 1 chat turn cites this document and keeps its answer.'
+      : `Delete permanently? ${count} chat turns cite this document and keep their answers.`
   }
 
   const loadingModel = documents.some((d) => d.status === 'loading-model')
@@ -134,10 +157,7 @@ export function DocumentList({ source }: DocumentListProps) {
                 {doc.status === 'ready' && confirmingId !== doc.id && (
                   <button
                     type="button"
-                    onClick={() => {
-                      setConfirmingId(doc.id)
-                      setDeleteError(null)
-                    }}
+                    onClick={() => startConfirm(doc.id)}
                     aria-label={`Delete ${doc.fileName}`}
                     className="flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded border border-slate-200 px-3 text-xs text-slate-400 hover:border-red-300 hover:text-red-600 dark:border-slate-700 dark:text-slate-500 dark:hover:border-red-500 dark:hover:text-red-400"
                   >
@@ -147,7 +167,7 @@ export function DocumentList({ source }: DocumentListProps) {
                 {doc.status === 'ready' && confirmingId === doc.id && (
                   <StatusBanner variant="error" className="items-center">
                     <span className="flex flex-wrap items-center gap-2">
-                      Delete permanently?
+                      {confirmText(doc.id)}
                       <Button variant="destructive" onClick={() => void handleDelete(doc.id)}>
                         Delete
                       </Button>

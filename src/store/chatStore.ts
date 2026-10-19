@@ -47,6 +47,10 @@ export interface TurnRequestContext {
   previousQuestion: string | null
 }
 
+// Which tier/provider/model a request goes out with — updated on retry, since the user may
+// have switched keys since the turn was first asked.
+export type TurnKey = Pick<TurnRecord, 'tier' | 'provider' | 'model'>
+
 export type TurnOutcome =
   | {
       status: 'answered'
@@ -54,8 +58,9 @@ export type TurnOutcome =
       groundingWarning: boolean
       docLabels: DocLabel[]
       webGrounded: boolean
-      // From the Worker's echo; absent from an older Worker. Replaces the model recorded
-      // at startTurn (null on the shared tier) when present.
+      // From the Worker's echo; absent from an older Worker. Replaces what startTurn
+      // recorded (the shared tier's model is null until then) when present.
+      provider?: TurnRecord['provider']
       model?: string
       // Grounded results only — kept in groundedSession, never in the turn record.
       webSources?: WebSource[]
@@ -86,7 +91,8 @@ interface ChatState {
   openConversation: (id: string) => Promise<void>
   newConversation: () => void
   startTurn: (input: NewTurn) => Promise<TurnRequestContext>
-  retryTurn: (turnId: string) => Promise<void>
+  // Re-sends the same turn with the current key config; null if the turn is gone.
+  retryTurn: (turnId: string, key: TurnKey) => Promise<TurnRequestContext | null>
   settleTurn: (turnId: string, outcome: TurnOutcome) => Promise<void>
   // An egress record for this turn's request (egressFetch's onRecord). Upserts by record
   // id, so the in-flight copy is replaced by the settled one and each retry adds a row.
@@ -114,6 +120,14 @@ export const useChatStore = create<ChatState>((set, get) => {
   const inflight = new Map<string, TurnRecord>()
 
   const findTurn = (turnId: string) => inflight.get(turnId) ?? get().turns.find((t) => t.id === turnId)
+
+  // The history / Doc N map / blend question for a turn whose ancestors are `path`.
+  const contextFor = (turnId: string, path: TurnRecord[]): TurnRequestContext => ({
+    turnId,
+    history: historyForRequest(path),
+    docLabels: docLabelsFor(path),
+    previousQuestion: previousQuestionFor(path),
+  })
 
   // Updates a turn and its conversation in memory first, then persists. A failed write
   // only flips `storage` — the in-memory conversation (and the answer on screen) stays;
@@ -153,10 +167,14 @@ export const useChatStore = create<ChatState>((set, get) => {
     groundedSession: new Map(),
     storage: 'ok',
 
+    // Lists conversations and opens the most recent one — unless the user already started
+    // or opened one while this was loading.
     restore: async () => {
       try {
         await sweepInterruptedTurns()
-        set({ conversations: await getConversations() })
+        const conversations = await getConversations()
+        set({ conversations })
+        if (conversations.length > 0 && get().activeConversationId === null) await get().openConversation(conversations[0].id)
       } catch (err) {
         set({ storage: storageStateFor(err) })
       }
@@ -214,19 +232,17 @@ export const useChatStore = create<ChatState>((set, get) => {
       // Written as 'pending' before the request goes out, so a tab that dies mid-request
       // still leaves the turn behind (swept to 'interrupted' on a later load).
       await commit({ ...conversation, updatedAt: now, activeLeafId: turn.id }, turn)
-      return {
-        turnId: turn.id,
-        history: historyForRequest(path),
-        docLabels: docLabelsFor(path),
-        previousQuestion: previousQuestionFor(path),
-      }
+      return contextFor(turn.id, path)
     },
 
     // Retry re-sends the same turn (same question, same chunks), so it reuses the record.
-    retryTurn: (turnId) => {
+    retryTurn: async (turnId, key) => {
       const turn = findTurn(turnId)
-      if (turn) inflight.set(turnId, turn)
-      return updateTurn(turnId, (t) => ({ ...t, status: 'pending', failure: null, completedAt: null }))
+      if (!turn) return null
+      inflight.set(turnId, turn)
+      await updateTurn(turnId, (t) => ({ ...t, ...key, status: 'pending', failure: null, completedAt: null }))
+      // Retry is only offered on the open conversation's leaf, so its ancestors are in `turns`.
+      return contextFor(turnId, pathTo(get().turns, turn.parentId))
     },
 
     settleTurn: async (turnId, outcome) => {
@@ -250,6 +266,7 @@ export const useChatStore = create<ChatState>((set, get) => {
               answer: outcome.webGrounded ? null : outcome.answer,
               groundingWarning: outcome.groundingWarning,
               docLabels: outcome.docLabels,
+              provider: outcome.provider ?? t.provider,
               model: outcome.model ?? t.model,
               webGrounded: outcome.webGrounded,
               failure: null,

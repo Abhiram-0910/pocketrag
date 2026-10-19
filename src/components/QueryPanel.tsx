@@ -1,20 +1,12 @@
-import { useCallback, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { flushSync } from 'react-dom'
 import { embedQuery, rerankChunks } from '../lib/embeddingClient'
-import { getAllChunks, getChunksForDocument, type ChunkRecord } from '../lib/db'
+import { getAllChunks, getChunksByIds, getChunksForDocument, type ChunkRecord } from '../lib/db'
 import { hybridRankChunks, type ScoredChunk } from '../lib/retrieval'
 import { applyRerank, type RerankScore } from '../lib/reranker'
 import type { RerankCandidate } from '../workers/embedding.types'
-import {
-  attemptAnswer,
-  fetchAnswerFromWorker,
-  type DocLabel,
-  type HistoryTurn,
-  type ImageAttachment,
-  type KeyConfig,
-  type WebSource,
-} from '../lib/answerRequest'
-import { buildRetrievalQuery } from '../lib/conversation'
+import { attemptAnswer, fetchAnswerFromWorker, type ImageAttachment, type KeyConfig } from '../lib/answerRequest'
+import { buildRetrievalQuery, pathTo, previousQuestionFor } from '../lib/conversation'
 import { isDiagramLikely } from '../lib/diagramHeuristic'
 import { getDiagramImagesEnabled, setDiagramImagesEnabled } from '../lib/diagramImageSetting'
 import { getWebSearchEnabled, setWebSearchEnabled } from '../lib/webSearchSetting'
@@ -25,7 +17,9 @@ import { canRunQuery } from '../lib/queryScope'
 import { classify, type TaxonomyResult } from '../lib/errorTaxonomy'
 import { failureAction, type FailureAction } from '../lib/apiError'
 import { getSessionFile } from '../lib/sessionFiles'
+import type { TurnRecord } from '../lib/historyDb'
 import { useDocumentStore } from '../store/documentStore'
+import { answerFor, useChatStore, type HistoryStorageState, type TurnKey, type TurnRequestContext } from '../store/chatStore'
 import { StatusBanner } from './ui/StatusBanner'
 import { Button } from './ui/Button'
 
@@ -34,14 +28,9 @@ const TOP_K = 3
 // the full chunk pool down to this many first, then reranking narrows it to TOP_K.
 const RERANK_POOL_SIZE = 15
 const ANSWER_TIMEOUT_MS = 60_000
-// Client-side hygiene cap on stored conversation turns — avoids unbounded growth of
-// in-memory state over a long-lived tab, not because 10+ turns would break anything
-// today.
-const MAX_STORED_TURNS = 10
-// Only the most recent turns are sent as `history` on each request — the Worker
-// independently re-caps to the same number regardless (worker/src/validate.ts's
-// MAX_HISTORY_TURNS), so a mismatch here would just be wasteful, never unsafe.
-const SENT_HISTORY_TURNS = 3
+
+// ConversationList's "New conversation" focuses the question input through this id.
+export const QUESTION_INPUT_ID = 'question-input'
 
 interface QueryPanelProps {
   keyConfig: KeyConfig | null
@@ -57,21 +46,46 @@ const FAILURE_ACTION_LABELS: Record<FailureAction, string> = {
   retry: 'Try again',
 }
 
-interface ConversationTurn {
-  question: string
-  answer: string
-  groundingWarning: boolean
-  docLabels: DocLabel[]
-  // Milestone 10 Phase B: whether a page image was included in this specific turn's
-  // request — tracked per turn, not just for the current answer, so the always-visible
-  // indicator stays accurate when scrolling back through "Conversation."
-  imageIncluded: boolean
-  // Milestone 12 (Gemini-native grounding): real, structured sources from Gemini's own
-  // groundingChunks for this specific turn — undefined/empty when grounding wasn't
-  // enabled, or was enabled but Gemini chose not to search. Tracked per turn, same
-  // reasoning as imageIncluded above.
-  webSources?: WebSource[]
-  searchEntryPointHtml?: string
+const STORAGE_COPY: Record<Exclude<HistoryStorageState, 'ok'>, { variant: 'warning' | 'info'; text: string }> = {
+  unavailable: {
+    variant: 'warning',
+    text: "Chat history can't be saved in this browser right now. This conversation still works, but won't be here after a reload.",
+  },
+  quota: {
+    variant: 'warning',
+    text: "This site's storage in your browser is full, so this conversation isn't being saved. Delete old conversations or documents to make room.",
+  },
+  blocked: {
+    variant: 'info',
+    text: "PocketRAG is open in another tab running an older version. Close that tab to finish updating; history isn't saved until then.",
+  },
+  outdated: {
+    variant: 'info',
+    text: 'A newer version of PocketRAG opened in another tab. Reload this tab to keep saving history.',
+  },
+}
+
+const GROUNDED_TEXT = 'Grounded in your documents.'
+const UNGROUNDED_TEXT =
+  'This answer may not be fully grounded in the source document — verify against the sources below.'
+// A grounded answer is never stored (Gemini terms — SECURITY_REVIEW.md §1.1); after a
+// reload only this placeholder is left.
+export const NOT_RETAINED_TEXT = 'Web-grounded answer, not retained (Google terms)'
+
+// The answer request goes out with whichever key is active now.
+function turnKeyFor(keyConfig: KeyConfig): TurnKey {
+  return keyConfig.keySource === 'own'
+    ? { tier: 'own', provider: keyConfig.provider, model: keyConfig.model }
+    : { tier: 'shared', provider: 'gemini', model: null }
+}
+
+/** Banner text for a stored failure. A turn restored from an earlier session shows the
+ * Worker's stored message as-is — no "Resets at" time, which would be stale by now. */
+function storedFailureBanner(turn: TurnRecord, restored: boolean): TaxonomyResult & { action: FailureAction | null } {
+  const f = turn.failure
+  if (!f) return { type: 'unknown', severity: 'warning', message: 'This answer failed.', action: null }
+  const classified = classify({ message: f.message, status: f.httpStatus, resetAt: restored ? undefined : f.resetAt })
+  return { ...classified, action: failureAction(f.code, f.source) }
 }
 
 /**
@@ -97,38 +111,41 @@ function rerankChunksAsync(
   })
 }
 
+// Session-only UI state below is keyed by turn id, so it only shows while that turn is
+// the open conversation's leaf — switching conversations hides it without a reset.
+interface TurnSources {
+  turnId: string
+  chunks: ScoredChunk<ChunkRecord>[]
+  // False when a restored turn cites a chunk that's since been deleted — retry is then
+  // replaced by "Ask again", since the same request can't be rebuilt.
+  complete: boolean
+}
+
 export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
   const [query, setQuery] = useState('')
   const [busy, setBusy] = useState(false)
   const [awaitingAnswer, setAwaitingAnswer] = useState(false)
-  const [timedOut, setTimedOut] = useState(false)
   const queryInputRef = useRef<HTMLInputElement>(null)
   const [error, setError] = useState<string | null>(null)
-  const [results, setResults] = useState<ScoredChunk<ChunkRecord>[] | null>(null)
-  const [submittedQuestion, setSubmittedQuestion] = useState<string | null>(null)
-  const [answer, setAnswer] = useState<string | null>(null)
-  const [groundingWarning, setGroundingWarning] = useState(false)
-  const [answerError, setAnswerError] = useState<(TaxonomyResult & { action: FailureAction | null }) | null>(null)
-  const [docLabels, setDocLabels] = useState<DocLabel[]>([])
-  const [conversationTurns, setConversationTurns] = useState<ConversationTurn[]>([])
   const [scope, setScope] = useState<'document' | 'all'>('document')
   const [rerankModelProgress, setRerankModelProgress] = useState<number | null>(null)
+  // The turn submitted or retried in this session. Its failure renders inside the
+  // always-mounted live region (announced); any other turn's stored failure renders
+  // outside it, so opening an old conversation announces nothing.
+  const [liveTurnId, setLiveTurnId] = useState<string | null>(null)
+  const [answerError, setAnswerError] = useState<(TaxonomyResult & { turnId: string; action: FailureAction | null }) | null>(null)
+  const [timedOutTurnId, setTimedOutTurnId] = useState<string | null>(null)
+  const [sources, setSources] = useState<TurnSources | null>(null)
   // Milestone 10 Phase B state. diagramImagesEnabled reads localStorage once at mount;
   // the toggle handler keeps it and localStorage in sync on every change.
   const [diagramImagesEnabled, setDiagramImagesEnabledState] = useState(() => getDiagramImagesEnabled())
-  const [imageIncluded, setImageIncluded] = useState(false)
-  // The image actually resolved for the *current* submitted question (or undefined) —
-  // stored so a retry resends the same image rather than re-rendering the page again.
-  const [pendingImage, setPendingImage] = useState<ImageAttachment | undefined>(undefined)
+  // The image and web-search choice actually used for a turn — stored so a retry resends
+  // the same ones, even if the toggles changed in between.
+  const [pendingImage, setPendingImage] = useState<{ turnId: string; image: ImageAttachment } | null>(null)
   // Milestone 12 (Gemini-native grounding) state. Same localStorage-once-at-mount
   // pattern as diagramImagesEnabled above, default OFF.
   const [webSearchEnabled, setWebSearchEnabledState] = useState(() => getWebSearchEnabled())
-  const [webSources, setWebSources] = useState<WebSource[] | undefined>(undefined)
-  const [searchEntryPointHtml, setSearchEntryPointHtml] = useState<string | undefined>(undefined)
-  // The toggle state actually used for the *current* submitted question — stored so a
-  // retry resends the same choice, even if the checkbox changed in between (same
-  // "pending" pattern pendingImage above already established).
-  const [pendingWebSearchEnabled, setPendingWebSearchEnabled] = useState(false)
+  const [pendingWebSearch, setPendingWebSearch] = useState<{ turnId: string; enabled: boolean } | null>(null)
   // Non-blocking, always-visible note for the one failure mode that must never be
   // silent: a diagram-likely chunk matched, but the file isn't in memory to render it
   // (most commonly a document restored from a prior session — see sessionFiles.ts).
@@ -136,6 +153,26 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
 
   const documents = useDocumentStore((s) => s.documents)
   const selectedId = useDocumentStore((s) => s.selectedId)
+  const conversations = useChatStore((s) => s.conversations)
+  const activeConversationId = useChatStore((s) => s.activeConversationId)
+  const turns = useChatStore((s) => s.turns)
+  const groundedSession = useChatStore((s) => s.groundedSession)
+  const storage = useChatStore((s) => s.storage)
+  const startTurn = useChatStore((s) => s.startTurn)
+  const retryTurn = useChatStore((s) => s.retryTurn)
+  const settleTurn = useChatStore((s) => s.settleTurn)
+  const appendEgress = useChatStore((s) => s.appendEgress)
+  const newConversation = useChatStore((s) => s.newConversation)
+
+  // Linear history: the open conversation's active root-to-leaf path. The leaf is the
+  // current answer; everything before it is "Conversation".
+  const activeLeafId = conversations.find((c) => c.id === activeConversationId)?.activeLeafId ?? null
+  const path = useMemo(() => pathTo(turns, activeLeafId), [turns, activeLeafId])
+  const leaf = path.at(-1) ?? null
+  const pastTurns = path.slice(0, -1)
+  const isLive = leaf !== null && leaf.id === liveTurnId
+  const leafSources = sources !== null && sources.turnId === leaf?.id ? sources : null
+
   // "this document" queries the selected ready doc; "all documents" pools every stored
   // doc. hybridRankChunks is scope-agnostic (all embeddings are unit-normalized by the
   // same model, so cosine scores are directly comparable across documents — see
@@ -146,7 +183,8 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
   const docsReady = canRunQuery(documents, selectedId, scope)
   const canQuery = docsReady && keyConfig !== null
 
-  const titleFor = (id: string) => documents.find((d) => d.id === id)?.fileName ?? id
+  // A restored turn can cite a document deleted since — label it rather than show its id.
+  const titleFor = useCallback((id: string) => documents.find((d) => d.id === id)?.fileName ?? 'deleted document', [documents])
   // Milestone 9: combined retrieval pool means a single answer can draw on both
   // Documents-tab (local-only) and Notes-tab (OCR'd) chunks — this badge keeps which
   // trust model applied to which source always visible, not just knowable from the tab.
@@ -179,13 +217,35 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
     setWebSearchEnabled(enabled)
   }, [])
 
-  // The currently displayed answer is the last entry in conversationTurns (pushed on
-  // every successful runAnswerAttempt below); "Conversation" only ever shows what came
-  // before it, so the current answer isn't rendered twice.
-  const pastTurns = conversationTurns.slice(0, -1)
+  // A turn restored from IndexedDB has no ranked chunks in memory: rebuild its Sources
+  // (and what a retry would resend) from its citations. Chunks deleted since are skipped.
+  const leafId = leaf?.id ?? null
+  const leafCitations = leaf?.citations
+  const sourcesTurnId = sources?.turnId ?? null
+  useEffect(() => {
+    if (leafId === null || !leafCitations || leafId === sourcesTurnId) return
+    let cancelled = false
+    const citations = [...leafCitations].sort((a, b) => a.rank - b.rank)
+    getChunksByIds(citations.map((c) => c.chunkId))
+      .then((found) => {
+        if (cancelled) return
+        const byId = new Map(found.map((chunk) => [chunk.id, chunk]))
+        const chunks = citations.flatMap((c) => {
+          const chunk = byId.get(c.chunkId)
+          return chunk ? [{ chunk, score: c.score }] : []
+        })
+        setSources({ turnId: leafId, chunks, complete: chunks.length === citations.length })
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [leafId, leafCitations, sourcesTurnId])
 
   const runAnswerAttempt = useCallback(
     async (
+      turnId: string,
+      context: TurnRequestContext,
       question: string,
       chunks: ScoredChunk<ChunkRecord>[],
       isRetry: boolean,
@@ -194,7 +254,7 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
       enableWebSearch?: boolean,
     ) => {
       setAwaitingAnswer(true)
-      setTimedOut(false)
+      setTimedOutTurnId(null)
       // Cleared on retry too: a retry can now come from a failure banner's "Try again",
       // and a stale failure must not sit beside the answer that retry produced.
       setAnswerError(null)
@@ -205,63 +265,65 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
         score,
         documentId: chunk.documentId,
       }))
-      // Prompt history (Milestone 11 Phase C2) is a separate, capped field from
-      // retrieval-query blending below — this crosses the wire and shapes the prompt,
-      // it never touches retrieval.
-      const history: HistoryTurn[] = conversationTurns
-        .slice(-SENT_HISTORY_TURNS)
-        .map(({ question: q, answer: a }) => ({ question: q, answer: a }))
+      // Prompt history (Milestone 11 Phase C2) comes from the store: the last answered
+      // turns on this turn's path, never a grounded one. Every attempt's egress — retries
+      // included — is recorded on the turn.
       const result = await attemptAnswer(
         fetchAnswerFromWorker,
         question,
         requestChunks,
         activeKeyConfig,
         ANSWER_TIMEOUT_MS,
-        docLabels,
-        history,
+        context.docLabels,
+        context.history,
         image,
         enableWebSearch,
+        (record) => void appendEgress(turnId, record),
       )
 
       if (result.outcome === 'success') {
-        setAnswer(result.answer)
-        setGroundingWarning(result.groundingWarning)
-        setDocLabels(result.docLabels)
-        setImageIncluded(image !== undefined)
-        setWebSources(result.webSources)
-        setSearchEntryPointHtml(result.searchEntryPointHtml)
-        setConversationTurns((prev) =>
-          [
-            ...prev,
-            {
-              question,
-              answer: result.answer,
-              groundingWarning: result.groundingWarning,
-              docLabels: result.docLabels,
-              imageIncluded: image !== undefined,
-              webSources: result.webSources,
-              searchEntryPointHtml: result.searchEntryPointHtml,
-            },
-          ].slice(-MAX_STORED_TURNS),
-        )
+        await settleTurn(turnId, {
+          status: 'answered',
+          answer: result.answer,
+          groundingWarning: result.groundingWarning,
+          docLabels: result.docLabels,
+          webGrounded: (result.webSources?.length ?? 0) > 0 || result.searchEntryPointHtml !== undefined,
+          provider: result.provider,
+          model: result.model,
+          webSources: result.webSources,
+          searchEntryPointHtml: result.searchEntryPointHtml,
+        })
       } else if (result.outcome === 'timeout') {
         if (isRetry) {
           setAnswerError({
+            turnId,
             type: 'unknown',
             severity: 'warning',
             message: 'Answer generation timed out again.',
             action: null,
           })
         } else {
-          setTimedOut(true)
+          setTimedOutTurnId(turnId)
         }
+        await settleTurn(turnId, { status: 'timed-out' })
       } else {
         const classified = classify({ message: result.message, status: result.status, resetAt: result.resetAt })
-        setAnswerError({ ...classified, action: failureAction(result.code, result.source) })
+        setAnswerError({ turnId, ...classified, action: failureAction(result.code, result.source) })
+        await settleTurn(turnId, {
+          status: 'failed',
+          failure: {
+            kind: classified.type,
+            message: result.message,
+            httpStatus: result.status,
+            code: result.code,
+            source: result.source,
+            resetAt: result.resetAt,
+          },
+        })
       }
       setAwaitingAnswer(false)
     },
-    [docLabels, conversationTurns],
+    [appendEgress, settleTurn],
   )
 
   const handleSubmit = useCallback(
@@ -272,31 +334,17 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
       const activeKeyConfig = keyConfig
 
       const question = query.trim()
-      // Retrieval-query blending (Milestone 11 Phase C2): fold the immediately
-      // preceding question — and only that one — into the query used for retrieval.
+      // Retrieval-query blending (Milestone 11 Phase C2): fold the nearest answered
+      // ancestor's question — and only that one — into the query used for retrieval.
       // The literal, unblended `question` below is still what's sent to the Worker as
       // the actual question being answered; the blended string never crosses the wire.
-      const previousQuestion = conversationTurns.at(-1)?.question ?? null
-      const retrievalQuery = buildRetrievalQuery(previousQuestion, question)
-      // Milestone 12: captured once at submit time, same "pending" pattern as
-      // pendingImage — a retry resends this exact choice, even if the checkbox
-      // changes in between.
+      const retrievalQuery = buildRetrievalQuery(previousQuestionFor(path), question)
+      // Milestone 12: captured once at submit time — a retry resends this exact choice,
+      // even if the checkbox changes in between.
       const activeWebSearchEnabled = isGeminiEffective && webSearchEnabled
-      setPendingWebSearchEnabled(activeWebSearchEnabled)
       setBusy(true)
       setError(null)
-      setResults(null)
-      setSubmittedQuestion(question)
-      setAnswer(null)
-      setAnswerError(null)
-      setTimedOut(false)
-      setGroundingWarning(false)
       setDiagramFallbackNote(null)
-      setWebSources(undefined)
-      setSearchEntryPointHtml(undefined)
-      // docLabels is intentionally NOT reset here — Milestone 11 Phase C freezes "Doc N"
-      // labels for the lifetime of the conversation, so the map from the previous
-      // answer carries forward and gets echoed back to the Worker in runAnswerAttempt.
 
       embedQuery(retrievalQuery, {
         onBackend: () => {},
@@ -333,7 +381,6 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
                   setRerankModelProgress(null)
                 }
               }
-              setResults(ranked)
 
               // Milestone 10 Phase B: at most one image, for the single top-ranked
               // chunk, only when the opt-in toggle is on and the active key config is
@@ -365,9 +412,29 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
                   }
                 }
               }
-              setPendingImage(image)
 
-              await runAnswerAttempt(question, ranked, false, activeKeyConfig, image, activeWebSearchEnabled)
+              // Saved as 'pending' before the request goes out (chatStore.startTurn).
+              const context = await startTurn({
+                question,
+                citations: ranked.map(({ chunk, score }, rank) => ({
+                  chunkId: chunk.id,
+                  documentId: chunk.documentId,
+                  page: chunk.page,
+                  rank,
+                  score,
+                })),
+                scope,
+                ...turnKeyFor(activeKeyConfig),
+                imageIncluded: image !== undefined,
+                webSearchRequested: activeWebSearchEnabled,
+              })
+              const turnId = context.turnId
+              setLiveTurnId(turnId)
+              setSources({ turnId, chunks: ranked, complete: true })
+              setPendingImage(image ? { turnId, image } : null)
+              setPendingWebSearch({ turnId, enabled: activeWebSearchEnabled })
+
+              await runAnswerAttempt(turnId, context, question, ranked, false, activeKeyConfig, image, activeWebSearchEnabled)
             })
             .catch((err) => setError(err instanceof Error ? err.message : 'Failed to retrieve chunks.'))
             .finally(() => setBusy(false))
@@ -385,7 +452,8 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
       selectedReadyId,
       query,
       busy,
-      conversationTurns,
+      path,
+      startTurn,
       runAnswerAttempt,
       diagramImagesEnabled,
       isGeminiEffective,
@@ -393,51 +461,71 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
     ],
   )
 
-  const handleRetry = useCallback(() => {
-    if (!submittedQuestion || !results || keyConfig === null) return
+  // Re-sends the leaf turn: its chunks from this session, or rebuilt from its citations
+  // for a restored turn (no page image then — it was never stored).
+  const handleRetry = useCallback(async () => {
+    if (!leaf || !leafSources || keyConfig === null) return
+    const turnId = leaf.id
+    const wasLive = liveTurnId === turnId
+    setLiveTurnId(turnId)
     setBusy(true)
-    runAnswerAttempt(submittedQuestion, results, true, keyConfig, pendingImage, pendingWebSearchEnabled).finally(() => {
-      // The banner holding "Try again" unmounts when the retry starts, dropping focus to
-      // <body>; the input is disabled while busy, so re-enable it first, then focus it.
-      flushSync(() => setBusy(false))
-      queryInputRef.current?.focus()
-    })
-  }, [submittedQuestion, results, runAnswerAttempt, keyConfig, pendingImage, pendingWebSearchEnabled])
+    const context = await retryTurn(turnId, turnKeyFor(keyConfig))
+    if (!context) {
+      setBusy(false)
+      return
+    }
+    const image = pendingImage?.turnId === turnId ? pendingImage.image : undefined
+    const enableWebSearch =
+      pendingWebSearch?.turnId === turnId ? pendingWebSearch.enabled : leaf.webSearchRequested && isGeminiEffective
+    await runAnswerAttempt(turnId, context, leaf.question, leafSources.chunks, wasLive, keyConfig, image, enableWebSearch)
+    // The banner holding "Try again" unmounts when the retry starts, dropping focus to
+    // <body>; the input is disabled while busy, so re-enable it first, then focus it.
+    flushSync(() => setBusy(false))
+    queryInputRef.current?.focus()
+  }, [leaf, leafSources, keyConfig, liveTurnId, retryTurn, pendingImage, pendingWebSearch, isGeminiEffective, runAnswerAttempt])
 
-  // Resets the conversation itself — turn history, the frozen Doc N map (so numbering
-  // restarts at Doc 1 on the next question), and the current answer/results. Document
-  // selection/scope are untouched: those are library state, not conversation state.
-  const handleClearConversation = useCallback(() => {
-    setConversationTurns([])
-    setDocLabels([])
-    setAnswer(null)
-    setGroundingWarning(false)
-    setAnswerError(null)
-    setResults(null)
-    setSubmittedQuestion(null)
-    setTimedOut(false)
-    setImageIncluded(false)
-    setPendingImage(undefined)
-    setDiagramFallbackNote(null)
-    setWebSources(undefined)
-    setSearchEntryPointHtml(undefined)
-    setPendingWebSearchEnabled(false)
+  // When the same request can't be rebuilt (interrupted, or its cited chunks are gone):
+  // put the question back in the input for the user to ask again.
+  const handleAskAgain = useCallback((question: string) => {
+    setQuery(question)
+    queryInputRef.current?.focus()
   }, [])
 
-  // Exports every turn currently in conversationTurns (past + current, in order) plus
-  // the current turn's retrieved chunks as Sources — past turns' chunks aren't retained
-  // in state, so only the current turn can carry a Sources section (see pdfExport.ts).
+  // Starts a fresh conversation; the old one stays in history (ConversationList deletes).
+  // Document selection/scope are untouched: those are library state, not conversation state.
+  const handleNewConversation = useCallback(() => {
+    newConversation()
+    setError(null)
+    setDiagramFallbackNote(null)
+    queryInputRef.current?.focus()
+  }, [newConversation])
+
+  // Exports the active path's answered turns, in order, plus the leaf's Sources (the
+  // only turn whose chunks are loaded — see pdfExport.ts).
   const handleExportPdf = useCallback(() => {
-    const sources: ExportSource[] = (results ?? []).map(({ chunk, score }) => ({
+    const exportSources: ExportSource[] = (leafSources?.chunks ?? []).map(({ chunk, score }) => ({
       documentId: chunk.documentId,
       page: chunk.page,
       score,
       text: chunk.text,
     }))
-    buildConversationPdf(conversationTurns, sources, titleFor).save('pocketrag-conversation.pdf')
-  }, [conversationTurns, results, titleFor])
+    const exportTurns = path
+      .filter((t) => t.status === 'answered')
+      .map((t) => ({
+        question: t.question,
+        answer: answerFor({ groundedSession }, t) ?? NOT_RETAINED_TEXT,
+        groundingWarning: t.groundingWarning,
+        docLabels: t.docLabels,
+      }))
+    buildConversationPdf(exportTurns, exportSources, titleFor).save('pocketrag-conversation.pdf')
+  }, [leafSources, path, groundedSession, titleFor])
 
-  const answerAction = answerError?.action ?? null
+  const liveError = answerError !== null && answerError.turnId === leaf?.id ? answerError : null
+  const answerAction = liveError?.action ?? null
+  const leafTimedOut = leaf !== null && timedOutTurnId === leaf.id
+  const grounded = leaf ? groundedSession.get(leaf.id) : undefined
+  // The question just submitted is still in the input; a restored one isn't anywhere else.
+  const showLeafQuestion = leaf !== null && !isLive
 
   const placeholder = canQuery
     ? scope === 'all'
@@ -449,8 +537,92 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
         : 'Select a document first'
       : 'Finish setting up your API key first'
 
+  const answerText = (turn: TurnRecord) => {
+    const text = answerFor({ groundedSession }, turn)
+    return text !== null ? (
+      <p className="text-sm text-slate-900 dark:text-slate-100">{text}</p>
+    ) : (
+      <p className="text-sm italic text-slate-600 dark:text-slate-400">{NOT_RETAINED_TEXT}</p>
+    )
+  }
+
+  // A stored failure / timeout / interruption of a turn that isn't this session's live
+  // one: same copy and actions, rendered outside the live region (inLiveRegion drops the
+  // banner's own role) so opening an old conversation doesn't announce it.
+  const restoredOutcome = (turn: TurnRecord, actionable: boolean) => {
+    const canRebuild = actionable && leafSources !== null && leafSources.complete && leafSources.chunks.length > 0
+    const askAgain = (
+      <Button variant="secondary" className="mt-2" onClick={() => handleAskAgain(turn.question)}>
+        Ask again
+      </Button>
+    )
+    if (turn.status === 'failed') {
+      const banner = storedFailureBanner(turn, true)
+      const action = banner.action
+      return (
+        <StatusBanner variant={banner.severity} inLiveRegion>
+          <span className="block">{banner.message}</span>
+          {canRebuild && <span className="block">Showing raw matched passages below.</span>}
+          {actionable &&
+            action &&
+            (action !== 'retry' ? (
+              <Button variant="secondary" className="mt-2" onClick={() => onFailureAction?.(action)}>
+                {FAILURE_ACTION_LABELS[action]}
+              </Button>
+            ) : canRebuild ? (
+              <Button variant="secondary" className="mt-2" onClick={() => void handleRetry()}>
+                {FAILURE_ACTION_LABELS.retry}
+              </Button>
+            ) : (
+              askAgain
+            ))}
+        </StatusBanner>
+      )
+    }
+    if (turn.status === 'timed-out') {
+      return (
+        <StatusBanner variant="warning" inLiveRegion>
+          <span className="block">This answer timed out.</span>
+          {actionable &&
+            (canRebuild ? (
+              <Button variant="secondary" className="mt-2" onClick={() => void handleRetry()}>
+                {FAILURE_ACTION_LABELS.retry}
+              </Button>
+            ) : (
+              askAgain
+            ))}
+        </StatusBanner>
+      )
+    }
+    if (turn.status === 'interrupted' || turn.status === 'pending') {
+      return (
+        <StatusBanner variant="info" inLiveRegion>
+          <span className="block">
+            {turn.status === 'interrupted'
+              ? 'This answer was interrupted — the tab closed before it arrived.'
+              : 'No answer was received for this question yet.'}
+          </span>
+          {actionable && askAgain}
+        </StatusBanner>
+      )
+    }
+    return null
+  }
+
   return (
     <div className="text-left">
+      <div aria-live="polite" aria-atomic="true">
+        {storage !== 'ok' && (
+          <StatusBanner variant={STORAGE_COPY[storage].variant} className="mb-2" inLiveRegion>
+            <span className="block">{STORAGE_COPY[storage].text}</span>
+            {storage === 'outdated' && (
+              <Button variant="secondary" className="mt-2" onClick={() => window.location.reload()}>
+                Reload
+              </Button>
+            )}
+          </StatusBanner>
+        )}
+      </div>
       {hasReadyDoc && (
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <div className="inline-flex overflow-hidden rounded border border-slate-200 text-xs dark:border-slate-700">
@@ -469,13 +641,13 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
               </button>
             ))}
           </div>
-          {conversationTurns.length > 0 && (
+          {path.length > 0 && (
             <div className="flex gap-2">
               <Button variant="secondary" onClick={handleExportPdf}>
                 Export as PDF
               </Button>
-              <Button variant="secondary" onClick={handleClearConversation}>
-                Clear conversation
+              <Button variant="secondary" onClick={handleNewConversation}>
+                New conversation
               </Button>
             </div>
           )}
@@ -512,11 +684,13 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
       <form onSubmit={handleSubmit} className="flex flex-col gap-2 sm:flex-row">
         <input
           ref={queryInputRef}
+          id={QUESTION_INPUT_ID}
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           disabled={!canQuery || busy}
           placeholder={placeholder}
+          aria-label="Question"
           className="min-h-11 flex-1 rounded border border-slate-300 px-3 py-2 text-sm text-slate-900 disabled:bg-slate-50 disabled:text-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500 dark:disabled:bg-slate-950 dark:disabled:text-slate-600"
         />
         <Button type="submit" loading={busy} disabled={!canQuery || busy || !query.trim()}>
@@ -542,49 +716,48 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
         </p>
       )}
 
-      {awaitingAnswer && !timedOut && (
+      {awaitingAnswer && !leafTimedOut && isLive && (
         <p className="mt-4 text-sm text-slate-500 motion-safe:animate-pulse dark:text-slate-400">
           Generating an answer… this usually takes a few seconds, but can occasionally take up to a few
           minutes on the free tier.
-          {pendingImage !== undefined && ' A page image was included, which can take a bit longer.'} Please
+          {pendingImage?.turnId === leaf?.id && ' A page image was included, which can take a bit longer.'} Please
           don't close this tab.
         </p>
       )}
 
-      {timedOut && (
+      {leafTimedOut && isLive && leaf?.status === 'timed-out' && (
         <StatusBanner variant="warning" className="mt-4 items-center">
           <span className="flex flex-wrap items-center gap-2">
             This is taking longer than expected.
-            <Button variant="secondary" onClick={handleRetry}>
+            <Button variant="secondary" onClick={() => void handleRetry()}>
               Try again
             </Button>
           </span>
         </StatusBanner>
       )}
 
-      {answer && (
+      {leaf?.status === 'answered' && (
         <div className="mt-4 space-y-2 rounded border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
-          <StatusBanner variant={groundingWarning ? 'warning' : 'success'}>
-            {groundingWarning
-              ? 'This answer may not be fully grounded in the source document — verify against the sources below.'
-              : 'Grounded in your documents.'}
+          {showLeafQuestion && <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{leaf.question}</p>}
+          <StatusBanner variant={leaf.groundingWarning ? 'warning' : 'success'}>
+            {leaf.groundingWarning ? UNGROUNDED_TEXT : GROUNDED_TEXT}
           </StatusBanner>
-          {imageIncluded && (
+          {leaf.imageIncluded && (
             <p className="text-xs text-slate-500 dark:text-slate-400">
               🖼️ A page image was included in this request.
             </p>
           )}
-          <p className="text-sm text-slate-900 dark:text-slate-100">{answer}</p>
-          {docLabels.length > 0 && (
+          {answerText(leaf)}
+          {leaf.docLabels.length > 0 && (
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              {docLabels.map((d) => `Doc ${d.label} = ${titleFor(d.documentId)}`).join(' · ')}
+              {leaf.docLabels.map((d) => `Doc ${d.label} = ${titleFor(d.documentId)}`).join(' · ')}
             </p>
           )}
-          {webSources && webSources.length > 0 && (
+          {grounded?.webSources && grounded.webSources.length > 0 && (
             <div className="text-xs text-slate-500 dark:text-slate-400">
               <p>🌐 Includes results from a live web search:</p>
               <ul className="ml-4 list-disc">
-                {webSources.map((source, i) => (
+                {grounded.webSources.map((source, i) => (
                   <li key={i}>
                     <a
                       href={source.uri}
@@ -599,15 +772,23 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
               </ul>
             </div>
           )}
-          {searchEntryPointHtml && (
+          {grounded?.searchEntryPointHtml && (
             // Google's Grounding ToS (ai.google.dev/gemini-api/terms#grounding-with-
             // google-search) requires displaying this "Search Suggestions" widget
             // alongside any grounded result shown to an end user. Google's docs never
             // state this HTML is safe to inject unsanitized (checked directly — see
             // SECURITY_REVIEW.md), so it's sanitized before render like any other
-            // externally-sourced content reaching this origin's DOM.
-            <div dangerouslySetInnerHTML={{ __html: sanitizeGroundingHtml(searchEntryPointHtml) }} />
+            // externally-sourced content reaching this origin's DOM. Kept in memory for
+            // this session only (chatStore.groundedSession), never stored.
+            <div dangerouslySetInnerHTML={{ __html: sanitizeGroundingHtml(grounded.searchEntryPointHtml) }} />
           )}
+        </div>
+      )}
+
+      {leaf !== null && leaf.status !== 'answered' && !isLive && (
+        <div className="mt-4 space-y-2">
+          <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{leaf.question}</p>
+          {restoredOutcome(leaf, true)}
         </div>
       )}
 
@@ -617,49 +798,57 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
             Conversation ({pastTurns.length})
           </summary>
           <ul className="mt-3 space-y-3">
-            {pastTurns.map((turn, i) => (
+            {pastTurns.map((turn) => (
               <li
-                key={i}
+                key={turn.id}
                 className="space-y-2 rounded border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900"
               >
                 <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{turn.question}</p>
-                <StatusBanner variant={turn.groundingWarning ? 'warning' : 'success'}>
-                  {turn.groundingWarning
-                    ? 'This answer may not be fully grounded in the source document — verify against the sources below.'
-                    : 'Grounded in your documents.'}
-                </StatusBanner>
-                {turn.imageIncluded && (
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    🖼️ A page image was included in this request.
-                  </p>
-                )}
-                <p className="text-sm text-slate-900 dark:text-slate-100">{turn.answer}</p>
-                {turn.docLabels.length > 0 && (
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    {turn.docLabels.map((d) => `Doc ${d.label} = ${titleFor(d.documentId)}`).join(' · ')}
-                  </p>
-                )}
-                {turn.webSources && turn.webSources.length > 0 && (
-                  <div className="text-xs text-slate-500 dark:text-slate-400">
-                    <p>🌐 Includes results from a live web search:</p>
-                    <ul className="ml-4 list-disc">
-                      {turn.webSources.map((source, i) => (
-                        <li key={i}>
-                          <a
-                            href={source.uri}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-blue-600 underline dark:text-blue-400"
-                          >
-                            {source.title}
-                          </a>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {turn.searchEntryPointHtml && (
-                  <div dangerouslySetInnerHTML={{ __html: sanitizeGroundingHtml(turn.searchEntryPointHtml) }} />
+                {turn.status === 'answered' ? (
+                  <>
+                    <StatusBanner variant={turn.groundingWarning ? 'warning' : 'success'}>
+                      {turn.groundingWarning ? UNGROUNDED_TEXT : GROUNDED_TEXT}
+                    </StatusBanner>
+                    {turn.imageIncluded && (
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        🖼️ A page image was included in this request.
+                      </p>
+                    )}
+                    {answerText(turn)}
+                    {turn.docLabels.length > 0 && (
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        {turn.docLabels.map((d) => `Doc ${d.label} = ${titleFor(d.documentId)}`).join(' · ')}
+                      </p>
+                    )}
+                    {groundedSession.get(turn.id)?.webSources?.length ? (
+                      <div className="text-xs text-slate-500 dark:text-slate-400">
+                        <p>🌐 Includes results from a live web search:</p>
+                        <ul className="ml-4 list-disc">
+                          {groundedSession.get(turn.id)?.webSources?.map((source, i) => (
+                            <li key={i}>
+                              <a
+                                href={source.uri}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-blue-600 underline dark:text-blue-400"
+                              >
+                                {source.title}
+                              </a>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                    {groundedSession.get(turn.id)?.searchEntryPointHtml && (
+                      <div
+                        dangerouslySetInnerHTML={{
+                          __html: sanitizeGroundingHtml(groundedSession.get(turn.id)?.searchEntryPointHtml as string),
+                        }}
+                      />
+                    )}
+                  </>
+                ) : (
+                  restoredOutcome(turn, false)
                 )}
               </li>
             ))}
@@ -668,15 +857,15 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
       )}
 
       <div aria-live="polite" aria-atomic="true">
-        {answerError && (
-          <StatusBanner variant={answerError.severity} className="mt-4" inLiveRegion>
-            <span className="block">{answerError.message}</span>
+        {liveError && (
+          <StatusBanner variant={liveError.severity} className="mt-4" inLiveRegion>
+            <span className="block">{liveError.message}</span>
             <span className="block">Showing raw matched passages below.</span>
             {answerAction && (
               <Button
                 variant="secondary"
                 className="mt-2"
-                onClick={() => (answerAction === 'retry' ? handleRetry() : onFailureAction?.(answerAction))}
+                onClick={() => (answerAction === 'retry' ? void handleRetry() : onFailureAction?.(answerAction))}
               >
                 {FAILURE_ACTION_LABELS[answerAction]}
               </Button>
@@ -685,13 +874,13 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
         )}
       </div>
 
-      {results && results.length > 0 && (
-        <details className="mt-4" open={!answer}>
+      {leafSources && leafSources.chunks.length > 0 && (
+        <details className="mt-4" open={leaf?.status !== 'answered'}>
           <summary className="cursor-pointer text-sm font-medium text-slate-700 dark:text-slate-300">
-            Sources ({results.length})
+            Sources ({leafSources.chunks.length})
           </summary>
           <ul className="mt-3 space-y-3">
-            {results.map(({ chunk, score }) => (
+            {leafSources.chunks.map(({ chunk, score }) => (
               <li
                 key={chunk.id}
                 className="rounded border border-slate-200 p-3 text-sm text-slate-700 dark:border-slate-700 dark:text-slate-300"
@@ -714,8 +903,13 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
           </ul>
         </details>
       )}
-      {results && results.length === 0 && (
+      {leafSources && leafSources.chunks.length === 0 && leaf?.citations.length === 0 && (
         <p className="mt-4 text-sm text-slate-500 dark:text-slate-400">No chunks found.</p>
+      )}
+      {leafSources && !leafSources.complete && (
+        <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+          Some sources for this answer came from a document that has since been deleted.
+        </p>
       )}
     </div>
   )

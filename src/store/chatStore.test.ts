@@ -18,6 +18,7 @@ const newTurn = (question: string, overrides: Partial<NewTurn> = {}): NewTurn =>
   webSearchRequested: false,
   ...overrides,
 })
+const SHARED_KEY = { tier: 'shared' as const, provider: 'gemini' as const, model: null }
 const answered = (answer: string, webGrounded = false) => ({
   status: 'answered' as const,
   answer,
@@ -110,7 +111,7 @@ describe('chatStore', () => {
     const conversationId = useChatStore.getState().activeConversationId as string
     expect((await getTurns(conversationId))[0]).toMatchObject({ status: 'failed', failure, model: 'gpt-x' })
 
-    await useChatStore.getState().retryTurn(turnId)
+    await useChatStore.getState().retryTurn(turnId, SHARED_KEY)
     const stored = await getTurns(conversationId)
     expect(stored).toHaveLength(1)
     expect(stored[0]).toMatchObject({ id: turnId, status: 'pending', failure: null })
@@ -221,7 +222,7 @@ describe('chatStore', () => {
       status: 'failed',
       failure: { kind: 'provider-unavailable', message: 'x', httpStatus: 502, code: 'provider_unavailable' },
     })
-    await useChatStore.getState().retryTurn(turnId)
+    await useChatStore.getState().retryTurn(turnId, SHARED_KEY)
     await useChatStore.getState().appendEgress(turnId, egressRecord('r2', { outcome: 'ok', httpStatus: 200 }))
     await useChatStore.getState().settleTurn(turnId, answered('A'))
 
@@ -281,5 +282,55 @@ describe('chatStore', () => {
     const { turnId } = await useChatStore.getState().startTurn(newTurn('Q'))
     await useChatStore.getState().settleTurn(turnId, { ...answered('A'), model: 'gemini-3.5-flash-lite' })
     expect((await getTurns(useChatStore.getState().activeConversationId as string))[0].model).toBe('gemini-3.5-flash-lite')
+  })
+
+  it('restore() opens the most recent conversation', async () => {
+    const older = await useChatStore.getState().startTurn(newTurn('Older question'))
+    await useChatStore.getState().settleTurn(older.turnId, answered('Older answer'))
+    // updatedAt has millisecond resolution; same-millisecond ties fall back to the random id.
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    useChatStore.getState().newConversation()
+    const newer = await useChatStore.getState().startTurn(newTurn('Newer question'))
+    await useChatStore.getState().settleTurn(newer.turnId, answered('Newer answer'))
+    const newerId = useChatStore.getState().activeConversationId
+
+    useChatStore.setState(useChatStore.getInitialState())
+    await useChatStore.getState().restore()
+
+    expect(useChatStore.getState().activeConversationId).toBe(newerId)
+    expect(useChatStore.getState().turns.map((t) => t.question)).toEqual(['Newer question'])
+  })
+
+  it("restore() doesn't switch away from a conversation the user started while it loaded", async () => {
+    useChatStore.setState(useChatStore.getInitialState())
+    const restoring = useChatStore.getState().restore()
+    const { turnId } = await useChatStore.getState().startTurn(newTurn('Typed fast'))
+    await restoring
+    expect(useChatStore.getState().turns.map((t) => t.id)).toEqual([turnId])
+  })
+
+  it("retryTurn returns the request context from the turn's ancestors and records the key now in use", async () => {
+    const q1 = await useChatStore.getState().startTurn(newTurn('Q1'))
+    await useChatStore.getState().settleTurn(q1.turnId, answered('A1'))
+    const q2 = await useChatStore.getState().startTurn(newTurn('Q2'))
+    await useChatStore.getState().settleTurn(q2.turnId, { status: 'timed-out' })
+
+    const ctx = await useChatStore.getState().retryTurn(q2.turnId, { tier: 'own', provider: 'openai', model: 'gpt-x' })
+
+    expect(ctx).toEqual({
+      turnId: q2.turnId,
+      history: [{ question: 'Q1', answer: 'A1' }],
+      docLabels: [{ label: 1, documentId: 'doc-a' }],
+      previousQuestion: 'Q1',
+    })
+    const stored = (await getTurns(useChatStore.getState().activeConversationId as string)).find((t) => t.id === q2.turnId)
+    expect(stored).toMatchObject({ status: 'pending', tier: 'own', provider: 'openai', model: 'gpt-x' })
+    expect(await useChatStore.getState().retryTurn('no-such-turn', SHARED_KEY)).toBeNull()
+  })
+
+  it('records the echoed provider as well as the model', async () => {
+    const { turnId } = await useChatStore.getState().startTurn(newTurn('Q'))
+    await useChatStore.getState().settleTurn(turnId, { ...answered('A'), provider: 'gemini', model: 'gemini-3.5-flash-lite' })
+    expect(useChatStore.getState().turns[0]).toMatchObject({ provider: 'gemini', model: 'gemini-3.5-flash-lite' })
   })
 })
