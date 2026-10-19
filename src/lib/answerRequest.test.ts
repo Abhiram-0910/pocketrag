@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { attemptAnswer, type FetchAnswerFn, type KeyConfig } from './answerRequest'
+import { WorkerRequestError } from './apiError'
 
 const CHUNKS = [{ text: 'The mitochondrion is the powerhouse of the cell.', page: 1, score: 0.9, documentId: 'doc-1' }]
 const DOC_LABELS = [{ label: 1, documentId: 'doc-1' }]
@@ -273,5 +274,23 @@ describe('attemptAnswer', () => {
     const retry = await attemptAnswer(retryFetchAnswer, 'q', CHUNKS, SHARED_CONFIG, 60_000)
 
     expect(retry).toEqual({ outcome: 'success', answer: 'Recovered.', groundingWarning: false, docLabels: DOC_LABELS })
+  })
+
+  it('passes a provider failure\'s status, code and source through to the error outcome', async () => {
+    const message = 'The free shared tier is at capacity right now. Try again later, or use your own API key.'
+    const fetchAnswer: FetchAnswerFn = vi
+      .fn()
+      .mockRejectedValue(new WorkerRequestError(message, 502, undefined, 'provider_rate_limited', 'shared'))
+
+    const result = await attemptAnswer(fetchAnswer, 'q', CHUNKS, SHARED_CONFIG, 60_000)
+
+    expect(result).toEqual({
+      outcome: 'error',
+      message,
+      status: 502,
+      resetAt: undefined,
+      code: 'provider_rate_limited',
+      source: 'shared',
+    })
   })
 })

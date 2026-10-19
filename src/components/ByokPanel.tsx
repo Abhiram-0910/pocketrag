@@ -1,17 +1,24 @@
-import { useState } from 'react'
+import { useImperativeHandle, useRef, useState, type Ref } from 'react'
+import { flushSync } from 'react-dom'
 import { Eye, EyeSlash } from '@phosphor-icons/react'
 import type { KeyConfig } from '../lib/answerRequest'
-import { fetchModelsFromWorker, type ModelInfo } from '../lib/models'
-import { WorkerRequestError } from '../lib/apiError'
+import { defaultModelFor, fetchModelsFromWorker, type ModelInfo, type Provider } from '../lib/models'
+import { WorkerRequestError, failureAction, type FailureAction } from '../lib/apiError'
 import { classify, type TaxonomyResult } from '../lib/errorTaxonomy'
 import { StatusBanner } from './ui/StatusBanner'
 import { Button } from './ui/Button'
 
-interface ByokPanelProps {
-  onChange: (config: KeyConfig | null) => void
+/** Lets QueryPanel's answer-failure actions (via App) reach this panel's local state. */
+export interface ByokPanelHandle {
+  handleFailureAction: (action: FailureAction) => void
 }
 
-type Provider = 'gemini' | 'openai' | 'anthropic' | 'grok' | 'openrouter'
+interface ByokPanelProps {
+  onChange: (config: KeyConfig | null) => void
+  ref?: Ref<ByokPanelHandle>
+}
+
+type PanelError = TaxonomyResult & { action?: FailureAction | null }
 
 const PROVIDER_LABELS: Record<Provider, string> = {
   gemini: 'Gemini',
@@ -23,20 +30,12 @@ const PROVIDER_LABELS: Record<Provider, string> = {
 
 // Providers live-verified end-to-end against their real API (see AGENTS.md session
 // logs). Everything else here is shipped selectable but flagged Experimental — built
-// and unit-tested against mocked responses, never exercised against a real account. A
-// failure on an Experimental provider is logged server-side (worker/src/index.ts's
-// logProviderError) and surfaced to the user as a calm generic message, never raw
-// provider error text — see QueryPanel's answerError display.
+// and unit-tested against mocked responses, never shown to produce a real answer. Its
+// failures are classified by the Worker like any other provider's (worker/src/index.ts's
+// classifyStatus) and shown as that code's fixed copy; only a failure the Worker can't
+// classify gets the "isn't fully supported yet" copy. Must match worker/src/validate.ts's
+// EXPERIMENTAL_PROVIDERS (experimentalProviders.test.ts).
 const EXPERIMENTAL_PROVIDERS: Provider[] = ['anthropic', 'grok', 'openrouter']
-
-// Gemini's /models list isn't filtered by "available to new users" — it can return a
-// since-deprecated model (e.g. gemini-2.5-flash) ahead of working ones, so picking
-// fetched[0] blindly can auto-select a model that 404s on the very first real question.
-// Prefer the same model the shared tier already pins for exactly this reason
-// (worker/src/providers/gemini.ts's DEFAULT_SHARED_MODEL) when it's present in the
-// fetched list; fall back to fetched[0] only if it's genuinely absent. Found live via
-// Milestone 16's BYOK-Gemini retest (Session 28).
-const PREFERRED_GEMINI_MODEL = 'gemini-3.5-flash-lite'
 
 /**
  * Own-key entry: provider picker, key input, "fetch models" call, model picker. The key
@@ -46,15 +45,18 @@ const PREFERRED_GEMINI_MODEL = 'gemini-3.5-flash-lite'
  * `null` whenever BYOK is selected but not yet complete (no key, or key not yet resolved
  * to a model), so the caller never silently falls back to the shared key mid-setup.
  */
-export function ByokPanel({ onChange }: ByokPanelProps) {
+export function ByokPanel({ onChange, ref }: ByokPanelProps) {
   const [useOwnKey, setUseOwnKey] = useState(false)
   const [provider, setProvider] = useState<Provider>('gemini')
   const [apiKey, setApiKey] = useState('')
   const [models, setModels] = useState<ModelInfo[]>([])
   const [selectedModel, setSelectedModel] = useState('')
   const [fetching, setFetching] = useState(false)
-  const [error, setError] = useState<TaxonomyResult | null>(null)
+  const [error, setError] = useState<PanelError | null>(null)
   const [showKey, setShowKey] = useState(false)
+  const providerSelectRef = useRef<HTMLSelectElement>(null)
+  const keyInputRef = useRef<HTMLInputElement>(null)
+  const modelSelectRef = useRef<HTMLSelectElement>(null)
 
   const handleToggle = (next: boolean) => {
     setUseOwnKey(next)
@@ -98,17 +100,24 @@ export function ByokPanel({ onChange }: ByokPanelProps) {
         onChange(null)
         return
       }
-      const defaultModel =
-        (provider === 'gemini' && fetched.find((m) => m.id === PREFERRED_GEMINI_MODEL)) || fetched[0]
+      // '' leaves the "Choose a model" placeholder selected and the key config unset, so
+      // Ask stays disabled until the user picks a model themselves.
+      const defaultModel = defaultModelFor(provider, fetched)
       setModels(fetched)
-      setSelectedModel(defaultModel.id)
-      onChange({ keySource: 'own', apiKey: trimmedKey, provider, model: defaultModel.id })
+      setSelectedModel(defaultModel)
+      onChange(defaultModel ? { keySource: 'own', apiKey: trimmedKey, provider, model: defaultModel } : null)
     } catch (err) {
-      const classified =
-        err instanceof WorkerRequestError
-          ? classify({ message: err.message, status: err.status, resetAt: err.resetAt })
-          : classify({ message: err instanceof Error ? err.message : 'Failed to fetch model list.' })
-      setError(classified)
+      if (err instanceof WorkerRequestError) {
+        const action = failureAction(err.code, err.source)
+        setError({
+          ...classify({ message: err.message, status: err.status, resetAt: err.resetAt }),
+          // A failed fetch leaves no model list to choose from, and /models is always
+          // own-key, so only these two actions make sense here.
+          action: action === 'check-key' || action === 'retry' ? action : null,
+        })
+      } else {
+        setError(classify({ message: err instanceof Error ? err.message : 'Failed to fetch model list.' }))
+      }
       setModels([])
       setSelectedModel('')
       onChange(null)
@@ -121,6 +130,35 @@ export function ByokPanel({ onChange }: ByokPanelProps) {
     setSelectedModel(modelId)
     onChange({ keySource: 'own', apiKey: apiKey.trim(), provider, model: modelId })
   }
+
+  // key_rejected: the fetched list belongs to a key the provider just refused — drop it
+  // and send the user to the key. "Fetch models" stays enabled for the same key, so a
+  // key that was only temporarily rejected can be re-fetched without retyping it.
+  const handleFailureAction = (action: FailureAction) => {
+    switch (action) {
+      case 'check-key':
+        setModels([])
+        setSelectedModel('')
+        onChange(null)
+        keyInputRef.current?.focus()
+        break
+      case 'choose-model':
+        modelSelectRef.current?.focus()
+        break
+      case 'use-own-key':
+        // flushSync so the provider select is mounted before we focus it.
+        if (!useOwnKey) flushSync(() => handleToggle(true))
+        providerSelectRef.current?.focus()
+        break
+      case 'retry':
+        void handleFetchModels()
+        break
+    }
+  }
+
+  useImperativeHandle(ref, () => ({ handleFailureAction }))
+
+  const errorAction = error?.action ?? null
 
   return (
     <div className="text-left text-sm">
@@ -137,6 +175,8 @@ export function ByokPanel({ onChange }: ByokPanelProps) {
       {useOwnKey && (
         <div className="mt-2 space-y-2 rounded border border-slate-200 p-3 dark:border-slate-700">
           <select
+            ref={providerSelectRef}
+            aria-label="Provider"
             value={provider}
             onChange={(e) => handleProviderChange(e.target.value as Provider)}
             className="min-h-11 w-full rounded border border-slate-300 px-2 py-1.5 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
@@ -150,14 +190,16 @@ export function ByokPanel({ onChange }: ByokPanelProps) {
 
           {EXPERIMENTAL_PROVIDERS.includes(provider) && (
             <StatusBanner variant="warning">
-              Experimental — this provider hasn't been verified against a live account yet. If something goes
-              wrong, you'll see a generic error message.
+              Experimental — this provider hasn't been verified end to end with a real API key yet, so it may not
+              work.
             </StatusBanner>
           )}
 
           <div className="flex gap-2">
             <div className="relative flex-1">
               <input
+                ref={keyInputRef}
+                aria-label={`${PROVIDER_LABELS[provider]} API key`}
                 type={showKey ? 'text' : 'password'}
                 value={apiKey}
                 onChange={(e) => handleApiKeyChange(e.target.value)}
@@ -181,10 +223,15 @@ export function ByokPanel({ onChange }: ByokPanelProps) {
 
           {models.length > 0 && (
             <select
+              ref={modelSelectRef}
+              aria-label="Model"
               value={selectedModel}
               onChange={(e) => handleModelChange(e.target.value)}
               className="min-h-11 w-full rounded border border-slate-300 px-2 py-1.5 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
             >
+              <option value="" disabled>
+                Choose a model
+              </option>
               {models.map((model) => (
                 <option key={model.id} value={model.id}>
                   {model.displayName}
@@ -193,7 +240,18 @@ export function ByokPanel({ onChange }: ByokPanelProps) {
             </select>
           )}
 
-          {error && <StatusBanner variant={error.severity}>{error.message}</StatusBanner>}
+          <div aria-live="polite" aria-atomic="true">
+            {error && (
+              <StatusBanner variant={error.severity} inLiveRegion>
+                <span className="block">{error.message}</span>
+                {errorAction && (
+                  <Button variant="secondary" className="mt-2" onClick={() => handleFailureAction(errorAction)}>
+                    {errorAction === 'check-key' ? 'Check your key' : 'Try again'}
+                  </Button>
+                )}
+              </StatusBanner>
+            )}
+          </div>
         </div>
       )}
     </div>

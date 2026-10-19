@@ -30,6 +30,7 @@ import {
   DISCORD_SUPPRESS_WINDOW_SECONDS,
   type DiscordEndpoint,
 } from './discord'
+import type { FailureCode } from './failureCodes'
 
 const RATE_LIMIT_MESSAGE = "You've hit today's request limit. Please try again tomorrow."
 // Client-facing copy per failure code. The provider's own text (safeMessage) never goes
@@ -52,8 +53,6 @@ const PROVIDER_UNAVAILABLE_MESSAGE = "The provider couldn't respond right now. P
 const SHARED_UNAVAILABLE_MESSAGE =
   "The free tier couldn't respond right now. Try again in a moment, or use your own API key."
 const OCR_UNAVAILABLE_MESSAGE = "OCR isn't available right now. Please try again in a moment."
-
-type FailureCode = 'key_rejected' | 'provider_rate_limited' | 'request_rejected' | 'provider_unavailable'
 
 interface ProviderFailure {
   provider: SupportedProvider

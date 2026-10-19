@@ -1,4 +1,4 @@
-import { WorkerRequestError, parseWorkerErrorResponse } from './apiError'
+import { WorkerRequestError, parseWorkerErrorResponse, type FailureCode, type FailureSource } from './apiError'
 
 // The Worker owns Doc N labelling and returns this label→documentId map so the client
 // can resolve real titles for the legend/Sources (documentId → fileName lives locally).
@@ -90,7 +90,14 @@ export type AnswerAttemptResult =
       searchEntryPointHtml?: string
     }
   | { outcome: 'timeout' }
-  | { outcome: 'error'; message: string; status?: number; resetAt?: string }
+  | {
+      outcome: 'error'
+      message: string
+      status?: number
+      resetAt?: string
+      code?: FailureCode
+      source?: FailureSource
+    }
 
 function isAbortError(err: unknown): boolean {
   return err instanceof DOMException && err.name === 'AbortError'
@@ -122,7 +129,14 @@ export async function attemptAnswer(
   } catch (err) {
     if (isAbortError(err)) return { outcome: 'timeout' }
     if (err instanceof WorkerRequestError) {
-      return { outcome: 'error', message: err.message, status: err.status, resetAt: err.resetAt }
+      return {
+        outcome: 'error',
+        message: err.message,
+        status: err.status,
+        resetAt: err.resetAt,
+        code: err.code,
+        source: err.source,
+      }
     }
     return { outcome: 'error', message: err instanceof Error ? err.message : 'unknown error' }
   } finally {

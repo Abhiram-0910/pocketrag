@@ -7,6 +7,9 @@ interface StatusBannerProps {
   variant: StatusVariant
   children: ReactNode
   className?: string
+  // Set when rendered inside an always-mounted aria-live container, which does the
+  // announcing — the banner then drops its own role so it isn't announced twice.
+  inLiveRegion?: boolean
 }
 
 const VARIANT_CONFIG: Record<StatusVariant, { icon: Icon; classes: string }> = {
@@ -29,11 +32,11 @@ const VARIANT_CONFIG: Record<StatusVariant, { icon: Icon; classes: string }> = {
 }
 
 /** Shared status/error/warning/success/info banner — one visual convention, replaces every ad-hoc colored box. */
-export function StatusBanner({ variant, children, className = '' }: StatusBannerProps) {
+export function StatusBanner({ variant, children, className = '', inLiveRegion = false }: StatusBannerProps) {
   const { icon: VariantIcon, classes } = VARIANT_CONFIG[variant]
   return (
     <div
-      role={variant === 'error' ? 'alert' : 'status'}
+      role={inLiveRegion ? undefined : variant === 'error' ? 'alert' : 'status'}
       className={`flex items-start gap-2 rounded border p-2 text-xs ${classes} ${className}`}
     >
       <VariantIcon className="mt-0.5 size-4 shrink-0" weight="bold" aria-hidden="true" />

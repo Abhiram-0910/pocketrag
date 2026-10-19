@@ -1,4 +1,5 @@
-import { useCallback, useState, type FormEvent } from 'react'
+import { useCallback, useRef, useState, type FormEvent } from 'react'
+import { flushSync } from 'react-dom'
 import { embedQuery, rerankChunks } from '../lib/embeddingClient'
 import { getAllChunks, getChunksForDocument, type ChunkRecord } from '../lib/db'
 import { hybridRankChunks, type ScoredChunk } from '../lib/retrieval'
@@ -22,6 +23,7 @@ import { sanitizeGroundingHtml } from '../lib/sanitizeHtml'
 import { buildConversationPdf, type ExportSource } from '../lib/pdfExport'
 import { canRunQuery } from '../lib/queryScope'
 import { classify, type TaxonomyResult } from '../lib/errorTaxonomy'
+import { failureAction, type FailureAction } from '../lib/apiError'
 import { getSessionFile } from '../lib/sessionFiles'
 import { useDocumentStore } from '../store/documentStore'
 import { StatusBanner } from './ui/StatusBanner'
@@ -43,6 +45,16 @@ const SENT_HISTORY_TURNS = 3
 
 interface QueryPanelProps {
   keyConfig: KeyConfig | null
+  // Answer-failure actions that act on the BYOK panel (check key, choose model, use own
+  // key); 'retry' is handled here.
+  onFailureAction?: (action: FailureAction) => void
+}
+
+const FAILURE_ACTION_LABELS: Record<FailureAction, string> = {
+  'check-key': 'Check your key',
+  'use-own-key': 'Use your own key',
+  'choose-model': 'Choose another model',
+  retry: 'Try again',
 }
 
 interface ConversationTurn {
@@ -85,17 +97,18 @@ function rerankChunksAsync(
   })
 }
 
-export function QueryPanel({ keyConfig }: QueryPanelProps) {
+export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
   const [query, setQuery] = useState('')
   const [busy, setBusy] = useState(false)
   const [awaitingAnswer, setAwaitingAnswer] = useState(false)
   const [timedOut, setTimedOut] = useState(false)
+  const queryInputRef = useRef<HTMLInputElement>(null)
   const [error, setError] = useState<string | null>(null)
   const [results, setResults] = useState<ScoredChunk<ChunkRecord>[] | null>(null)
   const [submittedQuestion, setSubmittedQuestion] = useState<string | null>(null)
   const [answer, setAnswer] = useState<string | null>(null)
   const [groundingWarning, setGroundingWarning] = useState(false)
-  const [answerError, setAnswerError] = useState<TaxonomyResult | null>(null)
+  const [answerError, setAnswerError] = useState<(TaxonomyResult & { action: FailureAction | null }) | null>(null)
   const [docLabels, setDocLabels] = useState<DocLabel[]>([])
   const [conversationTurns, setConversationTurns] = useState<ConversationTurn[]>([])
   const [scope, setScope] = useState<'document' | 'all'>('document')
@@ -182,7 +195,9 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
     ) => {
       setAwaitingAnswer(true)
       setTimedOut(false)
-      if (!isRetry) setAnswerError(null)
+      // Cleared on retry too: a retry can now come from a failure banner's "Try again",
+      // and a stale failure must not sit beside the answer that retry produced.
+      setAnswerError(null)
 
       const requestChunks = chunks.map(({ chunk, score }) => ({
         text: chunk.text,
@@ -234,14 +249,15 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
           setAnswerError({
             type: 'unknown',
             severity: 'warning',
-            message: 'Answer generation timed out again — showing raw matched passages below.',
+            message: 'Answer generation timed out again.',
+            action: null,
           })
         } else {
           setTimedOut(true)
         }
       } else {
         const classified = classify({ message: result.message, status: result.status, resetAt: result.resetAt })
-        setAnswerError({ ...classified, message: `${classified.message} — showing raw matched passages below.` })
+        setAnswerError({ ...classified, action: failureAction(result.code, result.source) })
       }
       setAwaitingAnswer(false)
     },
@@ -380,9 +396,12 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
   const handleRetry = useCallback(() => {
     if (!submittedQuestion || !results || keyConfig === null) return
     setBusy(true)
-    runAnswerAttempt(submittedQuestion, results, true, keyConfig, pendingImage, pendingWebSearchEnabled).finally(() =>
-      setBusy(false),
-    )
+    runAnswerAttempt(submittedQuestion, results, true, keyConfig, pendingImage, pendingWebSearchEnabled).finally(() => {
+      // The banner holding "Try again" unmounts when the retry starts, dropping focus to
+      // <body>; the input is disabled while busy, so re-enable it first, then focus it.
+      flushSync(() => setBusy(false))
+      queryInputRef.current?.focus()
+    })
   }, [submittedQuestion, results, runAnswerAttempt, keyConfig, pendingImage, pendingWebSearchEnabled])
 
   // Resets the conversation itself — turn history, the frozen Doc N map (so numbering
@@ -417,6 +436,8 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
     }))
     buildConversationPdf(conversationTurns, sources, titleFor).save('pocketrag-conversation.pdf')
   }, [conversationTurns, results, titleFor])
+
+  const answerAction = answerError?.action ?? null
 
   const placeholder = canQuery
     ? scope === 'all'
@@ -482,14 +503,15 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
           <span>
             Allow Gemini to search the web (Experimental)
             <span className="block text-slate-400 dark:text-slate-500">
-              Lets Gemini check the live web when useful. Not yet verified against a live billing-enabled
-              account — if something goes wrong, you'll see a generic error message.
+              Lets Gemini check the live web when useful. Not yet verified end to end with a billing-enabled
+              API key, so it may not work.
             </span>
           </span>
         </label>
       )}
       <form onSubmit={handleSubmit} className="flex flex-col gap-2 sm:flex-row">
         <input
+          ref={queryInputRef}
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -645,11 +667,23 @@ export function QueryPanel({ keyConfig }: QueryPanelProps) {
         </details>
       )}
 
-      {answerError && (
-        <StatusBanner variant={answerError.severity} className="mt-4">
-          {answerError.message}
-        </StatusBanner>
-      )}
+      <div aria-live="polite" aria-atomic="true">
+        {answerError && (
+          <StatusBanner variant={answerError.severity} className="mt-4" inLiveRegion>
+            <span className="block">{answerError.message}</span>
+            <span className="block">Showing raw matched passages below.</span>
+            {answerAction && (
+              <Button
+                variant="secondary"
+                className="mt-2"
+                onClick={() => (answerAction === 'retry' ? handleRetry() : onFailureAction?.(answerAction))}
+              >
+                {FAILURE_ACTION_LABELS[answerAction]}
+              </Button>
+            )}
+          </StatusBanner>
+        )}
+      </div>
 
       {results && results.length > 0 && (
         <details className="mt-4" open={!answer}>

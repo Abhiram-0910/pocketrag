@@ -22,6 +22,14 @@ describe('classify', () => {
     expect(result.message).toBe("This provider isn't fully supported yet.")
   })
 
+  it('never treats a provider rate limit (502) as our own limit, even if the body carried a resetAt', () => {
+    const message = 'Your provider account hit its rate limit, quota, or credit balance. Wait a moment or check your plan.'
+    const result = classify({ message, status: 502, resetAt: '2026-08-12T00:00:00.000Z' })
+    expect(result.type).toBe('provider-unavailable')
+    expect(result.message).toBe(message)
+    expect(result.message).not.toContain('Resets at')
+  })
+
   it('classifies any other Worker status as unknown, preserving the message', () => {
     const result = classify({ message: 'question must be a non-empty string.', status: 400 })
     expect(result.type).toBe('unknown')

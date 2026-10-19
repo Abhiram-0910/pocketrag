@@ -3,7 +3,7 @@ import { DropZone } from './components/DropZone'
 import { NotesDropZone } from './components/NotesDropZone'
 import { DocumentList } from './components/DocumentList'
 import { QueryPanel } from './components/QueryPanel'
-import { ByokPanel } from './components/ByokPanel'
+import { ByokPanel, type ByokPanelHandle } from './components/ByokPanel'
 import { LandingPage } from './components/LandingPage'
 import { getAllDocuments } from './lib/db'
 import type { KeyConfig } from './lib/answerRequest'
@@ -18,6 +18,9 @@ function App() {
   // Matches ByokPanel's default (unchecked) state — the shared key until the user
   // opts into BYOK and completes key entry.
   const [keyConfig, setKeyConfig] = useState<KeyConfig | null>({ keySource: 'shared' })
+  // The key and model list live only in ByokPanel's local state (never shared state), so
+  // QueryPanel's answer-failure actions reach them through this handle.
+  const byokPanel = useRef<ByokPanelHandle>(null)
   // Milestone 9: the tab only gates which upload/list UI is shown — QueryPanel below
   // stays visible and searches the combined pool regardless of the active tab (the
   // trust-sensitive step already happened at OCR-consent time, not at query time).
@@ -103,8 +106,8 @@ function App() {
             <DocumentList source="note" />
           </>
         )}
-        <ByokPanel onChange={setKeyConfig} />
-        <QueryPanel keyConfig={keyConfig} />
+        <ByokPanel ref={byokPanel} onChange={setKeyConfig} />
+        <QueryPanel keyConfig={keyConfig} onFailureAction={(action) => byokPanel.current?.handleFailureAction(action)} />
       </div>
     </main>
   )

@@ -5,8 +5,29 @@ export interface ModelInfo {
   displayName: string
 }
 
+export type Provider = 'gemini' | 'openai' | 'anthropic' | 'grok' | 'openrouter'
+
+// Gemini's /models list isn't filtered by "available to new users" — it can return a
+// since-deprecated model (e.g. gemini-2.5-flash) ahead of working ones, so picking
+// fetched[0] blindly can auto-select a model that 404s on the very first real question.
+// The shared tier pins this same model for exactly this reason (worker/src/providers/
+// gemini.ts's DEFAULT_SHARED_MODEL). Found live via Milestone 16's BYOK-Gemini retest
+// (Session 28).
+export const PREFERRED_GEMINI_MODEL = 'gemini-3.5-flash-lite'
+
+/**
+ * The model to pre-select after a fetch, or '' for "Choose a model". Only Gemini's
+ * pinned model is ever auto-selected: no other provider's list order is a safe default
+ * (OpenAI/OpenRouter/Grok are unordered or include models that can't answer; Anthropic's
+ * newest-first would silently pick the most expensive model).
+ */
+export function defaultModelFor(provider: Provider, fetched: ModelInfo[]): string {
+  if (provider === 'gemini' && fetched.some((m) => m.id === PREFERRED_GEMINI_MODEL)) return PREFERRED_GEMINI_MODEL
+  return ''
+}
+
 export type FetchModelsFn = (
-  provider: 'gemini' | 'openai' | 'anthropic' | 'grok' | 'openrouter',
+  provider: Provider,
   apiKey: string,
 ) => Promise<ModelInfo[]>
 

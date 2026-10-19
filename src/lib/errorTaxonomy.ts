@@ -18,12 +18,12 @@ const PROVIDER_UNAVAILABLE_STATUS = 502
 
 /**
  * Classifies a Worker API failure (from /answer or /models) into a plain-language
- * taxonomy type. Note there is no separate "invalid key" type: the Worker
- * deliberately sanitizes every provider-call failure (bad key, provider outage,
- * unsupported model, etc.) into the same generic 502 message across all 5 providers
- * (see AGENTS.md Sessions 11-13) — that's a security decision, not a gap here, so
- * "invalid key" and "provider down" are genuinely indistinguishable client-side and
- * both map to `provider-unavailable`.
+ * taxonomy type, keyed on HTTP status only. Every provider-call failure is a 502 whose
+ * `error` is already user-ready copy (bad key, provider rate limit, rejected request,
+ * outage — see the Worker's classification table in ARCHITECTURE.md), so all of them
+ * map to `provider-unavailable` with the message shown as-is. What the UI *offers*
+ * per failure (check key, retry, …) comes from the 502's `code` via apiError.ts's
+ * failureAction, not from here. Only our own per-IP limit is a 429 with `resetAt`.
  */
 export function classify(input: ClassifiableError): TaxonomyResult {
   if (input.status === RATE_LIMIT_STATUS) {
