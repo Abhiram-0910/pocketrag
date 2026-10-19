@@ -34,8 +34,8 @@ server-side log, confirmed via `wrangler tail` for all three), but their *succes
 path (an actual working answer) is not yet proven against a real key for any of the
 three. A uniform log-and-sanitize path (`logProviderError` in `worker/src/index.ts`)
 covers all 5 providers: any provider-call failure logs a structured, key-free entry
-server-side and returns a calm generic message to the client instead of raw provider
-error text. 60s timeout + manual retry still there as a demo-day safety net.
+server-side and returns a fixed per-code message (Step A classification) instead of raw
+provider error text; the UI shows it verbatim with a per-code action (Step B). 60s timeout + manual retry still there as a demo-day safety net.
 
 ---
 
@@ -63,6 +63,15 @@ error text. 60s timeout + manual retry still there as a demo-day safety net.
      (captured live with a fake key), so `classify()` maps it to `key_rejected`. If
      it has no key-specific code, check whether the 400 message matches
      `/\bapi key\b/i` or the status is 401/403.
+
+## Standing Rules — frontend failure UI (Step B, `32e3d09`)
+
+- **The UI shows the Worker's `error` string verbatim and uses `code` only to pick an
+  action** (`failureAction()` in `src/lib/apiError.ts`). Never branch copy on `code`
+  client-side, and never render provider text — the Worker owns the wording.
+- **Adding a `FailureCode` means editing BOTH** `worker/src/failureCodes.ts` and the
+  copy in `src/lib/apiError.ts` (plus a `failureAction` case). The frontend never
+  imports Worker code; `src/lib/failureCodes.test.ts` fails if the two drift.
 
 ---
 

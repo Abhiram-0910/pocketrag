@@ -15,14 +15,22 @@ Read this at the start of every session to know what to work on next.
       `GET /key` gate, tier-aware Discord gating. Commit `85a925d`; Worker deployed as
       `b612f443` (rollback target: prior version `7cc4bd27`). See ARCHITECTURE.md
       (classification table) and SECURITY_REVIEW.md §6 (Step A update).
-- [ ] **Step B** — frontend per-code messages from the Worker's `code`/`source`
-      fields; a "check your key" action on `key_rejected`; stop auto-selecting
-      `fetched[0]` as the model for OpenAI/OpenRouter.
+- [x] **Step B** — UI shows the Worker's `error` verbatim and picks an action from
+      `code`/`source` (Check your key / Use your own key / Choose another model / Try
+      again, with focus moves); explicit model choice after a fetch (only Gemini's
+      pinned model is auto-selected); always-mounted `aria-live` failure regions;
+      `FAILURE_CODES` parity test; `e2e/step-b-failures.cjs`. Commit `32e3d09`; Pages
+      deployed as `f7043c66` (rollback target: `869ce49a`). See ARCHITECTURE.md (Step B
+      entries) and AGENTS.md (Step B standing rules).
 - [ ] **Step C** — Pages `_headers` with a CSP (report-only first, then enforce);
       serve ONNX wasm locally via `wasmPaths`; narrow `img-src`; bump DOMPurify.
 - [ ] **Step D** — server-issued `retryAfterSeconds` + `date` on rate-limit responses
       and a live countdown in the UI, for our own buckets only (not provider limits).
-- [ ] Egress ledger: one documented list of every host the app and Worker contact.
+  - [ ] Decide whether shared-tier provider failures refund the per-IP quota: today
+        every 502 spends one request (`worker/src/index.ts` counter increments before
+        dispatch, `rateLimit.ts:52`); own-key failures should NOT refund (fake-key spam).
+- [ ] Per-answer egress ledger (user-visible: what left the browser, destination host,
+      route, status, latency, per answer)
 - [ ] Shared-Gemini free-tier data-use disclosure in the UI and README (free-tier
       Gemini may use inputs to improve Google's products).
 - [ ] Discord: create an Admin server and rotate the webhook (the old webhook is
@@ -36,8 +44,11 @@ Read this at the start of every session to know what to work on next.
 - [ ] IndexedDB export (documents + conversations).
 - [ ] Client-side error monitoring.
 - [ ] CI + E2E tests.
-- [ ] a11y: `aria-live` for answer/status updates, autofill handling, a proper
-      label on the API-key input.
+  - [ ] Wire `e2e/step-b-failures.cjs` into CI when the CI item lands.
+- [ ] a11y: `aria-live` for the answer itself and other status updates (failure
+      banners done in Step B), autofill handling. (API-key input label done in Step B.)
+- [ ] Verify the `aria-live` announcements with a real screen reader (NVDA/Narrator);
+      only DOM-checked so far.
 - [ ] PWA (manifest + offline shell).
 
 ### Earlier sprint notes
@@ -829,7 +840,8 @@ plan at `~/.claude/plans/snoopy-stirring-tide.md` (Sessions A-D).
   only works because of the uniform log-and-sanitize path added the same session
   (`logProviderError` in `index.ts`, applied to all 5 providers): any failure is caught,
   logged server-side with full diagnostic detail (key-free, structured, lands in Workers
-  Logs automatically), and the client only ever sees a calm generic message — so an
+  Logs automatically), and the client only ever sees fixed per-code copy (never
+  provider text; Step A/B) — so an
   Experimental provider's failure mode is safe to expose to real traffic even before its
   success path is proven. `worker/src/providers/<name>.ts` + full mocked-response unit
   tests (including the two key-leak tests) still ship and deploy on the Worker side

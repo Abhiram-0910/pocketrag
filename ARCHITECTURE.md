@@ -78,6 +78,8 @@ pocketrag/
 | `src/lib/conversation.ts` | `buildRetrievalQuery()` — blends the immediately preceding question into retrieval only, never sent to the Worker as-is (see Key Architectural Decisions) |
 | `src/lib/answerRequest.ts` | `attemptAnswer()` — one answer attempt wrapped in an `AbortController` ~60s timeout, discriminated `{outcome}` return instead of throwing |
 | `src/lib/errorTaxonomy.ts` | Maps every failure (rate-limit, provider-unavailable, network, corrupt-pdf, webgpu-unsupported, unknown) to a severity + plain-language message |
+| `src/lib/apiError.ts` | `WorkerRequestError` + `parseWorkerErrorResponse` (status-gated `resetAt` / `code` / `source`), `FAILURE_CODES` (parity-tested against `worker/src/failureCodes.ts`), `failureAction()` |
+| `e2e/step-b-failures.cjs` | Manual Playwright run (global install, not a dependency) against `vite preview`, route-mocked: each failure code's banner, action, focus target, and live-region placement |
 | `src/lib/diagramHeuristic.ts`, `src/lib/pageRender.ts`, `src/lib/sessionFiles.ts` | Diagram-aware Q&A (Milestone 10): lexical diagram-likely detection, on-demand page-image rendering, and the session-only (never persisted) raw-`File` cache page rendering needs |
 | `src/lib/diagramImageSetting.ts`, `src/lib/webSearchSetting.ts`, `src/lib/landingVisitSetting.ts` | Opt-in localStorage flags (diagram image sending, Gemini web-search grounding, landing-page-seen) — all default OFF/unset, same read-once-at-mount pattern |
 | `src/lib/ocrRequest.ts` | Client-side call to the Worker's `/ocr` endpoint for Notes-tab transcription |
@@ -317,8 +319,8 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
   provider code + scrubbed message) into one of four codes, and the client gets a
   fixed string for that code — never provider text. HTTP status stays **502** for
   every provider failure (the frontend's `errorTaxonomy.ts` keys off it); `code`, and
-  `source` (`shared`|`own`) on rate limits, are additive JSON fields the frontend
-  doesn't consume yet (Step B). Checked in order:
+  `source` (`shared`|`own`) on rate limits, are additive JSON fields that only pick a
+  UI action (Step B, below). Checked in order:
 
   | Tier | Status / signal | `code` | Client copy |
   |---|---|---|---|
@@ -333,6 +335,30 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
   The shared tier never says "your key" or "your request" — the key is ours. `/models`
   is always classified as `own`. Our own per-IP rate limit is separate: it returns
   429 before any provider call.
+- **The UI shows the Worker's `error` verbatim; `code` only picks an action (Step B,
+  `32e3d09`).** `src/lib/apiError.ts`'s `parseWorkerErrorResponse` reads fields by
+  status — `resetAt` only on our own 429, `code`/`source` only on a 502, unknown values
+  dropped — so a provider rate limit can never render as ours, and an older Worker
+  with no `code` still shows its message with no action. `failureAction(code, source)`
+  maps `key_rejected` → "Check your key", `provider_rate_limited` + `shared` → "Use
+  your own key" (own → none), `request_rejected` → "Choose another model",
+  `provider_unavailable` → "Try again". `FAILURE_CODES` lives in
+  `worker/src/failureCodes.ts` and is copied (never imported) into `apiError.ts`;
+  `src/lib/failureCodes.test.ts` fails if they drift. The key and model list stay in
+  `ByokPanel`'s local state, so `QueryPanel`'s actions reach it through a
+  `ByokPanelHandle` ref (`useImperativeHandle`, wired in `App.tsx`): check-key clears
+  the model list and selection and focuses the key input (key kept, re-fetchable
+  without retyping); choose-model focuses the model select without clearing it;
+  use-own-key turns BYOK on and focuses the provider select; retry re-runs the answer
+  and then focuses the question input. Failure banners render inside always-mounted
+  `aria-live="polite" aria-atomic="true"` containers (`StatusBanner inLiveRegion`
+  drops its own role so nothing is announced twice).
+- **Explicit model choice after a fetch (Step B).** `src/lib/models.ts`'s
+  `defaultModelFor` pre-selects only Gemini's pinned `PREFERRED_GEMINI_MODEL`, and only
+  if the fetched list contains it; every other case leaves a disabled "Choose a model"
+  placeholder and no key config, so Search stays disabled until the user picks. No
+  provider's list order is a safe default (OpenAI/OpenRouter/Grok are unordered or
+  include models that can't answer; Anthropic's newest-first would pick the priciest).
 
 ---
 
