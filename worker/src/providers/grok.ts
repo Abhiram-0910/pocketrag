@@ -1,6 +1,6 @@
 import { providerError } from './errors'
 
-const API_BASE = 'https://api.x.ai/v1'
+export const API_BASE = 'https://api.x.ai/v1'
 
 interface GrokChatResponse {
   choices?: { message?: { content?: string } }[]

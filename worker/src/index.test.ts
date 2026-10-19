@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import worker from './index'
+import { DEFAULT_SHARED_MODEL } from './providers/gemini'
 import type { KVLike } from './rateLimit'
 
 // No real Workers runtime in these tests (plain node vitest, no Miniflare), so
@@ -291,6 +292,52 @@ describe('worker fetch handler — /answer, shared key', () => {
       makeEnv(), makeCtx()
     )
     expect(res.headers.get('Access-Control-Allow-Origin')).toBeNull()
+  })
+})
+
+describe('worker fetch handler — /answer provider/model echo', () => {
+  type Echo = { provider?: string; model?: string }
+
+  it('shared tier: echoes gemini and the model of the one upstream call that answered', async () => {
+    mockGeminiSuccess('answer (Doc 1, page 1).')
+    const res = await worker.fetch(answerRequest(validBody), makeEnv(), makeCtx())
+
+    expect(res.status).toBe(200)
+    const data = (await res.json()) as Echo
+    const calls = vi.mocked(fetch).mock.calls
+    expect(calls).toHaveLength(1)
+    expect(String(calls[0][0])).toContain(`/models/${data.model}:generateContent`)
+    expect(data).toMatchObject({ provider: 'gemini', model: DEFAULT_SHARED_MODEL })
+  })
+
+  it('own key, Gemini: echoes the requested model', async () => {
+    mockGeminiSuccess('answer')
+    const res = await worker.fetch(answerRequest(byokBody), makeEnv(), makeCtx())
+    expect((await res.json()) as Echo).toMatchObject({ provider: 'gemini', model: 'gemini-3.5-pro' })
+  })
+
+  it('own key, OpenAI: echoes the provider and the model sent in the request body', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content: 'answer' } }] }),
+      text: async () => '',
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    const res = await worker.fetch(answerRequest({ ...byokBody, provider: 'openai', model: 'gpt-4o-mini' }), makeEnv(), makeCtx())
+
+    const sent = JSON.parse(String((fetchSpy.mock.calls[0][1] as RequestInit).body)) as { model: string }
+    expect((await res.json()) as Echo).toMatchObject({ provider: 'openai', model: sent.model })
+    expect(sent.model).toBe('gpt-4o-mini')
+  })
+
+  it('a failed answer carries no provider/model fields', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500, text: async () => 'server error' }))
+    const res = await worker.fetch(answerRequest(validBody), makeEnv(), makeCtx())
+    expect(res.status).toBe(502)
+    const data = (await res.json()) as Record<string, unknown>
+    expect(data).not.toHaveProperty('provider')
+    expect(data).not.toHaveProperty('model')
   })
 })
 

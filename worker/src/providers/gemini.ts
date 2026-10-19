@@ -5,7 +5,7 @@ import { providerError } from './errors'
 // not via the floating `gemini-flash-lite-latest` alias. Confirmed working 2026-07-25.
 export const DEFAULT_SHARED_MODEL = 'gemini-3.5-flash-lite'
 
-const API_BASE = 'https://generativelanguage.googleapis.com/v1beta'
+export const API_BASE = 'https://generativelanguage.googleapis.com/v1beta'
 
 // Milestone 12 (Gemini-native grounding): only the fields this file actually reads are
 // typed, matching GeminiGenerateResponse's existing convention below — the real

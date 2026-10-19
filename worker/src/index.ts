@@ -369,6 +369,13 @@ async function handleAnswer(
         // on the ToS requirement to display it alongside any grounded result shown.
         webSources: webGrounding?.webSources ?? [],
         searchEntryPointHtml: webGrounding?.searchEntryPointHtml,
+        // The provider and model this answer came from, so the client's receipt can name
+        // the shared tier's model instead of guessing it. There's no fallback chain: the
+        // switch above made exactly one call, with exactly this model. (A provider-side
+        // router id such as OpenRouter's openrouter/auto is echoed as sent — the provider,
+        // not us, picks the model behind it.)
+        provider,
+        model,
       },
       200,
       origin,

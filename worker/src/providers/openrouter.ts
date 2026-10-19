@@ -1,6 +1,6 @@
 import { providerError } from './errors'
 
-const API_BASE = 'https://openrouter.ai/api/v1'
+export const API_BASE = 'https://openrouter.ai/api/v1'
 // Optional but recommended identifying headers — attribute this app's traffic on
 // OpenRouter's own dashboard. Fixed values, not user-configurable; the first provider
 // on this roadmap needing headers beyond auth on the chat call.

@@ -1,6 +1,6 @@
 import { providerError } from './errors'
 
-const API_BASE = 'https://api.openai.com/v1'
+export const API_BASE = 'https://api.openai.com/v1'
 
 interface OpenAiChatResponse {
   choices?: { message?: { content?: string } }[]

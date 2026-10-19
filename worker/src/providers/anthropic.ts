@@ -1,6 +1,6 @@
 import { providerError } from './errors'
 
-const API_BASE = 'https://api.anthropic.com/v1'
+export const API_BASE = 'https://api.anthropic.com/v1'
 const ANTHROPIC_API_VERSION = '2023-06-01'
 // Anthropic's Messages API requires max_tokens (unlike Gemini/OpenAI, which use a
 // provider-side default) — capped generously above what a grounded-QA answer needs.
