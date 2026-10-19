@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest'
+import DOMPurify from 'dompurify'
+import { describe, expect, it, vi } from 'vitest'
 import { sanitizeGroundingHtml } from './sanitizeHtml'
 
 describe('sanitizeGroundingHtml', () => {
@@ -28,5 +29,15 @@ describe('sanitizeGroundingHtml', () => {
     expect(out).toContain('prefers-color-scheme')
     expect(out).toContain('href="https://google.com/search?q=test"')
     expect(out).toContain('Search suggestion')
+  })
+
+  it('sanitizes a given input once and returns the cached result on re-render', () => {
+    const spy = vi.spyOn(DOMPurify, 'sanitize')
+    const html = '<div class="memo-check"><a href="https://google.com/search?q=memo">memo</a></div>'
+    const first = sanitizeGroundingHtml(html)
+    const second = sanitizeGroundingHtml(html)
+    expect(second).toBe(first)
+    expect(spy).toHaveBeenCalledTimes(1)
+    spy.mockRestore()
   })
 })

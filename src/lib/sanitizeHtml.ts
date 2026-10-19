@@ -1,5 +1,11 @@
 import DOMPurify from 'dompurify'
 
+// QueryPanel calls this during render, for the current answer and every stored turn, so
+// without a cache every re-render re-parses each widget. Keyed by the input string;
+// oldest entry evicted past MAX_CACHED (QueryPanel keeps at most 10 turns + the current one).
+const MAX_CACHED = 16
+const cache = new Map<string, string>()
+
 /**
  * Sanitizes Gemini grounding's searchEntryPoint.renderedContent before it hits
  * dangerouslySetInnerHTML. Google's own docs never state this widget HTML is safe to
@@ -11,5 +17,11 @@ import DOMPurify from 'dompurify'
  * vectors — no custom allowlist needed.
  */
 export function sanitizeGroundingHtml(html: string): string {
-  return DOMPurify.sanitize(html)
+  let clean = cache.get(html)
+  if (clean === undefined) {
+    clean = DOMPurify.sanitize(html)
+    cache.set(html, clean)
+    if (cache.size > MAX_CACHED) cache.delete(cache.keys().next().value as string)
+  }
+  return clean
 }
