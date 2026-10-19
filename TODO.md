@@ -64,21 +64,28 @@ Read this at the start of every session to know what to work on next.
       outbound request goes through (in-memory session log). No UI, no Worker change,
       not deployed. Commits `36ef802`, `3b81d47`. See ARCHITECTURE.md (history DB,
       egress), SECURITY_REVIEW.md §1.1 correction + §8, AGENTS.md (Phase 1 rules).
-- [ ] **Phase 2** — move `QueryPanel` onto `chatStore`: restore conversations on load,
-      conversation list, delete-one (two-step confirm) and delete-all controls, storage
-      banners (`unavailable` / `quota` / `blocked` / `outdated`), drop `QueryPanel`'s own
-      `SENT_HISTORY_TURNS` copy.
-  - [ ] Until then, `QueryPanel` still sends grounded answers as in-session `history`
-        (chatStore's `historyForRequest()` excludes them) — fixed by the move, or by a
-        one-line filter first if web search is promoted before it.
-  - [ ] `settleTurn()` throws if the user switched conversations while the request was
-        in flight (the turn isn't in `turns` any more) — handle when wiring.
-  - [ ] Deleting a conversation that isn't the active one leaves its grounded texts in
-        `chatStore.groundedText` until reload (unreachable, but not freed).
-  - [ ] Persist each turn's egress records (`TurnRecord.egress`) and build the Receipts
-        view; extend step-b (failed turns restored with copy + action, retry adds a
-        record, timed-out / interrupted states) and step-c (history flows + reconcile
-        every observed cross-origin request against the ledger, Chromium).
+- [x] **Phase 2a** — store and egress plumbing + Worker echo (commits `36dea5b`,
+      `c9d54c5`, `f8ab63a`, `5b90205`). Fixed: `settleTurn()` after a conversation
+      switch, grounded entries freed on any conversation's delete. Worker deployed
+      `483afdc9` (rollback target `b612f443-ed53-44e0-8cce-1877c8b7ce2b`); Pages not
+      redeployed.
+- [ ] **Phase 2b** — the UI, per the approved Phase 2 plan: `QueryPanel` onto
+      `chatStore` (restore on load, linear history, `onEgress` → `appendEgress`,
+      echoed `model` → `settleTurn`, Step B behaviors kept, drop its own
+      `SENT_HISTORY_TURNS`), `ConversationList.tsx` (open, delete-one, delete-all,
+      "Delete everything"), the document-delete confirm count, storage banners, the
+      Receipts and This-session views, then Pages preview → production.
+  - [ ] Until then, the live `QueryPanel` still sends grounded answers as in-session
+        `history`, and its answer requests aren't recorded (no `onEgress`).
+  - [ ] e2e: step-b (failed turns restored with copy + action, retry adds a record,
+        timed-out / interrupted states); step-c (history flows; reconcile every
+        observed cross-origin request against the Receipts, `hf.co` hops matching a
+        `huggingface.co` record, `OPTIONS` preflights paired with a POST) on Chromium
+        and Firefox.
+  - [ ] Copy: landing page + README egress claims (wording table in the Phase 2 plan,
+        awaiting approval).
+  - [ ] OpenRouter router ids (`openrouter/auto`): the echo repeats the requested id;
+        the actual model is only in OpenRouter's response `model` field (not read).
 - [ ] Deferred (decide later): branching UI (edit / regenerate / sibling switcher — the
       tree ops exist); OCR and `/models` egress persistence; history export/import
       (pairs with the documents export below; import is a new untrusted input; the

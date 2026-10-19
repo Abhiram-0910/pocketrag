@@ -66,8 +66,10 @@ pocketrag/
 | `src/lib/retrieval.ts` | `rankChunks()` — pure cosine-ranking over an array of `{embedding}` objects, generic over the chunk shape |
 | `src/lib/db.ts` | IndexedDB via `idb`: `documents` + `chunks` object stores, `documentId` index on chunks. `saveDocument()`, `getChunksForDocument()` (this-document scope), `getAllChunks()` (all-documents scope), `getAllDocuments()` (restore-on-reload), `deleteDocument()` (atomic readwrite over both stores, via the `documentId` index). `requestPersistOnce()` asks for `navigator.storage.persist()` once per session, on the first document or chat-turn save. A failed open isn't cached, so the next call retries |
 | `src/lib/historyDb.ts` | Chat history in its own IndexedDB database, `pocketrag-history` (see Key Architectural Decisions): `conversations` + `turns` stores, turns linked into a tree by `parentId`. `saveTurn()` (turn + conversation in one transaction, grounded answer dropped), `getConversations()`, `getTurns()`, `deleteConversation()`, `deleteAllHistory()`, `sweepInterruptedTurns()` |
-| `src/store/chatStore.ts` | Zustand store over `historyDb.ts`: `startTurn()` persists the turn as `pending` and returns the `history` / `docLabels` / blend question for its request; `settleTurn()`, `retryTurn()`, `selectBranch()`, deletes. Grounded answer text lives only in its in-memory `groundedText` map. Not wired into the UI yet (Phase 2) |
-| `src/lib/egress.ts` | The one place the app makes network requests: `egressFetch()` (Worker calls) and `downloadFetch()` (transformers.js `env.fetch`). Records each request (host, payload categories, bytes, timing, outcome) in an in-memory session log. `egress.bypass.test.ts` fails on a raw `fetch(` / XHR / beacon / WebSocket / EventSource anywhere else in `src/` |
+| `src/store/chatStore.ts` | Zustand store over `historyDb.ts`: `startTurn()` persists the turn as `pending` and returns the `history` / `docLabels` / blend question for its request; `settleTurn()`, `retryTurn()`, `appendEgress()`, `selectBranch()`, deletes. An in-flight map lets a request settle and save after the user switches conversations. Grounded results live only in its in-memory `groundedSession` map. Not wired into the UI yet (Phase 2b) |
+| `src/lib/egress.ts` | The one place the app makes network requests: `egressFetch()` (Worker calls) and `downloadFetch()` (transformers.js `env.fetch`). Records each request (host, payload categories and counts, bytes, timing, outcome) to an `onRecord` sink — a turn's `appendEgress` for an answer — or the session log (capped at 200, never takes answers). `egress.bypass.test.ts` fails on a raw `fetch(` / XHR / beacon / WebSocket / EventSource anywhere else in `src/` |
+| `src/lib/receipts.ts` | Plain-language text for the Receipts view: contents ("3 passages from your documents"), status, size, duration, destinations, the one-line total per answer. Pure |
+| `src/lib/allowedDestinations.ts` | `connect-src`'s destinations with plain labels, for the Receipts limits section — a compiled copy; `allowedDestinations.test.ts` fails if it drifts from `public/_headers` |
 | `src/lib/queryScope.ts` | `canRunQuery()` — pure readiness check extracted from `QueryPanel` so scope/selection logic is unit-testable without a DOM |
 | `src/lib/embeddingClient.ts` | Main-thread singleton wrapper around the embedding Worker (typed postMessage protocol): `embedDocument()` and `embedQuery()` |
 | `src/workers/embedding.worker.ts` | Loads tokenizer + model, chunks each page, embeds, and separately embeds single query strings — all model logic lives here, never on the main thread |
@@ -439,7 +441,8 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
     provider, model (`null` on the shared tier: the Worker picks it and doesn't say),
     image/web-search flags, `webGrounded`, the Step A/B failure (`code`, `source`, HTTP
     status, and the Worker's fixed `error` copy, stored because the UI shows it verbatim
-    and never rebuilds copy from `code`), and `egress` records (empty until Phase 2).
+    and never rebuilds copy from `code`), and `egress` records (written by
+    `chatStore.appendEgress`; empty until the UI passes `onEgress`, Phase 2b).
   - **Tree:** editing or regenerating a turn adds a sibling under the same `parentId`.
     A new turn's request `history` = the last 3 answered, non-grounded turns on its
     root-to-parent path; its echoed `docLabels` = the nearest answered ancestor's map,
@@ -449,7 +452,13 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
     still leaves the turn. On load, `pending` turns older than `STALE_PENDING_MS` (5 min)
     become `interrupted`; younger ones may be another tab's request still in flight.
   - **Grounded answers are never persisted** — `saveTurn()` nulls `answer` whenever
-    `webGrounded`, and `chatStore` keeps the text in an in-memory map for the session.
+    `webGrounded`, and `chatStore` keeps the answer, web sources and Search Suggestions
+    in its in-memory `groundedSession` map (with the conversation id, so deleting any
+    conversation frees its entries).
+  - **In-flight turns** are tracked by id independent of the open conversation: a
+    request that settles after the user switched conversations still saves to its own
+    conversation, `turns` only mirrors the open one, and a turn whose conversation was
+    deleted mid-request is dropped rather than re-saved.
     `webSources` and `searchEntryPointHtml` have no field at all. Grounded turns are
     also never sent upstream as `history`. Basis: the Gemini terms (SECURITY_REVIEW.md
     §1.1, correction).
@@ -476,10 +485,17 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
   (`cacheWasm.js`) on the normal path. Each request is recorded twice (in flight, then
   settled) with destination host, post-redirect host, via worker or direct, upstream
   provider, payload categories, UTF-8 body bytes, timing, HTTP status and outcome.
-  Worker records go to an in-memory session log; per-turn persistence and the
-  Receipts view are Phase 2. Model downloads stay session-level records: they carry no
-  user data, happen once per browser (cache hits never reach `env.fetch`), and can't be
-  pinned to a turn without guessing.
+  An `/answer` record goes to the `onRecord` sink (`chatStore.appendEgress`, upserted by
+  record id, so the settled copy replaces the in-flight one and each retry adds a row)
+  and never to the session log — enforced in `recordEgress` itself, so nothing is listed
+  twice. Everything else (`/ocr`, `/models`, model and runtime downloads) goes to the
+  session log: memory only, capped at `MAX_SESSION_EGRESS` (200) with a `dropped`
+  count, exposed as a snapshot + subscribe pair for `useSyncExternalStore`. `egress.ts`
+  imports no store (the embedding worker bundles it). Model downloads stay
+  session-level: they carry no user data, happen once per browser (cache hits never
+  reach `env.fetch`), and can't be pinned to a turn without guessing. Each record also
+  carries `counts` (passages, history turns, distinct document ids across chunks and
+  `docLabels`) for plain-language receipts.
   - **Categories come from the body, not the caller:** a fixed map of top-level keys
     (`question` → question, `chunks` → passage text + document ids, `docLabels` →
     document ids, `history` → history, `image` → page image, `base64` → OCR file,
@@ -502,6 +518,19 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
     path, so ORT's XHR fallback can only reach a host the ledger already names, and
     `script-src` blocks the cross-origin `import()`. CSP covers neither navigations nor
     WebRTC. Details: SECURITY_REVIEW.md §8.
+- **The Worker echoes `{provider, model}` on a successful `/answer` (Phase 2a, Worker
+  `483afdc9`).** Additive fields on the 200 body only; error bodies are unchanged. There
+  is no fallback chain on any tier — the dispatch makes exactly one provider call with
+  exactly that model (a test pins the shared tier's echoed model to the single upstream
+  URL) — so the echo is the model that answered. Exception: a provider-side router id
+  (OpenRouter's `openrouter/auto`) is echoed as sent; the provider picks the model
+  behind it, and only its response's own `model` field would say which. The client
+  (`parseServedBy` in `answerRequest.ts`) keeps the echo only if the provider is in
+  `PROVIDERS` and the model matches the Worker's `MODEL_PATTERN` character set; an older
+  Worker's response simply has none. Receipts name the forwarded host from
+  `PROVIDER_HOSTS` (`models.ts`), which `providers.test.ts` pins to each provider file's
+  exported `API_BASE` — that hop is the Worker's own report, not something the browser
+  observes.
 
 ---
 

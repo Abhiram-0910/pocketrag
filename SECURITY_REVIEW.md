@@ -485,6 +485,7 @@ through the wrapped `env.fetch`.
 |---|---|---|
 | ORT fallback re-fetch (`XMLHttpRequest`) and re-import (`import()`) after a failed cached load (§7) | onnxruntime-web's own code, not `env.fetch` | `connect-src` allows only the pinned jsDelivr path; `script-src` blocks the cross-origin `import()` |
 | Intermediate redirect hops | `fetch` follows them; only the first and final URL are visible | every hop must be in `connect-src` (`*.hf.co`) |
+| CORS preflight (`OPTIONS`) before each Worker POST | browser-initiated: `Content-Type: application/json` makes every POST non-simple, and `worker/src/cors.ts` sends no `Access-Control-Max-Age`, so Chromium re-checks after ~5 s. No body; it reveals the origin, the method and the header names | same Worker origin in `connect-src`; carries no user data |
 | Same-origin browser loads (app shell, bundles, fonts, pdf.js worker) | browser-initiated | `'self'` only; no user data |
 | Navigations (clicked web-source links, `window.open`) | not network calls the app makes | **not bounded by CSP** (`navigate-to` was dropped from the spec) |
 | WebRTC | not used by the app | **not bounded by CSP** |
@@ -503,10 +504,20 @@ answer as a React text node — a restored answer containing `<img onerror>` ren
 escaped text (`chatStore.test.ts`). Nothing is encrypted at rest; a key held by the same
 origin wouldn't stop a script running in it.
 
+**Phase 2a update (2026-10-19, Worker `483afdc9`, Pages not redeployed).** Per-turn
+egress plumbing (`chatStore.appendEgress`, `egressFetch`'s `onRecord`), payload counts,
+and a 200-record cap on the session log — which, enforced in `recordEgress`, never takes
+an `/answer` record. Until the UI passes `onEgress` (Phase 2b), the shipped `QueryPanel`'s
+answer requests are therefore recorded nowhere; nothing displayed them before either. The
+Worker now echoes `{provider, model}` on a 200 `/answer`. That echo, like the "forwarded
+to" host, is **the Worker's own report** of what it did — the browser can't observe the
+hop to the provider — and the client drops a malformed one (`parseServedBy`). Live check
+against `483afdc9`: one shared-tier `/answer` → `200`, `"provider":"gemini","model":"gemini-3.5-flash-lite"`.
+
 **Not verified:** the in-browser path from a worker `egress` message to the main-thread
 session log (unit-tested with a stubbed `fetch`; the e2e proves only that downloads still
-work through the wrapper — Phase 2's Receipts e2e will read the log back); Firefox and
-Safari runs of this change.
+work through the wrapper — Phase 2b's Receipts e2e will read it back from the UI); Firefox
+and Safari runs of the egress change.
 
 **Verdict: PASS, with the listed gaps.**
 
@@ -524,7 +535,7 @@ Safari runs of this change.
 | 5 | CORS & origin validation | PASS | none |
 | 6 | Client-supplied data reaching a provider without revalidation | PASS | none |
 | 7 | Content-Security-Policy & security headers (Step C) | **ENFORCED — PASS, with listed gaps** | production `8c992a01`; ORT bytes not integrity-checked, Safari unverified, Firefox worker reports unobservable, no production violation collection |
-| 8 | Egress ledger visibility, chat history at rest (Phase 1) | **PASS, with listed gaps** | not deployed; navigations/WebRTC outside CSP, history plaintext at rest, worker→log path not browser-verified |
+| 8 | Egress ledger visibility, chat history at rest (Phase 1, 2a) | **PASS, with listed gaps** | Worker echo live (`483afdc9`); history/egress frontend not deployed; CORS preflights and navigations not recorded; navigations/WebRTC outside CSP; history plaintext at rest; worker→log path not browser-verified |
 
 **Status: audit complete, both gaps found this session are fixed, verified, and
 committed (`9ace2ff`).** Nothing outstanding from the approved plan. Re-confirmed

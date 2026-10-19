@@ -94,7 +94,7 @@ provider error text; the UI shows it verbatim with a per-code action (Step B). 6
   Tailwind's `.container` utility to the production CSS. After a build, `dist/`'s CSS
   hash should only change when app styles change.
 
-## Standing Rules — chat history and egress (Phase 1, `36ef802` / `3b81d47`)
+## Standing Rules — chat history and egress (Phase 1 `36ef802` / `3b81d47`, Phase 2a)
 
 - **Every outbound request goes through `src/lib/egress.ts`** — `egressFetch()` for
   Worker calls, `downloadFetch()` as transformers.js's `env.fetch`. Never call `fetch`,
@@ -110,6 +110,15 @@ provider error text; the UI shows it verbatim with a per-code action (Step B). 6
   the versionchange transaction auto-commit half-done. Each new `pocketrag-history`
   version is its own `if (oldVersion < N)` step; the documents DB `pocketrag` stays at
   version 1 (see ARCHITECTURE.md for why history is a separate database).
+- **An `/answer` request's egress goes to its turn, never the session log.** Pass
+  `onEgress` (→ `chatStore.appendEgress(turnId, …)`) through `attemptAnswer`;
+  `egress.ts`'s `recordEgress` drops `purpose: 'answer'` on purpose. `egress.ts` must not
+  import a store — the embedding worker bundles it.
+- **Adding a provider also means** `PROVIDERS` and `PROVIDER_HOSTS` in `src/lib/models.ts`
+  and an exported `API_BASE` in its `worker/src/providers/*.ts` file —
+  `src/lib/providers.test.ts` fails otherwise. **Changing `connect-src`** in
+  `public/_headers` means updating `src/lib/allowedDestinations.ts` too
+  (`allowedDestinations.test.ts`).
 - **Local `wrangler pages dev` needs `--compatibility-date=2026-07-29`** with the
   installed wrangler 4.114.0: without it, wrangler defaults to today's date, which its
   bundled workerd doesn't support, and the server never starts (step-c then fails every
@@ -3688,6 +3697,36 @@ reverted.
 `QueryPanel` still sends grounded answers as in-session `history` until it moves onto
 `chatStore`; the worker→main-thread egress message path isn't browser-verified; the
 `blocked` DB event is untested (can't be triggered at v1).
+
+### Session 33 — 2026-10-19 (Claude Code)
+**Goal:** Phase 2a — store and egress plumbing for Receipts, the Worker's
+`{provider, model}` echo, Worker-only deploy. No UI change, no Pages deploy.
+
+**Built:** `36dea5b` chatStore in-flight map (settle/egress after a conversation switch;
+no resurrection of a deleted conversation), `appendEgress`, `groundedSession` (answer +
+web sources + Search Suggestions, by conversation), storage back to `ok` on a successful
+write; `countTurnsCiting`, `getChunksByIds`, `deleteAllDocuments`. `c9d54c5` egress
+`counts`, `onRecord` sink, 200-record session log that never takes answers,
+snapshot/subscribe; `receipts.ts`, `allowedDestinations.ts`, `PROVIDER_HOSTS`.
+`f8ab63a` Worker echo + exported `API_BASE` (checked first: no model fallback chain on
+any tier). `5b90205` client `parseServedBy`, `PROVIDERS`, provider parity tests.
+
+**Deployed (Worker only):** `b612f443-ed53-44e0-8cce-1877c8b7ce2b` →
+`483afdc9-8dea-4afe-b02a-cb67e199a17b`. Rollback:
+`cd worker && npx wrangler rollback b612f443-ed53-44e0-8cce-1877c8b7ce2b --message "Revert /answer provider/model echo"`.
+Live check (one call): shared `/answer` → 200 with `"provider":"gemini","model":"gemini-3.5-flash-lite"`.
+
+**Verification:** frontend 244/244 (was 215), Worker 331/331 (was 327), `tsc`/`oxlint`
+clean both sides (the one pre-existing `QueryPanel.tsx` warning), build passes the size
+guard, CSS `index-BDvXQpZ6.css` identical to `6158529`, `git diff 6158529 --
+public/_headers` empty, step-b `exit=0` (12 scenarios, `failures: []`), step-c `exit=0`
+(Chromium WASM, 12/12, 0 unexpected).
+
+**Deviations:** `PROVIDER_HOSTS` landed in the egress commit (Receipts needs it); its
+parity test in the client-echo commit, after the Worker exported `API_BASE`.
+`groundedText` was renamed `groundedSession` (it holds more than text now). Until
+Phase 2b, the live `QueryPanel` passes no `onEgress`, so its answer requests aren't
+recorded anywhere (nothing displayed them before).
 
 ---
 
