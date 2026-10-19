@@ -50,6 +50,44 @@ already-reviewed code.
   holding the user's full document text, i.e. the one thing this project exists to
   keep local — rendering any externally-sourced HTML unsanitized here is a real gap,
   independent of how trustworthy Google's widget is presumed to be.
+- **Correction (2026-10-19, from the primary text):** "forbid framing/caching/syndicating"
+  was accurate but incomplete. Re-read directly at `ai.google.dev/gemini-api/terms`
+  ("Effective March 23, 2026"), section *Grounding with Google Search → Use Restrictions*:
+  - **Chat-history exception:** "You may copy and store, for up to two (2) years, the
+    text of the Grounded Result(s) … (2) in chat history of an end user of your
+    application only for the purpose of allowing that end user to view their chat
+    history." It names only *the text of the Grounded Result*.
+  - **Search Suggestions and Links are not in that exception.** The general rule is "will
+    not … copy, store … Grounded Results or Search Suggestions, except that…", and the
+    only exception naming Search Suggestions is "solely … for the minimum time necessary
+    to comply with applicable law". "Links" (URLs plus their titles/labels) are a
+    separately defined term and aren't named in the chat-history exception either.
+  - **Display:** "will only display the Grounded Results with the associated Search
+    Suggestion(s) to the end user who submitted the prompt."
+  - **No modification:** "Unless permitted by Google in writing, you: (1) will not
+    modify, or intersperse any other content with, the Grounded Results or Search
+    Suggestions" — DOMPurify dropping the widget's leading `<style>` is a modification
+    (open item in TODO.md).
+  - **End-user copies:** "You may allow end user(s) to copy and store individual Grounded
+    Results that were displayed to them … as long as you do not allow Grounded Results
+    to be … used to create a database."
+  - **Resubmission:** storing "temporarily for the purpose of resubmitting the text of
+    the Grounded Result in a subsequent prompt that you submit to Google via a function
+    call to obtain a refined or improved Grounded Result" — a function-call refinement,
+    not general conversation context.
+
+  **What this project does (Phase 1, `historyDb.ts` / `chatStore.ts`), stricter than the
+  exception:** a grounded answer's text is never persisted (`answer: null`,
+  `webGrounded: true`; kept in memory for the session only); `searchEntryPointHtml` and
+  `webSources` are never persisted; grounded answers are never sent upstream as
+  `history`. **Unverified from the text:** whether showing a stored grounded answer
+  without its Search Suggestions in a history view satisfies the display rule (moot here,
+  since the text isn't stored); whether keeping the widget in in-memory component state
+  for the session counts as "cache" (not defined); the "Client Application Guidelines"
+  the terms reference (not read). `ai.google.dev/gemini-api/docs/grounding/search-suggestions`
+  now redirects to `/docs/google-search`, which only says "Full usage requirements are
+  detailed in the Terms of Service". Note: `QueryPanel.tsx`, not yet moved onto
+  `chatStore`, still sends grounded answers as in-session `history` — Phase 2 item.
 - **Verdict: GAP FOUND — FIXED INLINE as a severity exception** (approved mid-review
   rather than deferred to the batch-fix pass, since production was live with this gap
   and the fix was well-understood and low-risk).
@@ -425,6 +463,55 @@ doesn't use (`sanitize(string)`); bumped anyway.
 
 ---
 
+## 8. Egress ledger visibility and chat history at rest (Phase 1, 2026-10-19)
+
+**Claim:** every request the app itself makes is recorded by `src/lib/egress.ts`, and
+anything it can't record is bounded by the enforced CSP.
+
+**Method:** routed `/answer`, `/models`, `/ocr` through `egressFetch()` and set
+transformers.js's `env.fetch` to `downloadFetch()` in the embedding worker (traced in
+`node_modules/@huggingface/transformers/src`: `utils/hub.js` `getFile()` and
+`backends/utils/cacheWasm.js` both call `env.fetch`). `egress.test.ts` calls each real
+request builder with only `fetch` stubbed and asserts the exact recorded categories.
+`egress.bypass.test.ts` scans `src/` for raw network calls; it was shown failing on a
+temporarily added `fetch(` in `src/lib/retrieval.ts`, then passing after the revert.
+`e2e/step-c-csp.cjs` (local `wrangler pages dev`, Chromium WASM): 12/12 flows, 0
+unexpected violations, ORT `.wasm`/`.mjs` still loaded from the pinned jsDelivr path
+through the wrapped `env.fetch`.
+
+**What the ledger cannot see**, and what bounds it:
+
+| Not recorded | Why | Bound |
+|---|---|---|
+| ORT fallback re-fetch (`XMLHttpRequest`) and re-import (`import()`) after a failed cached load (§7) | onnxruntime-web's own code, not `env.fetch` | `connect-src` allows only the pinned jsDelivr path; `script-src` blocks the cross-origin `import()` |
+| Intermediate redirect hops | `fetch` follows them; only the first and final URL are visible | every hop must be in `connect-src` (`*.hf.co`) |
+| Same-origin browser loads (app shell, bundles, fonts, pdf.js worker) | browser-initiated | `'self'` only; no user data |
+| Navigations (clicked web-source links, `window.open`) | not network calls the app makes | **not bounded by CSP** (`navigate-to` was dropped from the spec) |
+| WebRTC | not used by the app | **not bounded by CSP** |
+| `CrossOriginStorageCache.js`'s raw `fetch` in transformers.js | not via `env.fetch` | `connect-src`; believed off by default — **unverified** |
+
+The ledger is the app's own account of what it sent; the CSP is the hard bound. A
+Phase 2 e2e will reconcile them (every cross-origin request Playwright observes must
+match a ledger record).
+
+**Chat history at rest:** `pocketrag-history` stores questions and (non-grounded) answers
+**in plaintext** in IndexedDB, like the document text and embeddings already in
+`pocketrag`. Anyone with access to the browser profile can read it, and so can any script
+running in this origin. The XSS mitigation is the enforced CSP (§7: no inline script, no
+`'unsafe-eval'`, `connect-src` limiting where stolen data could go) plus rendering every
+answer as a React text node — a restored answer containing `<img onerror>` renders as
+escaped text (`chatStore.test.ts`). Nothing is encrypted at rest; a key held by the same
+origin wouldn't stop a script running in it.
+
+**Not verified:** the in-browser path from a worker `egress` message to the main-thread
+session log (unit-tested with a stubbed `fetch`; the e2e proves only that downloads still
+work through the wrapper — Phase 2's Receipts e2e will read the log back); Firefox and
+Safari runs of this change.
+
+**Verdict: PASS, with the listed gaps.**
+
+---
+
 ## Summary
 
 | # | Area | Verdict | Action |
@@ -437,6 +524,7 @@ doesn't use (`sanitize(string)`); bumped anyway.
 | 5 | CORS & origin validation | PASS | none |
 | 6 | Client-supplied data reaching a provider without revalidation | PASS | none |
 | 7 | Content-Security-Policy & security headers (Step C) | **ENFORCED — PASS, with listed gaps** | production `8c992a01`; ORT bytes not integrity-checked, Safari unverified, Firefox worker reports unobservable, no production violation collection |
+| 8 | Egress ledger visibility, chat history at rest (Phase 1) | **PASS, with listed gaps** | not deployed; navigations/WebRTC outside CSP, history plaintext at rest, worker→log path not browser-verified |
 
 **Status: audit complete, both gaps found this session are fixed, verified, and
 committed (`9ace2ff`).** Nothing outstanding from the approved plan. Re-confirmed

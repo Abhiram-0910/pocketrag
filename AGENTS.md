@@ -94,6 +94,27 @@ provider error text; the UI shows it verbatim with a per-code action (Step B). 6
   Tailwind's `.container` utility to the production CSS. After a build, `dist/`'s CSS
   hash should only change when app styles change.
 
+## Standing Rules — chat history and egress (Phase 1, `36ef802` / `3b81d47`)
+
+- **Every outbound request goes through `src/lib/egress.ts`** — `egressFetch()` for
+  Worker calls, `downloadFetch()` as transformers.js's `env.fetch`. Never call `fetch`,
+  `XMLHttpRequest`, `sendBeacon`, `WebSocket` or `EventSource` anywhere else in `src/`;
+  `src/lib/egress.bypass.test.ts` fails if you do. A new request-body key needs an entry
+  in `egress.ts`'s `KEY_CATEGORIES` (dev and tests throw without one).
+- **Never persist `searchEntryPointHtml`, `webSources`, or a grounded answer's text**
+  (`webGrounded: true` → `answer: null`; `historyDb.ts`'s `saveTurn()` enforces it,
+  `chatStore` keeps the text in memory only). Never send a grounded answer upstream as
+  `history` (`conversation.ts`'s `historyForRequest()`). Basis: SECURITY_REVIEW.md §1.1
+  (correction).
+- **No non-IndexedDB `await` inside an `upgrade()` callback** (either database). It lets
+  the versionchange transaction auto-commit half-done. Each new `pocketrag-history`
+  version is its own `if (oldVersion < N)` step; the documents DB `pocketrag` stays at
+  version 1 (see ARCHITECTURE.md for why history is a separate database).
+- **Local `wrangler pages dev` needs `--compatibility-date=2026-07-29`** with the
+  installed wrangler 4.114.0: without it, wrangler defaults to today's date, which its
+  bundled workerd doesn't support, and the server never starts (step-c then fails every
+  flow with `ERR_CONNECTION_REFUSED`).
+
 ---
 
 ## Session Log
@@ -3636,6 +3657,37 @@ and the pre-existing `QueryPanel.tsx:419` lint warning noted above. Standing
 backlog: commit this session's `README.md`/`ARCHITECTURE.md`/
 `SECURITY_REVIEW.md`/`AGENTS.md`/`TODO.md` changes (confirm with the user
 first, per this project's commit-only-when-asked convention).
+
+---
+
+### Session 32 — 2026-10-19 (Claude Code)
+**Goal:** Phase 1 of persisted chat history + a ledger-ready schema for per-answer
+egress receipts — no UI, no Worker change, no deploy. Plan approved with amendments
+(grounded answers never persisted; stale-pending sweep after 5 min; production records
+`uncategorized` instead of throwing; restored answers escaped like live ones).
+
+**Built:** `36ef802` — `src/lib/historyDb.ts` (separate `pocketrag-history` DB v1:
+conversations + turns tree), tree ops in `src/lib/conversation.ts`,
+`src/store/chatStore.ts` (not wired into `QueryPanel` yet); `db.ts` stops caching a
+rejected open and exports `requestPersistOnce`; `vite-env.d.ts` now declares
+`VITE_API_BASE_URL` (it declared `VITE_ANSWER_API_URL`, which nothing reads).
+`3b81d47` — `src/lib/egress.ts` wraps `/answer`, `/models`, `/ocr` and transformers.js
+`env.fetch`; records go to an in-memory session log; bypass guard test.
+
+**Verification:** frontend 215/215 (was 171), Worker 327/327 (untouched), `tsc` clean,
+`oxlint` clean except the pre-existing `QueryPanel.tsx` `titleFor` warning, build passes
+the size guard, CSS hash unchanged vs `1c4074f` (`index-BDvXQpZ6.css`).
+`e2e/step-b-failures.cjs` against `vite preview`: all scenarios, `failures: []` (one
+live `/models` call with a fake OpenAI key → 502 `key_rejected`).
+`e2e/step-c-csp.cjs` against `wrangler pages dev` (Chromium, WASM): 12/12 flows, 0
+unexpected violations, 0 CSP-blocked. `git diff 1c4074f -- public/_headers` empty. The
+bypass test was shown failing on a temporary raw `fetch(` in `retrieval.ts`, then
+reverted.
+
+**Deviations / not verified:** see TODO.md "Chat history + Receipts" — notably
+`QueryPanel` still sends grounded answers as in-session `history` until it moves onto
+`chatStore`; the worker→main-thread egress message path isn't browser-verified; the
+`blocked` DB event is untested (can't be triggered at v1).
 
 ---
 

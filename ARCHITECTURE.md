@@ -30,12 +30,13 @@ pocketrag/
 │   ├── lib/                  # Pure logic — retrieval (retrieval.ts, bm25.ts, reranker.ts,
 │   │                          # similarity.ts, conversation.ts), ingestion (pdf.ts, chunker.ts,
 │   │                          # pageRender.ts, sessionFiles.ts), persistence (db.ts,
-│   │                          # embeddingClient.ts), network (answerRequest.ts, ocrRequest.ts,
-│   │                          # apiError.ts, models.ts, sanitizeHtml.ts), UX state
+│   │                          # historyDb.ts, embeddingClient.ts), network (egress.ts,
+│   │                          # answerRequest.ts, ocrRequest.ts, apiError.ts, models.ts,
+│   │                          # sanitizeHtml.ts), UX state
 │   │                          # (errorTaxonomy.ts, queryScope.ts, diagramHeuristic.ts,
 │   │                          # diagramImageSetting.ts, webSearchSetting.ts,
 │   │                          # landingVisitSetting.ts), export (pdfExport.ts)
-│   ├── store/                # documentStore.ts (Zustand)
+│   ├── store/                # documentStore.ts, chatStore.ts (Zustand)
 │   └── workers/              # embedding.worker.ts, backend.ts, embedding.types.ts,
 │                              # ortPin.ts (pinned ONNX Runtime version + jsDelivr path)
 ├── public/                   # favicon, self-hosted fonts, _headers (CSP + security headers)
@@ -63,7 +64,10 @@ pocketrag/
 | `src/lib/chunker.ts` | Token-aware overlapping chunking — pure function, takes an injected `Tokenizer` (real subword counts, exact original text preserved via char offsets). Called once per page by the Worker, so a chunk never spans a page boundary |
 | `src/lib/similarity.ts` | Cosine similarity for already-normalized vectors |
 | `src/lib/retrieval.ts` | `rankChunks()` — pure cosine-ranking over an array of `{embedding}` objects, generic over the chunk shape |
-| `src/lib/db.ts` | IndexedDB via `idb`: `documents` + `chunks` object stores, `documentId` index on chunks. `saveDocument()`, `getChunksForDocument()` (this-document scope), `getAllChunks()` (all-documents scope), `getAllDocuments()` (restore-on-reload), `deleteDocument()` (atomic readwrite over both stores, via the `documentId` index). Requests `navigator.storage.persist()` once on first save |
+| `src/lib/db.ts` | IndexedDB via `idb`: `documents` + `chunks` object stores, `documentId` index on chunks. `saveDocument()`, `getChunksForDocument()` (this-document scope), `getAllChunks()` (all-documents scope), `getAllDocuments()` (restore-on-reload), `deleteDocument()` (atomic readwrite over both stores, via the `documentId` index). `requestPersistOnce()` asks for `navigator.storage.persist()` once per session, on the first document or chat-turn save. A failed open isn't cached, so the next call retries |
+| `src/lib/historyDb.ts` | Chat history in its own IndexedDB database, `pocketrag-history` (see Key Architectural Decisions): `conversations` + `turns` stores, turns linked into a tree by `parentId`. `saveTurn()` (turn + conversation in one transaction, grounded answer dropped), `getConversations()`, `getTurns()`, `deleteConversation()`, `deleteAllHistory()`, `sweepInterruptedTurns()` |
+| `src/store/chatStore.ts` | Zustand store over `historyDb.ts`: `startTurn()` persists the turn as `pending` and returns the `history` / `docLabels` / blend question for its request; `settleTurn()`, `retryTurn()`, `selectBranch()`, deletes. Grounded answer text lives only in its in-memory `groundedText` map. Not wired into the UI yet (Phase 2) |
+| `src/lib/egress.ts` | The one place the app makes network requests: `egressFetch()` (Worker calls) and `downloadFetch()` (transformers.js `env.fetch`). Records each request (host, payload categories, bytes, timing, outcome) in an in-memory session log. `egress.bypass.test.ts` fails on a raw `fetch(` / XHR / beacon / WebSocket / EventSource anywhere else in `src/` |
 | `src/lib/queryScope.ts` | `canRunQuery()` — pure readiness check extracted from `QueryPanel` so scope/selection logic is unit-testable without a DOM |
 | `src/lib/embeddingClient.ts` | Main-thread singleton wrapper around the embedding Worker (typed postMessage protocol): `embedDocument()` and `embedQuery()` |
 | `src/workers/embedding.worker.ts` | Loads tokenizer + model, chunks each page, embeds, and separately embeds single query strings — all model logic lives here, never on the main thread |
@@ -78,7 +82,7 @@ pocketrag/
 | `src/components/ui/Button.tsx`, `ui/StatusBanner.tsx` | Shared primitives (Session 14 design system) — every action button and every error/warning/info banner in the app routes through these two |
 | `src/lib/bm25.ts` | BM25 keyword scoring, fused with cosine similarity via Reciprocal Rank Fusion in `retrieval.ts`'s `hybridRankChunks()` |
 | `src/lib/reranker.ts` | Client-side cross-encoder reranking (`Xenova/ms-marco-MiniLM-L-2-v2`) over the hybrid-search pool, with graceful fallback to hybrid-only results if reranking fails |
-| `src/lib/conversation.ts` | `buildRetrievalQuery()` — blends the immediately preceding question into retrieval only, never sent to the Worker as-is (see Key Architectural Decisions) |
+| `src/lib/conversation.ts` | `buildRetrievalQuery()` — blends the immediately preceding question into retrieval only, never sent to the Worker as-is (see Key Architectural Decisions). Also the conversation-tree ops over `historyDb.ts` turns: `pathTo`, `childrenOf`, `latestLeafUnder`, `historyForRequest` (answered, non-grounded turns only), `previousQuestionFor`, `docLabelsFor` |
 | `src/lib/answerRequest.ts` | `attemptAnswer()` — one answer attempt wrapped in an `AbortController` ~60s timeout, discriminated `{outcome}` return instead of throwing |
 | `src/lib/errorTaxonomy.ts` | Maps every failure (rate-limit, provider-unavailable, network, corrupt-pdf, webgpu-unsupported, unknown) to a severity + plain-language message |
 | `src/lib/apiError.ts` | `WorkerRequestError` + `parseWorkerErrorResponse` (status-gated `resetAt` / `code` / `source`), `FAILURE_CODES` (parity-tested against `worker/src/failureCodes.ts`), `failureAction()` |
@@ -418,14 +422,95 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
   `new URL()` fallback that made Vite emit an unused 22.48 MiB wasm into `dist/` (the
   largest `dist/` file is now pdf.js's 2.12 MiB worker). The jsDelivr files are not
   integrity-checked at runtime — see SECURITY_REVIEW.md §7 for why SRI was dropped.
+- **Chat history lives in its own IndexedDB database, `pocketrag-history` (Phase 1,
+  2026-10-19).** Not two new stores in `pocketrag` at version 2, because of rollback:
+  if `pocketrag` went to v2 and Pages were rolled back to a build from before history,
+  that build's `openDB('pocketrag', 1)` would throw `VersionError`, and `App.tsx`'s
+  restore `.catch(() => {})` would show an empty library with every save failing and no
+  error visible. With a separate database the older build never opens the history DB,
+  and the documents DB stays at the version every build expects. The cost: no
+  transaction spans both, so deleting a document can't cascade into history; turns hold
+  only `chunkId`/`documentId` references, so a deleted document's text doesn't linger
+  in history (an answer may still paraphrase it).
+  - **Schema** (`historyDb.ts`, v1): `conversations` (`activeLeafId` = the branch
+    shown) and `turns`. A turn has question, answer, status (`pending` / `answered` /
+    `failed` / `timed-out` / `interrupted`), the Worker's full `docLabels` map after
+    that turn, citations (chunk/document ids, page, rank, score — no text), scope, tier,
+    provider, model (`null` on the shared tier: the Worker picks it and doesn't say),
+    image/web-search flags, `webGrounded`, the Step A/B failure (`code`, `source`, HTTP
+    status, and the Worker's fixed `error` copy, stored because the UI shows it verbatim
+    and never rebuilds copy from `code`), and `egress` records (empty until Phase 2).
+  - **Tree:** editing or regenerating a turn adds a sibling under the same `parentId`.
+    A new turn's request `history` = the last 3 answered, non-grounded turns on its
+    root-to-parent path; its echoed `docLabels` = the nearest answered ancestor's map,
+    so each branch keeps its own consistent Doc N numbering. Retry after a failure
+    reuses the same turn.
+  - **Written `pending` before the request goes out**, so a tab that dies mid-request
+    still leaves the turn. On load, `pending` turns older than `STALE_PENDING_MS` (5 min)
+    become `interrupted`; younger ones may be another tab's request still in flight.
+  - **Grounded answers are never persisted** — `saveTurn()` nulls `answer` whenever
+    `webGrounded`, and `chatStore` keeps the text in an in-memory map for the session.
+    `webSources` and `searchEntryPointHtml` have no field at all. Grounded turns are
+    also never sent upstream as `history`. Basis: the Gemini terms (SECURITY_REVIEW.md
+    §1.1, correction).
+  - **Migrations:** each future version is its own `if (oldVersion < N)` step in
+    `upgrade()`. The upgrade is one versionchange transaction, so a throw rolls it back
+    to the previous version with data intact (`historyDb.test.ts` checks this on
+    fake-indexeddb). **Never await a non-IndexedDB promise inside `upgrade()`**: the
+    transaction auto-commits and the migration is left half-done. If the open fails,
+    history degrades to memory-only for the session; documents are unaffected. The
+    connection closes itself when another tab opens a newer version (`blocking`), so
+    that tab's upgrade isn't stuck — shipped in v1 because deployed builds can't be
+    patched later.
+  - **Storage:** quota, eviction and `persist()` behave per MDN's "Storage quotas and
+    eviction criteria" (Chromium 60% of disk; Firefox best-effort min(10% of disk,
+    10 GiB group); Safari 17+ ~60%). Eviction takes the whole origin at once, so
+    documents, history and the model cache go together, and Safari deletes
+    script-written data after 7 days without interaction. A failed write
+    (`QuotaExceededError` or otherwise) only flips `chatStore.storage`; the
+    conversation stays in memory.
+- **Every outbound request goes through `src/lib/egress.ts` (Phase 1, 2026-10-19).**
+  `egressFetch()` wraps the three Worker calls (`/answer`, `/models`, `/ocr`);
+  `downloadFetch()` is installed as transformers.js's `env.fetch` in the embedding
+  worker, which covers model files (`hub.js`) and ONNX Runtime's `.wasm`/`.mjs`
+  (`cacheWasm.js`) on the normal path. Each request is recorded twice (in flight, then
+  settled) with destination host, post-redirect host, via worker or direct, upstream
+  provider, payload categories, UTF-8 body bytes, timing, HTTP status and outcome.
+  Worker records go to an in-memory session log; per-turn persistence and the
+  Receipts view are Phase 2. Model downloads stay session-level records: they carry no
+  user data, happen once per browser (cache hits never reach `env.fetch`), and can't be
+  pinned to a turn without guessing.
+  - **Categories come from the body, not the caller:** a fixed map of top-level keys
+    (`question` → question, `chunks` → passage text + document ids, `docLabels` →
+    document ids, `history` → history, `image` → page image, `base64` → OCR file,
+    `apiKey` → API key; `keySource`/`provider`/`model`/`enableWebSearch`/`mimeType` carry
+    none). An empty value carries nothing. A key not in the map throws in dev and tests,
+    so a new request field can't ship without a ledger decision; in production the
+    request still goes out and is recorded `uncategorized`.
+  - **Bypass guard:** `src/lib/egress.bypass.test.ts` scans every non-test `src/` file
+    (comments stripped) for `fetch(`, `globalThis`/`window`/`self.fetch`,
+    `XMLHttpRequest`, `sendBeacon`, `new WebSocket`, `new EventSource` outside
+    `egress.ts`, and checks the worker still assigns `env.fetch`. A scan, not a lint
+    rule, because `no-restricted-globals` misses `globalThis.fetch`.
+  - **What it can't see:** ONNX Runtime's fallback path (when its cached load fails it
+    re-fetches the `.wasm` with `XMLHttpRequest` and re-imports the `.mjs` with
+    `import()`, neither through `env.fetch`); intermediate redirect hops; browser-
+    initiated same-origin loads (app shell, fonts, pdf.js worker); navigations (a
+    clicked web-source link, `window.open`); WebRTC. The enforced CSP is the bound on
+    that gap: `connect-src` limits fetch/XHR/beacon/WebSocket/EventSource — from the page
+    and both workers — to the Worker origin, Hugging Face, and the one pinned jsDelivr
+    path, so ORT's XHR fallback can only reach a host the ledger already names, and
+    `script-src` blocks the cross-origin `import()`. CSP covers neither navigations nor
+    WebRTC. Details: SECURITY_REVIEW.md §8.
 
 ---
 
 ## Environment Variables Required
 ```bash
 # Frontend (repo root)
-# .env.development (committed): VITE_ANSWER_API_URL=http://localhost:8787/answer
-# .env.production (committed): VITE_ANSWER_API_URL=https://pocketrag-answer.abhiram-dev.workers.dev/answer
+# .env.development (committed): VITE_API_BASE_URL=http://localhost:8787
+# .env.production (committed): VITE_API_BASE_URL=https://pocketrag-answer.abhiram-dev.workers.dev
+# (answerRequest.ts / models.ts / ocrRequest.ts append /answer, /models, /ocr)
 
 # worker/.dev.vars (gitignored, local dev only — see worker/.dev.vars.example)
 GEMINI_API_KEY=

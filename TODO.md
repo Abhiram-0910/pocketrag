@@ -42,7 +42,8 @@ Read this at the start of every session to know what to work on next.
 - [ ] Gemini search suggestions: resolve the ToS question before promoting web search
       (terms say not to modify Search Suggestions without written permission, and
       DOMPurify currently strips Google's leading `<style>`, so the widget renders
-      unstyled); also stop persisting `searchEntryPointHtml`.
+      unstyled). Persistence is settled: the history DB never stores it (Phase 1); it
+      still sits in `QueryPanel`'s in-memory turns for the session's display.
 - [ ] Friendly error when the embedding model/runtime download fails — Firefox showed
       the raw `can't access property "tokenizer_class", s is undefined` as the document
       status when a model host was blocked.
@@ -57,8 +58,34 @@ Read this at the start of every session to know what to work on next.
   - [ ] Decide whether shared-tier provider failures refund the per-IP quota: today
         every 502 spends one request (`worker/src/index.ts` counter increments before
         dispatch, `rateLimit.ts:52`); own-key failures should NOT refund (fake-key spam).
-- [ ] Per-answer egress ledger (user-visible: what left the browser, destination host,
-      route, status, latency, per answer)
+### Chat history + Receipts (per-answer egress ledger)
+- [x] **Phase 1** — persisted history DB (`pocketrag-history`, separate from the
+      documents DB), conversation tree ops, `chatStore`, and the egress wrapper every
+      outbound request goes through (in-memory session log). No UI, no Worker change,
+      not deployed. Commits `36ef802`, `3b81d47`. See ARCHITECTURE.md (history DB,
+      egress), SECURITY_REVIEW.md §1.1 correction + §8, AGENTS.md (Phase 1 rules).
+- [ ] **Phase 2** — move `QueryPanel` onto `chatStore`: restore conversations on load,
+      conversation list, delete-one (two-step confirm) and delete-all controls, storage
+      banners (`unavailable` / `quota` / `blocked` / `outdated`), drop `QueryPanel`'s own
+      `SENT_HISTORY_TURNS` copy.
+  - [ ] Until then, `QueryPanel` still sends grounded answers as in-session `history`
+        (chatStore's `historyForRequest()` excludes them) — fixed by the move, or by a
+        one-line filter first if web search is promoted before it.
+  - [ ] `settleTurn()` throws if the user switched conversations while the request was
+        in flight (the turn isn't in `turns` any more) — handle when wiring.
+  - [ ] Deleting a conversation that isn't the active one leaves its grounded texts in
+        `chatStore.groundedText` until reload (unreachable, but not freed).
+  - [ ] Persist each turn's egress records (`TurnRecord.egress`) and build the Receipts
+        view; extend step-b (failed turns restored with copy + action, retry adds a
+        record, timed-out / interrupted states) and step-c (history flows + reconcile
+        every observed cross-origin request against the ledger, Chromium).
+- [ ] Deferred (decide later): branching UI (edit / regenerate / sibling switcher — the
+      tree ops exist); OCR and `/models` egress persistence; history export/import
+      (pairs with the documents export below; import is a new untrusted input; the
+      grounding terms bar using grounded results "to create a database"); Worker echoing
+      `{provider, model}` so shared-tier turns record their model instead of `null`
+      (needs a Worker deploy); whether deleting a document should cascade to turns that
+      cite it.
 - [ ] Shared-Gemini free-tier data-use disclosure in the UI and README (free-tier
       Gemini may use inputs to improve Google's products).
   - [ ] Reword the landing copy and README egress claims at the same time: more than
@@ -73,7 +100,8 @@ Read this at the start of every session to know what to work on next.
 - [ ] Anthropic / Grok / OpenRouter success paths still unverified (no working key).
 - [ ] `index.html` title / meta description / Open Graph tags.
 - [ ] Privacy and terms pages.
-- [ ] IndexedDB export (documents + conversations).
+- [ ] IndexedDB export (documents + conversations) — see "Chat history + Receipts" for
+      the grounded-turns constraint.
 - [ ] Client-side error monitoring.
   - [ ] Client-side CSP violation collection (today `report-uri /__csp-report` points at
         nothing, so production violations aren't recorded).
