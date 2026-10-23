@@ -2,8 +2,17 @@
 
 Local-first, browser-only "chat with your documents." Content you upload to the
 **Documents tab** is parsed, embedded, and searched entirely in your browser — the
-source file itself never leaves it. Only small retrieved text snippets, plus your
-question, are ever sent to an AI provider.
+source file itself never leaves it. To answer, it sends your question, up to 3
+retrieved passages, up to 3 earlier questions and answers, random document IDs (never
+file names), and a page image when a question is about a chart or diagram, on the free
+tier, through PocketRAG's Cloudflare Worker to the AI provider: Google Gemini on the
+free shared tier, or your own provider with your own key. Each answer's Receipts list
+exactly what was sent.
+
+Free shared tier: Google uses what's sent and the answers to provide, improve and
+develop its products and machine-learning technologies, and human reviewers may read
+them ([Gemini API Additional Terms](https://ai.google.dev/gemini-api/terms), "Unpaid
+Services"). Use your own paid key to avoid that.
 
 The one deliberate exception: the separate **Notes tab**, for handwritten or scanned
 content, sends the whole file to Google's Gemini API for OCR — gated behind an
@@ -21,9 +30,11 @@ explicit per-file consent prompt every time, no "remember my choice" shortcut. S
 3. Get a grounded answer, with citations back to the source document and page.
 
 PDF parsing, chunking, embedding, and retrieval on the Documents tab all run
-client-side (WebGPU with a WASM fallback) — the answer-composition request (question
-+ a handful of already-retrieved text snippets) is the only network call that path
-ever makes. Two disclosed exceptions to "nothing leaves the browser": Notes-tab OCR
+client-side (WebGPU with a WASM fallback) — the answer request (your question, a few
+retrieved passages, recent conversation turns) is the only request on that path that
+carries your content. The first visit also downloads the embedding and reranking
+models from Hugging Face and the ONNX runtime from jsDelivr; those carry nothing from
+your documents but see your IP address. Two disclosed exceptions to "nothing leaves the browser": Notes-tab OCR
 (above) and an opt-in toggle that sends a page image for diagram-aware questions,
 default off — see Features below for both.
 
@@ -32,8 +43,9 @@ default off — see Features below for both.
 - **Frontend:** React + Vite + TypeScript + Tailwind CSS v4 + Zustand
 - **In-browser ML:** `@huggingface/transformers` (embeddings), `pdf.js` (PDF parsing),
   a client-side BM25 + cosine hybrid retriever with cross-encoder reranking
-- **Storage:** IndexedDB (documents, chunks, embeddings — never source bytes for OCR'd
-  notes, see [ARCHITECTURE.md](./ARCHITECTURE.md))
+- **Storage:** IndexedDB (documents, chunks, embeddings, and chat history in plain
+  text; web-grounded answers are never stored — never source bytes for OCR'd notes, see
+  [ARCHITECTURE.md](./ARCHITECTURE.md))
 - **Answer composition:** Cloudflare Worker (TypeScript) — shared-tier Gemini by
   default, or bring your own API key
 - **Deployment:** Cloudflare Pages (frontend) + Cloudflare Workers (API), both live,
@@ -55,6 +67,13 @@ Milestone 16 retest):
 - Handwritten/scanned notes (photos and PDFs) via OCR, with per-file upload consent
 - Diagram-aware Q&A — opt-in page-image sending for questions about figures/charts
 - Export a conversation as a PDF
+- Receipts: every answer lists each request that carried your data — where it went,
+  what it carried (question, passage and turn counts, never the text itself), its size
+  and outcome, retries included — saved with the answer; a "This session" list covers
+  model downloads, OCR uploads and model-list checks (see [Receipts](#receipts) below)
+- Chat history: conversations saved in this browser and reopened on reload; delete one,
+  all history, or everything (documents + history). Web-grounded answers are never
+  stored
 - Plain-language error handling (rate limits, invalid keys, network failures) and
   Discord alerting on provider failures
 - Light/dark mode (OS preference), responsive down to mobile
