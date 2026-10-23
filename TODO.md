@@ -73,15 +73,26 @@ Read this at the start of every session to know what to work on next.
       `ca947ac`), deployed to a Pages **preview only**: `https://phase2.pocketrag.pages.dev`
       (`41d6f8c8`). Step-b and step-c (Chromium + Firefox) green; every observed request
       reconciled to a Receipt row.
-- [ ] **Production Pages deploy** — awaiting approval. Production still runs `8c992a01`,
-      which sends grounded answers as in-session `history` and records no answer egress.
-      Rollback target once deployed: `8c992a01-829a-4b8c-9a05-60d5c07d85e8` via the Pages
-      API `.../deployments/8c992a01-829a-4b8c-9a05-60d5c07d85e8/rollback`.
-- [ ] Copy: landing page + README egress claims (wording table in the Phase 2 plan,
-      awaiting approval; not committed).
-- [ ] Not verified yet: real CORS preflights (none observed under route mocks); the
-      `quota` banner with a real `QuotaExceededError` in a browser (Chromium's quota
-      override had no effect; simulated for the screenshot); Safari/WebKit.
+- [x] **Phase 2c** — UI fixes (`3731fea` not-retained cards show only the placeholder;
+      `6599f8d` Receipt limits text split, the rest in "What this doesn't show";
+      `96b94cb` This session grouped by purpose + host, no Size on downloads, step-c
+      purpose check) and the **production Pages deploy: `785e99d2`** (2026-10-23, from
+      `96b94cb`). Rollback target: `8c992a01-829a-4b8c-9a05-60d5c07d85e8` via the Pages API
+      `POST .../accounts/da55acd99cee5a43df7d397dd80af4e3/pages/projects/pocketrag/deployments/8c992a01-829a-4b8c-9a05-60d5c07d85e8/rollback`
+      (exact command in AGENTS.md Session 35). Live check passed: one real shared answer,
+      Receipt matched the request, reload restore, Delete everything, no re-download.
+      **Phase 2 is done.**
+- [ ] Copy (commit 8): landing page + README egress claims (wording table in the Phase 2
+      plan) — still awaiting approval; not committed, not deployed.
+- [ ] Not verified yet: CORS preflights on Firefox against the live Worker (Chromium: one
+      observed via CDP, paired with its POST); the `quota` banner with a real
+      `QuotaExceededError` in a browser (Chromium's quota override had no effect;
+      simulated for the screenshot); Safari/WebKit.
+- [ ] e2e: step-c's preflight pairing reads Playwright `request` events, which surfaced no
+      preflight even live; use a CDP `Network` session (as the Phase 2c production check
+      did) if it should ever pair a real one.
+- [ ] Shared `/answer` took 20.1 s in the production check (one sample, inside the 60 s
+      timeout) — watch for a pattern before acting.
 - [ ] e2e: root-cause the live `/models` hang on the long-lived route-mocked page (worked
       around with a route-free tab).
   - [ ] OpenRouter router ids (`openrouter/auto`): the echo repeats the requested id;

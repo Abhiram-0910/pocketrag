@@ -540,6 +540,32 @@ and `blocked` storage banners were only screenshotted with simulated triggers (C
 quota override had no effect here; `blocked` can't occur at history v1); their store
 handling is unit-tested.
 
+**Phase 2c update (2026-10-23): frontend deployed to production as `785e99d2`** (from
+`96b94cb`; rollback target `8c992a01`). Headers on `https://pocketrag.pages.dev` after the
+deploy: the enforced CSP is byte-identical to `public/_headers` (`cmp` exit 0, 447 bytes);
+X-Frame-Options, Referrer-Policy, Permissions-Policy, COOP and nosniff present; no
+report-only header. Production check (Chromium, real Worker, no route mocks, exactly one
+shared-tier `/answer`):
+
+- `/answer` → `200`, `provider: gemini`, `model: gemini-3.5-flash-lite`. The Receipt row
+  shows the same host, `gemini-3.5-flash-lite` under "Then to", and `538 B`, which is
+  the observed request body (538 bytes).
+- Reload: library, conversation and Receipt restored (same egress id). Delete everything
+  cleared both; re-embedding after a reload made 0 cross-origin requests.
+- **Preflights observed:** 1 `OPTIONS` (`/answer`, status 200), paired with the one
+  `POST` in the same phase. It was visible only through a CDP `Network` session;
+  Playwright's own `request` event surfaced none, which is why the mocked e2e never saw
+  one. It carries no user data, so the Receipt still doesn't list it (the limits text
+  says so).
+- 0 CSP reports, 0 in-page `securitypolicyviolation` events, 0 page errors.
+- step-c (local, Chromium + Firefox) now also checks download labels: each model's
+  observed requests equal its rows of that purpose (6/6 embed, 6/6 rerank).
+
+**Remaining gaps:** preflights verified on Chromium only (one call; Firefox not run
+against the live Worker); Firefox worker-side CSP reports unobservable (§7); no
+production CSP violation collection; Safari/WebKit unverified; `quota`/`blocked` banners
+simulated only; navigations and WebRTC outside CSP; history plaintext at rest.
+
 **Verdict: PASS, with the listed gaps.**
 
 ---
@@ -556,7 +582,7 @@ handling is unit-tested.
 | 5 | CORS & origin validation | PASS | none |
 | 6 | Client-supplied data reaching a provider without revalidation | PASS | none |
 | 7 | Content-Security-Policy & security headers (Step C) | **ENFORCED — PASS, with listed gaps** | production `8c992a01`; ORT bytes not integrity-checked, Safari unverified, Firefox worker reports unobservable, no production violation collection |
-| 8 | Egress ledger visibility, chat history at rest (Phase 1, 2a, 2b) | **PASS, with listed gaps** | Worker echo live (`483afdc9`); history + Receipts UI on a Pages preview only (production not redeployed); every observed request reconciled to a ledger row on Chromium and Firefox; CORS preflights not recorded and not observed under mocks; navigations/WebRTC outside CSP; history plaintext at rest; Safari unverified |
+| 8 | Egress ledger visibility, chat history at rest (Phase 1, 2a, 2b, 2c) | **PASS, with listed gaps** | Worker echo live (`483afdc9`); history + Receipts UI in production (`785e99d2`, rollback `8c992a01`); every observed request reconciled to a ledger row on Chromium and Firefox; one real CORS preflight observed (CDP, Chromium) and paired with its POST, not recorded in the ledger by design; navigations/WebRTC outside CSP; history plaintext at rest; Safari unverified |
 
 **Status: audit complete, both gaps found this session are fixed, verified, and
 committed (`9ace2ff`).** Nothing outstanding from the approved plan. Re-confirmed

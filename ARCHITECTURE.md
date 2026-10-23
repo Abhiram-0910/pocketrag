@@ -81,6 +81,7 @@ pocketrag/
 | `src/components/QueryPanel.tsx` | Scope toggle (this doc / all docs) → embed query → rank the scoped chunk pool from IndexedDB → `chatStore.startTurn` → POST to the Worker → composed answer as primary result, `Doc N = fileName` legend, raw ranked chunks as collapsible "Sources," visible failure note (not silent fallback) if the Worker call fails. Renders the open conversation's linear path from `chatStore` (Phase 2b): the leaf as the current answer, earlier turns under "Conversation"; restored failures/timeouts/interruptions outside the live region; storage banners; a Receipt on every answer and "This session" at the end |
 | `src/components/ConversationList.tsx` | Saved conversations: open, New conversation, delete one, delete all history, Delete everything (documents + history, model cache kept). Left rail from `lg` up, a disclosure below that; focus moves to the next row / the heading / the question input after each action |
 | `src/components/Receipts.tsx` | `TurnReceipt` (per answer: one row per request, retries included, total, the limits statement and allowed destinations) and `SessionReceipts` (downloads, OCR uploads, model-list checks). Rows carry `data-egress-id` / `data-host` / `data-final-host` for the e2e reconciliation |
+| `src/components/TurnAnswer.tsx` | One answer card's body: the grounded / ungrounded banner and the answer text, or only the "not retained" placeholder for a restored web-grounded turn (copy in `src/lib/answerCopy.ts`) |
 | `src/components/ByokPanel.tsx` | BYOK provider picker (all 5), key input, live model-list fetch, "(Experimental)" labeling for the 3 unverified providers — key is request-scoped component state only, never persisted |
 | `src/components/NotesDropZone.tsx` | Notes-tab drop zone — per-file OCR consent prompt before anything uploads, no "remember my choice" shortcut |
 | `src/components/LandingPage.tsx` | First-visit-only landing screen, gated by `landingVisitSetting.ts`'s localStorage flag |
@@ -534,8 +535,8 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
   `PROVIDER_HOSTS` (`models.ts`), which `providers.test.ts` pins to each provider file's
   exported `API_BASE` — that hop is the Worker's own report, not something the browser
   observes.
-- **Chat history UI and Receipts (Phase 2b, Pages preview `41d6f8c8` only — production
-  Pages has NOT been redeployed; it still runs `8c992a01`).**
+- **Chat history UI and Receipts (Phase 2b; Phase 2c polish; production Pages
+  `785e99d2` from `96b94cb`, 2026-10-23 — rollback target `8c992a01`).**
   - **Linear history.** `QueryPanel` shows the open conversation's active path; the
     tree and its branch ops exist in the store but have no UI yet. Every request's
     `history` comes from `chatStore` (never a grounded answer) — which also stops the
@@ -564,10 +565,23 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
   - **Receipts** (`Receipts.tsx`): a native `<details>` per answer whose summary is the
     one-line total ("2 requests · 2 destinations · 6.2 kB sent"); one `<ol>` row per
     request with a `<dl>` of To / Served by / Then to (+ model) / Sent / Size; a
-    double-rule total; the limits statement verbatim once per panel, with the allowed
-    destinations from `allowedDestinations.ts`. Receipt-like styling inside the existing
-    tokens (dashed rules, `tabular-nums`, uppercase micro-labels), no new fonts or
-    dependencies.
+    double-rule total; the limits statement once per panel — its first part
+    (`RECEIPT_LIMITS_TEXT`) always visible, the rest (`RECEIPT_NOT_SHOWN_TEXT`) inside the
+    "What this doesn't show · where this page may send data (N)" disclosure with the
+    allowed destinations from `allowedDestinations.ts`. Receipt-like styling inside the
+    existing tokens (dashed rules, `tabular-nums`, uppercase micro-labels), no new fonts
+    or dependencies.
+  - **This session** groups rows by purpose + destination host (`<details
+    data-egress-group>`, summary "Search model download · huggingface.co · 6 requests",
+    failures counted), still one DOM row per record inside each group so the e2e
+    reconciliation reads the same `data-host` / `data-final-host`; rows also carry
+    `data-purpose`. Downloads (`via: 'direct'`) show no Size row: they carry nothing from
+    the user. Embed vs rerank is classified by URL in `downloadFetch()`; the reranker
+    loads lazily on the first question, so before one is asked every Hugging Face group
+    is the search model.
+  - **A not-retained grounded answer** (restored, `answer: null`) shows only the
+    "Web-grounded answer, not retained (Google terms)" placeholder — no grounded /
+    ungrounded banner (`TurnAnswer.tsx`, also the PDF export).
 
 ---
 

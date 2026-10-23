@@ -3769,6 +3769,52 @@ the date, not a turn count. On mobile the conversation list sits under the heade
 directly above the question box. The live `/models` e2e check moved to its own tab after
 an intermittent hang on the main page (root cause not pinned down — see the e2e comment).
 
+### Session 35 — 2026-10-23 (Claude Code)
+**Goal:** Phase 2c — three UI fixes, then the **production** Pages deploy (authorized in
+the prompt, with rollback gates).
+
+**Built:** `3731fea` a restored web-grounded (not-retained) turn shows only the
+placeholder, no grounding banner (`TurnAnswer.tsx`, PDF export too; step-c checks it).
+`6599f8d` Receipt limits text: first part visible, the rest inside "What this doesn't
+show · where this page may send data (N)". `96b94cb` This session grouped by purpose +
+host with a count, one DOM row per record (reconciliation unchanged), `data-purpose`, no
+Size on downloads. The "every HF row is Search model download" report was not a
+mislabel: the reranker loads on the first question, so a view captured before one shows
+only embed downloads. step-c now checks it (6/6 embed, 6/6 rerank requests = rows).
+
+**Verification:** frontend 259/259, Worker 331/331, `tsc`/`oxlint` clean both sides,
+build + size guard pass, JS `index-RjEoeMr9.js` → `index-BT0pCVyT.js`, CSS
+`index-C0B4REZ8.css` → `index-iACYgoQC.css` (production before → after),
+`git diff 6158529 -- public/_headers` empty. step-b Chromium `exit=0` (`failures: []`);
+step-c Chromium and Firefox `exit=0`, 15/15 flows, 25/25 reconciled, 0 unexpected CSP
+violations. Screenshots `~/NewProjects/pocketrag-shots/*-v2.png`.
+
+**Deployed (Pages production):** `8c992a01` → **`785e99d2-c943-4996-8663-f9aef20b0652`**
+(Production, branch `main`, source `96b94cb`), via
+`npx wrangler pages deploy dist --project-name=pocketrag --branch=main`. Served CSP
+byte-identical to `public/_headers`; served index references `index-BT0pCVyT.js`.
+Rollback (Pages API, wrangler's OAuth token — run any `npx wrangler` command first so it
+refreshes):
+```bash
+TOKEN=$(grep -oP '^oauth_token = "\K[^"]+' ~/.config/.wrangler/config/default.toml)
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+  https://api.cloudflare.com/client/v4/accounts/da55acd99cee5a43df7d397dd80af4e3/pages/projects/pocketrag/deployments/8c992a01-829a-4b8c-9a05-60d5c07d85e8/rollback
+```
+Safe for stored history: `8c992a01` never opens `pocketrag-history`.
+
+**Production check** (Chromium, real Worker, no mocks, one `/answer`): 200,
+`gemini`/`gemini-3.5-flash-lite` (20.1 s); Receipt shows that model, the Worker host and
+538 B = the observed body; reload restored library, conversation and Receipt (same
+egress id); Delete everything cleared both and re-embedding made 0 cross-origin
+requests. Preflights: 1 `OPTIONS /answer` (200), paired with the one POST — seen only via
+a CDP `Network` session, not Playwright's `request` event. 0 CSP reports/events, 0 page
+errors. Test data deleted from production storage afterwards.
+
+**Deviations:** the screenshot and production-check scripts live in the session
+scratchpad, not the repo (as in Phase 2b). An extra screenshot,
+`receipt-expanded-limits-open-360-v2.png`, shows the moved limits text. Firefox wasn't
+run against the live Worker (one answer call allowed).
+
 ---
 
 <!-- Copy the block above for each new session -->
