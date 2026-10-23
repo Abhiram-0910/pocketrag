@@ -161,7 +161,7 @@ async function main() {
   async function snapshotLedger() {
     const rows = await page
       .locator('[data-egress-id]')
-      .evaluateAll((els) => els.map((el) => ({ id: el.getAttribute('data-egress-id'), host: el.getAttribute('data-host'), finalHost: el.getAttribute('data-final-host') })))
+      .evaluateAll((els) => els.map((el) => ({ id: el.getAttribute('data-egress-id'), host: el.getAttribute('data-host'), finalHost: el.getAttribute('data-final-host'), purpose: el.getAttribute('data-purpose') })))
       .catch(() => [])
     for (const row of rows) ledger.set(row.id, row)
   }
@@ -384,7 +384,17 @@ async function main() {
     else unused.splice(i, 1)
   }
   const downloadRows = [...ledger.values()].filter((r) => /huggingface\.co|hf\.co|cdn\.jsdelivr\.net/.test(r.host)).length
+  // Download labels: each model's observed requests match its rows' purpose (the reranker
+  // loads lazily, on the first question).
+  const purposeCounts = {}
+  for (const [model, purpose] of [['all-MiniLM-L6-v2', 'embed-model-download'], ['ms-marco-MiniLM-L-2-v2', 'rerank-model-download']]) {
+    const requests = heads.filter(({ req }) => req.url().includes(model)).length
+    const rows = [...ledger.values()].filter((r) => r.purpose === purpose).length
+    purposeCounts[purpose] = { requests, rows }
+  }
+  const purposeMismatch = Object.values(purposeCounts).some(({ requests, rows }) => requests === 0 || requests !== rows)
   const reconciliation = {
+    purposeCounts,
     observedRequests: heads.length - preflights.length,
     redirectChains,
     preflights: preflights.length,
@@ -410,7 +420,7 @@ async function main() {
   for (const r of unexpected) byDirective[r.directive || 'unparsed'] = (byDirective[r.directive || 'unparsed'] || 0) + 1
   const failed = flows.filter((f) => !f.ok)
   console.log(JSON.stringify({ browser: BROWSER, webgpu: WEBGPU, app: APP, flows, ortFromJsDelivr: [...ortUrls], allowlistedWidgetStyle: allowlisted.length, violationsByDirective: byDirective, unexpected, cspBlocked, pageErrors, reconciliation }, null, 2))
-  if (failed.length || unexpected.length || cspBlocked.length || unmatched.length || unpairedPreflights.length) process.exit(1)
+  if (failed.length || unexpected.length || cspBlocked.length || unmatched.length || unpairedPreflights.length || purposeMismatch) process.exit(1)
 }
 
 main().catch((e) => {

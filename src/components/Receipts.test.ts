@@ -125,6 +125,36 @@ describe('SessionReceipts', () => {
     expect(html).toContain('0 older entries dropped.')
   })
 
+  it('groups rows by destination + purpose with a count, one row per record, no size on downloads', () => {
+    const download = (id: string, purpose: EgressRecord['purpose'], host = 'huggingface.co') =>
+      record({ id, purpose, via: 'direct', upstream: null, host, finalHost: host, categories: ['none'], counts: {}, bytesSent: 0, outcome: 'ok', httpStatus: 200 })
+    for (const id of ['e1', 'e2', 'e3']) egress.recordEgress(download(id, 'embed-model-download'))
+    egress.recordEgress(download('j1', 'runtime-download', 'cdn.jsdelivr.net'))
+    for (const id of ['k1', 'k2']) egress.recordEgress(download(id, 'rerank-model-download'))
+    egress.recordEgress(record({ id: 'o1', purpose: 'ocr', categories: ['ocr-file'], counts: { 'ocr-file': 1 }, bytesSent: 2048, outcome: 'http-error', httpStatus: 500 }))
+
+    const html = renderToStaticMarkup(createElement(receipts.SessionReceipts))
+    const groups = [...html.matchAll(/data-egress-group="([^"]+)"/g)].map((m) => m[1])
+    expect(groups).toEqual([
+      'embed-model-download huggingface.co',
+      'runtime-download cdn.jsdelivr.net',
+      'rerank-model-download huggingface.co',
+      'ocr pocketrag-answer.abhiram-dev.workers.dev',
+    ])
+    const group = (key: string) => html.slice(html.indexOf(`data-egress-group="${key}"`)).split('</details>')[0]
+    expect(group('embed-model-download huggingface.co')).toContain('Search model download')
+    expect(group('embed-model-download huggingface.co')).toContain('3 requests')
+    expect(count(group('embed-model-download huggingface.co'), 'data-egress-id=')).toBe(3)
+    expect(group('rerank-model-download huggingface.co')).toContain('Reranking model download')
+    expect(count(group('rerank-model-download huggingface.co'), 'data-purpose="rerank-model-download"')).toBe(2)
+    expect(count(html, 'data-egress-id=')).toBe(7)
+    expect(html).toContain('data-egress-id="e1" data-host="huggingface.co" data-final-host="huggingface.co"')
+    // Size only on the OCR upload, which carries your file; the failed one is called out.
+    expect(count(html, '>Size<')).toBe(1)
+    expect(group('ocr pocketrag-answer.abhiram-dev.workers.dev')).toContain('2 kB')
+    expect(group('ocr pocketrag-answer.abhiram-dev.workers.dev')).toContain('1 failed')
+  })
+
   it('says so when nothing has left the browser yet', () => {
     const html = renderToStaticMarkup(createElement(receipts.SessionReceipts))
     expect(html).toContain('Nothing yet')
