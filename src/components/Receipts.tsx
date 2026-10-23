@@ -16,9 +16,12 @@ import {
 // session (SessionReceipts). Every row carries data-egress-id / data-host /
 // data-final-host so the e2e can reconcile them against the network requests it observed.
 
-// Verbatim, once per Receipt panel (not per row).
+// Verbatim, once per Receipt panel (not per row): the first part always visible, the
+// rest inside the allowed-destinations disclosure it introduces.
 export const RECEIPT_LIMITS_TEXT =
-  "This lists every request that carried data for this answer. “Then to” is what PocketRAG's server is built to do with it; your browser can't see past that server, so that part is our report, not something your browser observed. Not listed: the browser's own permission check before each request (it carries none of your data), loading the app itself, links you click, and a fallback download the AI runtime can make from its own CDN path. Your browser's security policy limits this page's own network requests (fetch, XHR) to the destinations below. It does not govern links you click or the browser's own navigation."
+  "This lists every request that carried data for this answer. “Then to” is what PocketRAG's server is built to do with it; your browser can't see past that server, so that part is our report, not something your browser observed."
+export const RECEIPT_NOT_SHOWN_TEXT =
+  "Not listed: the browser's own permission check before each request (it carries none of your data), loading the app itself, links you click, and a fallback download the AI runtime can make from its own CDN path. Your browser's security policy limits this page's own network requests (fetch, XHR) to the destinations below. It does not govern links you click or the browser's own navigation."
 
 const STATUS_STYLE: Record<EgressRecord['outcome'], { icon: Icon; className: string }> = {
   'in-flight': { icon: CircleNotch, className: 'text-slate-600 dark:text-slate-300' },
@@ -95,8 +98,9 @@ function Limits() {
       <p>{RECEIPT_LIMITS_TEXT}</p>
       <details className="mt-2">
         <summary className="cursor-pointer font-medium text-slate-700 focus-visible:outline-2 focus-visible:outline-blue-600 dark:text-slate-300">
-          Where this page is allowed to send data ({ALLOWED_DESTINATIONS.length})
+          What this doesn't show · where this page may send data ({ALLOWED_DESTINATIONS.length})
         </summary>
+        <p className="mt-2">{RECEIPT_NOT_SHOWN_TEXT}</p>
         <ul className="mt-2 space-y-1.5">
           {ALLOWED_DESTINATIONS.map((d) => (
             <li key={d.source}>

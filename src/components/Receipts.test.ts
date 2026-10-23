@@ -62,14 +62,25 @@ describe('TurnReceipt', () => {
     expect(html).toContain('2 requests · 6.2 kB')
   })
 
-  it('states the limits once per panel, verbatim, with the allowed destinations list', () => {
+  it('states the limits once per panel, verbatim: the first part visible, the rest with the allowed destinations', () => {
     expect(receipts.RECEIPT_LIMITS_TEXT).toBe(
-      "This lists every request that carried data for this answer. “Then to” is what PocketRAG's server is built to do with it; your browser can't see past that server, so that part is our report, not something your browser observed. Not listed: the browser's own permission check before each request (it carries none of your data), loading the app itself, links you click, and a fallback download the AI runtime can make from its own CDN path. Your browser's security policy limits this page's own network requests (fetch, XHR) to the destinations below. It does not govern links you click or the browser's own navigation.",
+      "This lists every request that carried data for this answer. “Then to” is what PocketRAG's server is built to do with it; your browser can't see past that server, so that part is our report, not something your browser observed.",
+    )
+    expect(receipts.RECEIPT_NOT_SHOWN_TEXT).toBe(
+      "Not listed: the browser's own permission check before each request (it carries none of your data), loading the app itself, links you click, and a fallback download the AI runtime can make from its own CDN path. Your browser's security policy limits this page's own network requests (fetch, XHR) to the destinations below. It does not govern links you click or the browser's own navigation.",
     )
     const html = renderToStaticMarkup(createElement(receipts.TurnReceipt, { turn: failedThenRetried }))
-    expect(count(html, 'a fallback download the AI runtime can make from its own CDN path')).toBe(1)
-    expect(html).toContain('Where this page is allowed to send data (5)')
-    expect(html).toContain('https://*.hf.co')
+    const visible = 'This lists every request that carried data for this answer.'
+    const notShown = 'a fallback download the AI runtime can make from its own CDN path'
+    expect(count(html, visible)).toBe(1)
+    expect(count(html, notShown)).toBe(1)
+    // The remainder sits inside the nested disclosure, after its summary; the first part
+    // sits outside it.
+    const nested = html.slice(html.lastIndexOf('<details'))
+    expect(nested).not.toContain(visible)
+    expect(nested.slice(nested.indexOf('</summary>'))).toContain(notShown)
+    expect(nested).toContain('What this doesn&#x27;t show · where this page may send data (5)')
+    expect(nested).toContain('https://*.hf.co')
   })
 
   it("doesn't name a model on a row whose upstream isn't the turn's provider, and handles no records", () => {
