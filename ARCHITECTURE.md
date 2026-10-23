@@ -582,6 +582,20 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
   - **A not-retained grounded answer** (restored, `answer: null`) shows only the
     "Web-grounded answer, not retained (Google terms)" placeholder — no grounded /
     ungrounded banner (`TurnAnswer.tsx`, also the PDF export).
+- **Copy and shareability (Phase 3a, production `1fd1b422` from `5efe65a`, 2026-10-23 —
+  rollback target `785e99d2`).** The landing page and README say what an answer request
+  carries (question, up to 3 passages, up to 3 earlier turns, random document IDs, the
+  opt-in diagram page image on the free tier), that it goes through PocketRAG's server,
+  that the BYOK key passes through unsaved, and that first-run downloads see the IP
+  address. The free-tier data-use line mirrors the Gemini API Additional Terms' "Unpaid
+  Services" clause (effective 2026-03-23, quoted in AGENTS.md Session 36); re-check it
+  when Google revises the terms. `index.html` carries the title, description, canonical,
+  Open Graph and Twitter tags; `public/og-image.png` (1200×630) was rendered once from
+  the landing page's `LockSimple` icon path and the self-hosted Inter font with the global
+  Playwright (no project dependency); regenerate it the same way if the tagline changes.
+  README screenshots live in `docs/screenshots/`. Tailwind scans Markdown and HTML too:
+  after this change the CSS was byte-identical (`index-iACYgoQC.css`), so no utility came
+  from the new text.
 
 ---
 

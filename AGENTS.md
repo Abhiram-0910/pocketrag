@@ -3815,6 +3815,64 @@ scratchpad, not the repo (as in Phase 2b). An extra screenshot,
 `receipt-expanded-limits-open-360-v2.png`, shows the moved limits text. Firefox wasn't
 run against the live Worker (one answer call allowed).
 
+### Session 36 — 2026-10-23 (Claude Code)
+**Goal:** Phase 3a — approved copy (plan commit 8, as amended), README Receipts
+showcase, index.html meta/OG, production deploy. Step D planned only (no code).
+
+**Built:** `8e51588` landing + README copy (what an answer request carries, the diagram
+page image on the free tier, OCR sends the whole file, BYOK key passes through unsaved,
+first-run downloads see the IP, Google's free-tier data use) and README Features gain
+Receipts and chat history. `bf29927` README "Receipts" section: 4 screenshots in
+`docs/screenshots/` (15-91 KB) and "Check a receipt yourself" (DevTools Payload /
+`Content-Length` / preflight / CSP header, the step-c command, what isn't proven).
+`5efe65a` index.html title, description, canonical, OG + Twitter tags, and
+`public/og-image.png` (1200×630, rendered from the `LockSimple` path + Inter).
+
+**Primary terms check** (https://ai.google.dev/gemini-api/terms, "Effective March 23,
+2026", Unpaid Services → How Google Uses Your Data): "When you use Unpaid Services,
+including, for example, Google AI Studio and the unpaid quota on Gemini API, Google uses
+the content you submit to the Services and any generated responses to provide, improve,
+and develop Google products and services and machine learning technologies, including
+Google's enterprise features, products, and services, consistent with our Privacy
+Policy." and "To help with quality and improve our products, human reviewers may read,
+annotate, and process your API input and output." The shipped line: "On the free shared
+tier, Google uses what's sent and the answers to provide, improve and develop its
+products and machine-learning technologies, and human reviewers may read them. Use your
+own paid key to avoid that." Same page, Use Restrictions: "You may use only Paid Services
+when making API Clients available to users in the European Economic Area, Switzerland, or
+the United Kingdom." — logged in TODO.md (the shared tier isn't geo-gated).
+
+**Verification:** frontend 259/259, Worker 331/331, `tsc`/`oxlint` clean both sides,
+build + size guard pass. JS `index-BT0pCVyT.js` → `index-DWxJQQtb.js`; CSS
+`index-iACYgoQC.css` unchanged and byte-identical to the pre-change build (Tailwind took
+nothing from the new README/landing text). `git diff 6158529 -- public/_headers` empty.
+step-b Chromium `exit=0` (15 scenarios, `failures: []`); step-c Chromium and Firefox
+`exit=0`, 15/15 flows, 25/25 matched, 0 unexpected CSP violations. Verified in
+Chromium and Firefox that a `fetch` POST's `Content-Length` equals the UTF-8 body bytes
+(the README tells readers to compare it with the Receipt's Size).
+
+**Deployed (Pages production):** `785e99d2` → **`1fd1b422-b0db-4b5f-ae54-ae956722b698`**
+(Production, `main`, source `5efe65a`). Served CSP byte-identical to `public/_headers`;
+XFO, Referrer-Policy, Permissions-Policy, COOP, nosniff present; index serves
+`index-DWxJQQtb.js` and the new title/OG tags; `/og-image.png` 200. Rollback:
+```bash
+npx wrangler whoami >/dev/null   # refreshes the OAuth token
+TOKEN=$(grep -oP '^oauth_token = "\K[^"]+' ~/.config/.wrangler/config/default.toml)
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+  https://api.cloudflare.com/client/v4/accounts/da55acd99cee5a43df7d397dd80af4e3/pages/projects/pocketrag/deployments/785e99d2-c943-4996-8663-f9aef20b0652/rollback
+```
+
+**Production smoke** (Chromium, no answer call, 0 requests reached the Worker): all 6
+new landing lines served, old copy gone; PDF → "1 chunk"; reload restored the library;
+Delete everything + reload → 0 documents; 0 CSP reports/events, 0 page errors.
+
+**Deviations:** the README intro had no "the files stay on your device" phrase, so the
+"except scanned pages you choose to OCR" addition went into the landing intro only; the
+README's existing Notes-tab paragraph already states that exception. The page image is
+opt-in (toggle, default off); the approved wording doesn't say so. The README screenshots
+come from a local build with the server mocked to fail once, and the README says that.
+The og-image and smoke scripts stay in the session scratchpad.
+
 ---
 
 <!-- Copy the block above for each new session -->

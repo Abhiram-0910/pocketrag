@@ -82,8 +82,20 @@ Read this at the start of every session to know what to work on next.
       (exact command in AGENTS.md Session 35). Live check passed: one real shared answer,
       Receipt matched the request, reload restore, Delete everything, no re-download.
       **Phase 2 is done.**
-- [ ] Copy (commit 8): landing page + README egress claims (wording table in the Phase 2
-      plan) — still awaiting approval; not committed, not deployed.
+- [x] Copy (commit 8): landing page + README egress claims, approved as amended, shipped
+      (`8e51588`) with the README Receipts showcase (`bf29927`) and index.html meta/OG
+      (`5efe65a`); production `1fd1b422` (rollback target `785e99d2`). The free-tier
+      data-use line was checked against the primary Gemini API terms (2026-03-23 version).
+- [ ] **Gemini terms: EEA/CH/UK users.** The Additional Terms say "You may use only Paid
+      Services when making API Clients available to users in the European Economic Area,
+      Switzerland, or the United Kingdom." The shared tier is an unpaid key with no
+      geo-gating, so it is available to those users today. Decide: geo-block the shared
+      tier there (Worker `request.cf.country`), move the shared key to a paid project, or
+      accept the risk. Not addressed by copy.
+- [ ] Favicon is still Vite's default logo (`public/favicon.svg`); replace with a
+      PocketRAG mark (the og-image uses the `LockSimple` icon).
+- [ ] Re-check the free-tier data-use copy whenever the Gemini API terms change (the
+      landing, README and og description quote it).
 - [ ] Not verified yet: CORS preflights on Firefox against the live Worker (Chromium: one
       observed via CDP, paired with its POST); the `quota` banner with a real
       `QuotaExceededError` in a browser (Chromium's quota override had no effect;
@@ -104,19 +116,17 @@ Read this at the start of every session to know what to work on next.
       `{provider, model}` so shared-tier turns record their model instead of `null`
       (needs a Worker deploy); whether deleting a document should cascade to turns that
       cite it.
-- [ ] Shared-Gemini free-tier data-use disclosure in the UI and README (free-tier
-      Gemini may use inputs to improve Google's products).
-  - [ ] Reword the landing copy and README egress claims at the same time: more than
-        "small passages" leaves the browser (question, conversation history, opt-in
-        page images, OCR files), Hugging Face and jsDelivr see the user's IP when the
-        model/runtime downloads, and the shared tier goes through our Worker.
+- [x] Shared-Gemini free-tier data-use disclosure on the landing page and README, and the
+      egress claims reworded (Phase 3a, `8e51588`). Not yet in the app's main screen
+      itself (only the landing page, shown once per browser).
 - [ ] Discord: create an Admin server and rotate the webhook (the old webhook is
       compromised), `wrangler secret put DISCORD_WEBHOOK_URL`, then do a positive
       check that a real alert arrives.
 - [ ] Grok bad-key detection relies only on the message regex `/\bapi key\b/i` (its
       code is a generic `invalid-argument`) — breaks silently if xAI rewords it.
 - [ ] Anthropic / Grok / OpenRouter success paths still unverified (no working key).
-- [ ] `index.html` title / meta description / Open Graph tags.
+- [x] `index.html` title / meta description / canonical / Open Graph + Twitter tags and a
+      1200×630 og-image (`5efe65a`).
 - [ ] Privacy and terms pages.
 - [ ] IndexedDB export (documents + conversations) — see "Chat history + Receipts" for
       the grounded-turns constraint.
