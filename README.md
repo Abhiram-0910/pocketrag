@@ -91,6 +91,78 @@ so treat these as best-effort, not proven:
   Google Cloud quota limit (`429 RESOURCE_EXHAUSTED`) across every attempt so far;
   believed to require a billing-linked project to unlock.
 
+## Receipts
+
+Every answer has a **Receipt**: one row per request that carried your data for it,
+retries included. Each row shows where the request went, what it carried, its size and
+its outcome. The **This session** list covers everything else the page fetched: model
+and runtime downloads, OCR uploads, model-list checks.
+
+| A failed request and its retry | The limits, on a phone |
+|---|---|
+| ![Receipt with a failed request (502) and a successful retry, each sent to PocketRAG's server and then to Gemini](docs/screenshots/receipt-failed-then-retried.png) | ![Receipt at 360px with the "What this doesn't show" section open](docs/screenshots/receipt-limits-mobile.png) |
+
+| This session: downloads, grouped | A restored web-grounded answer |
+|---|---|
+| ![This session list grouped by purpose and host: search model, AI runtime, reranking model](docs/screenshots/this-session.png) | ![A restored web-grounded turn: the answer isn't kept, its Receipt is](docs/screenshots/restored-not-retained-mobile.png) |
+
+The screenshots come from a local build with PocketRAG's server mocked: it failed the first
+answer on purpose. The model downloads in them are real.
+
+### Check a receipt yourself
+
+You don't have to take the Receipt's word for it. Your browser's developer tools show
+the same requests.
+
+1. Open https://pocketrag.pages.dev, open DevTools (F12) → **Network**, and tick
+   **Preserve log**.
+2. Add a PDF and ask a question. Expand the answer's **Receipt**.
+3. In Network, find the `POST` to `pocketrag-answer.abhiram-dev.workers.dev/answer`.
+   Compare it with the Receipt row:
+   - **To:** the request's host.
+   - **Sent:** the **Payload** tab (Firefox: **Request**) shows the JSON body. `question` is your question,
+     `chunks` are the passages (count them), `history` holds the earlier turns, and
+     `image` appears only when a page image was sent. The document IDs inside `chunks`
+     are random, not file names. With your own key, `apiKey` is in the body too.
+   - **Size:** the body's byte count. It's the `Content-Length` request header
+     (**Headers** → Request Headers). DevTools' Size column shows the *response*, not
+     what you sent. Receipts use decimal units (1 kB = 1000 B).
+   - **Status:** the response status, so a failed try shows as its own row.
+4. You may also see an `OPTIONS` request to the same URL just before the `POST`. That's
+   the browser's CORS preflight. It carries none of your data, so it is deliberately not
+   a Receipt row (the Receipt says so under "What this doesn't show").
+5. To see the security policy that limits where the page can send data, click the first
+   request (the page itself; reload if it's gone) → **Headers** → Response Headers →
+   `content-security-policy`. Its `connect-src` lists the only hosts this page's own
+   requests can reach. From a terminal:
+   `curl -sI https://pocketrag.pages.dev | grep -i content-security-policy`.
+
+**The automated check.** `e2e/step-c-csp.cjs` runs 15 flows (upload, questions, the
+diagram path, OCR, BYOK model list, reload, deletes) in a real browser. It then
+reconciles every cross-origin request the browser made against the Receipt and This
+session rows on the page, and checks that each model's downloads match their rows. It
+passes on Chromium and Firefox with 0 unmatched requests. It needs Playwright installed
+globally:
+
+```bash
+npm run build && npx wrangler pages dev dist --port 8788 --compatibility-date=2026-07-29 &
+NODE_PATH=$(npm root -g) node e2e/step-c-csp.cjs                    # Chromium
+BROWSER=firefox NODE_PATH=$(npm root -g) node e2e/step-c-csp.cjs    # Firefox
+```
+
+PocketRAG's server is mocked in that test (no shared quota spent). The Hugging Face and
+jsDelivr downloads are real.
+
+**What this does not prove:**
+- **"Then to"** (PocketRAG's server → Gemini or your provider) and the model name are the
+  server's own report. Your browser can't see past that server.
+- Size counts the request body only, not headers or preflights.
+- Safari/WebKit is unverified.
+- Links you click and the browser's own navigation aren't limited by the security policy
+  and aren't listed. One fallback download the AI runtime can make on its own isn't
+  listed either. See [SECURITY_REVIEW.md](./SECURITY_REVIEW.md) §8 for everything the
+  ledger can't see and what limits it.
+
 ## Docs
 
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — codebase map, data flow, and the reasoning
