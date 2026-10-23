@@ -284,9 +284,16 @@ async function main() {
     await page.getByText('And which one stores DNA?').first().waitFor({ timeout: 30_000 })
     const notRetained = await page.getByText('Web-grounded answer, not retained (Google terms)').count()
     if (notRetained === 0) throw new Error('no restored grounded turn shown as not retained')
+    // A not-retained card shows the placeholder only: no grounded / ungrounded banner.
+    const bannersOnNotRetained = await page.evaluate(() =>
+      [...document.querySelectorAll('p')]
+        .filter((p) => p.textContent === 'Web-grounded answer, not retained (Google terms)')
+        .filter((p) => /Grounded in your documents\.|may not be fully grounded/.test(p.parentElement.textContent)).length,
+    )
+    if (bannersOnNotRetained !== 0) throw new Error(`${bannersOnNotRetained} not-retained cards still show a grounding banner`)
     await docButton('eight-pages.pdf').click()
     await ask('Where is DNA stored?', 'reload + restore')
-    return { restoredNotRetained: notRetained }
+    return { restoredNotRetained: notRetained, bannersOnNotRetained }
   })
   await flow('document deletion', async () => {
     await page.getByRole('button', { name: 'Delete eight-pages.pdf' }).click()

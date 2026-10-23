@@ -50,6 +50,14 @@ describe('buildConversationPdf', () => {
     expect(page).not.toContain('Grounded in your documents.')
   })
 
+  it('writes only the not-retained text, no grounding line, for an answer that was not kept', async () => {
+    const doc = buildConversationPdf([makeTurn({ answer: null })], [], titleFor)
+    const [page] = await extractPages(doc)
+    expect(page).toContain('Web-grounded answer, not retained (Google terms)')
+    expect(page).not.toContain('Grounded in your documents.')
+    expect(page).not.toContain('may not be fully grounded')
+  })
+
   it('renders the Doc N legend resolved to real filenames', async () => {
     const doc = buildConversationPdf(
       [

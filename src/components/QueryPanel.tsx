@@ -21,6 +21,7 @@ import type { TurnRecord } from '../lib/historyDb'
 import { useDocumentStore } from '../store/documentStore'
 import { answerFor, useChatStore, type HistoryStorageState, type TurnKey, type TurnRequestContext } from '../store/chatStore'
 import { SessionReceipts, TurnReceipt } from './Receipts'
+import { TurnAnswer } from './TurnAnswer'
 import { StatusBanner } from './ui/StatusBanner'
 import { Button } from './ui/Button'
 
@@ -66,12 +67,6 @@ const STORAGE_COPY: Record<Exclude<HistoryStorageState, 'ok'>, { variant: 'warni
   },
 }
 
-const GROUNDED_TEXT = 'Grounded in your documents.'
-const UNGROUNDED_TEXT =
-  'This answer may not be fully grounded in the source document — verify against the sources below.'
-// A grounded answer is never stored (Gemini terms — SECURITY_REVIEW.md §1.1); after a
-// reload only this placeholder is left.
-export const NOT_RETAINED_TEXT = 'Web-grounded answer, not retained (Google terms)'
 
 // The answer request goes out with whichever key is active now.
 function turnKeyFor(keyConfig: KeyConfig): TurnKey {
@@ -520,7 +515,7 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
       .filter((t) => t.status === 'answered')
       .map((t) => ({
         question: t.question,
-        answer: answerFor({ groundedSession }, t) ?? NOT_RETAINED_TEXT,
+        answer: answerFor({ groundedSession }, t),
         groundingWarning: t.groundingWarning,
         docLabels: t.docLabels,
       }))
@@ -544,14 +539,6 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
         : 'Select a document first'
       : 'Finish setting up your API key first'
 
-  const answerText = (turn: TurnRecord) => {
-    const text = answerFor({ groundedSession }, turn)
-    return text !== null ? (
-      <p className="text-sm text-slate-900 dark:text-slate-100">{text}</p>
-    ) : (
-      <p className="text-sm italic text-slate-600 dark:text-slate-400">{NOT_RETAINED_TEXT}</p>
-    )
-  }
 
   // A stored failure / timeout / interruption of a turn that isn't this session's live
   // one: same copy and actions, rendered outside the live region (inLiveRegion drops the
@@ -749,15 +736,7 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
         {leaf?.status === 'answered' && (
           <div className="mt-4 space-y-2 rounded border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
             {showLeafQuestion && <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{leaf.question}</p>}
-            <StatusBanner variant={leaf.groundingWarning ? 'warning' : 'success'}>
-              {leaf.groundingWarning ? UNGROUNDED_TEXT : GROUNDED_TEXT}
-            </StatusBanner>
-            {leaf.imageIncluded && (
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                🖼️ A page image was included in this request.
-              </p>
-            )}
-            {answerText(leaf)}
+            <TurnAnswer turn={leaf} text={answerFor({ groundedSession }, leaf)} />
             {leaf.docLabels.length > 0 && (
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 {leaf.docLabels.map((d) => `Doc ${d.label} = ${titleFor(d.documentId)}`).join(' · ')}
@@ -841,15 +820,7 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
                 <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{turn.question}</p>
                 {turn.status === 'answered' ? (
                   <>
-                    <StatusBanner variant={turn.groundingWarning ? 'warning' : 'success'}>
-                      {turn.groundingWarning ? UNGROUNDED_TEXT : GROUNDED_TEXT}
-                    </StatusBanner>
-                    {turn.imageIncluded && (
-                      <p className="text-xs text-slate-500 dark:text-slate-400">
-                        🖼️ A page image was included in this request.
-                      </p>
-                    )}
-                    {answerText(turn)}
+                    <TurnAnswer turn={turn} text={answerFor({ groundedSession }, turn)} />
                     {turn.docLabels.length > 0 && (
                       <p className="text-xs text-slate-500 dark:text-slate-400">
                         {turn.docLabels.map((d) => `Doc ${d.label} = ${titleFor(d.documentId)}`).join(' · ')}

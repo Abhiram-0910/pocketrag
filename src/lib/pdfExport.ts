@@ -1,5 +1,6 @@
 import { jsPDF } from 'jspdf'
 import type { DocLabel } from './answerRequest'
+import { GROUNDED_TEXT, NOT_RETAINED_TEXT, UNGROUNDED_TEXT } from './answerCopy'
 
 const PAGE_MARGIN = 40
 const TITLE_FONT_SIZE = 16
@@ -12,13 +13,11 @@ const LINE_HEIGHT_FACTOR = 1.15
 const SECTION_GAP = 14
 const PARAGRAPH_GAP = 6
 
-const GROUNDED_TEXT = 'Grounded in your documents.'
-const UNGROUNDED_TEXT =
-  'This answer may not be fully grounded in the source document — verify against the sources below.'
 
 export interface ExportTurn {
   question: string
-  answer: string
+  // null: a web-grounded answer that wasn't retained — placeholder only, no grounding line.
+  answer: string | null
   groundingWarning: boolean
   docLabels: DocLabel[]
 }
@@ -85,9 +84,13 @@ export function buildConversationPdf(
 
     writeWrapped(`Q: ${turn.question}`, QUESTION_FONT_SIZE)
     cursor.y += PARAGRAPH_GAP
-    writeWrapped(turn.groundingWarning ? UNGROUNDED_TEXT : GROUNDED_TEXT, LABEL_FONT_SIZE)
-    cursor.y += PARAGRAPH_GAP
-    writeWrapped(turn.answer, BODY_FONT_SIZE)
+    if (turn.answer === null) {
+      writeWrapped(NOT_RETAINED_TEXT, BODY_FONT_SIZE)
+    } else {
+      writeWrapped(turn.groundingWarning ? UNGROUNDED_TEXT : GROUNDED_TEXT, LABEL_FONT_SIZE)
+      cursor.y += PARAGRAPH_GAP
+      writeWrapped(turn.answer, BODY_FONT_SIZE)
+    }
 
     if (turn.docLabels.length > 0) {
       cursor.y += PARAGRAPH_GAP
