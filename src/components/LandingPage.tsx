@@ -23,9 +23,9 @@ export function LandingPage({ onGetStarted }: LandingPageProps) {
           <p className="mt-2 text-slate-600 dark:text-slate-400">
             PocketRAG reads, indexes and searches your PDFs in your browser; the files stay on your device, except
             scanned pages you choose to OCR. To answer a question it sends your question, up to 3 matching passages,
-            your last few questions and answers, and a page image when a question is about a chart or diagram, on
-            the free tier, through PocketRAG's server to the AI provider: Google Gemini by default, or the provider
-            you pick with your own key. Every answer comes with a receipt of exactly what was sent.
+            your last few questions and answers, and, only if you turn on diagram images (off by default, free tier
+            only), a page image when a question is about a chart or diagram, through PocketRAG's server to the AI
+            provider: Google Gemini by default, or the provider you pick with your own key. Every answer comes with a receipt of exactly what was sent.
           </p>
         </div>
       </div>
@@ -57,7 +57,8 @@ export function LandingPage({ onGetStarted }: LandingPageProps) {
           <p className="text-sm text-slate-600 dark:text-slate-400">
             On the free shared tier, Google uses what's sent and the answers to provide, improve and develop its
             products and machine-learning technologies, and human reviewers may read them. Use your own paid key to
-            avoid that.
+            avoid that. The free shared tier isn't available in the EEA, Switzerland or the UK (Google's terms);
+            bring your own key there.
           </p>
         </div>
         <div className="flex items-start gap-3">

@@ -172,6 +172,15 @@ export function ByokPanel({ onChange, ref }: ByokPanelProps) {
         Use your own API key
       </label>
 
+      {/* Shared tier only. Same meaning as LandingPage's free-tier line (Gemini API terms,
+          "Unpaid Services"); hidden once the user switches to their own key. */}
+      {!useOwnKey && (
+        <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+          Free shared tier: Google uses what's sent to improve its products and human reviewers may read it. Use your
+          own paid key to avoid that.
+        </p>
+      )}
+
       {useOwnKey && (
         <div className="mt-2 space-y-2 rounded border border-slate-200 p-3 dark:border-slate-700">
           <select

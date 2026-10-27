@@ -4,15 +4,16 @@ Local-first, browser-only "chat with your documents." Content you upload to the
 **Documents tab** is parsed, embedded, and searched entirely in your browser — the
 source file itself never leaves it. To answer, it sends your question, up to 3
 retrieved passages, up to 3 earlier questions and answers, random document IDs (never
-file names), and a page image when a question is about a chart or diagram, on the free
-tier, through PocketRAG's Cloudflare Worker to the AI provider: Google Gemini on the
+file names), and, only if you turn on diagram images (off by default, free tier only), a
+page image when a question is about a chart or diagram, through PocketRAG's Cloudflare Worker to the AI provider: Google Gemini on the
 free shared tier, or your own provider with your own key. Each answer's Receipts list
 exactly what was sent.
 
 Free shared tier: Google uses what's sent and the answers to provide, improve and
 develop its products and machine-learning technologies, and human reviewers may read
 them ([Gemini API Additional Terms](https://ai.google.dev/gemini-api/terms), "Unpaid
-Services"). Use your own paid key to avoid that.
+Services"). Use your own paid key to avoid that. The free shared tier isn't available in
+the EEA, Switzerland or the UK (Google's terms); bring your own key there.
 
 The one deliberate exception: the separate **Notes tab**, for handwritten or scanned
 content, sends the whole file to Google's Gemini API for OCR — gated behind an
