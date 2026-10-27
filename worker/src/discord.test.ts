@@ -1,11 +1,16 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   DISCORD_SHARED_RATE_LIMIT_WINDOW_SECONDS,
   DISCORD_SUPPRESS_WINDOW_SECONDS,
+  KV_ALERT_WINDOW_MS,
+  KV_FAILURE_PAYLOAD,
   buildDiscordPayload,
+  resetDiscordMemory,
   sendDiscordAlert,
+  shouldAlertKvFailure,
   shouldNotify,
 } from './discord'
+import type { KVLike } from './rateLimit'
 
 function mockFetch(response: Partial<Response> & { ok?: boolean; status?: number }) {
   return vi.fn().mockResolvedValue({ ok: response.ok ?? true, status: response.status ?? 204 } as Response)
@@ -208,5 +213,49 @@ describe('shouldNotify', () => {
     expect(ttls).toEqual([DISCORD_SUPPRESS_WINDOW_SECONDS, DISCORD_SHARED_RATE_LIMIT_WINDOW_SECONDS])
     expect(DISCORD_SUPPRESS_WINDOW_SECONDS).toBe(600)
     expect(DISCORD_SHARED_RATE_LIMIT_WINDOW_SECONDS).toBe(21600)
+  })
+})
+
+describe('shouldNotify — KV failures fail open, suppressed in memory', () => {
+  beforeEach(() => resetDiscordMemory())
+  function boom(): Promise<never> {
+    return Promise.reject(new Error('KV down'))
+  }
+  const getThrows: KVLike = { get: boom, put: async () => {} }
+  const putThrows: KVLike = { get: async () => null, put: boom }
+
+  it.each<[string, KVLike, string]>([
+    ['get throws', getThrows, 'get'],
+    ['put throws', putThrows, 'put'],
+  ])('%s: notifies once per window from memory, reports the op', async (_name, kv, op) => {
+    const reported: string[] = []
+    expect(await shouldNotify(kv, 'gemini', 'answer', 'shared', 600, (o) => reported.push(o))).toBe(true)
+    expect(await shouldNotify(kv, 'gemini', 'answer', 'shared', 600, (o) => reported.push(o))).toBe(false)
+    expect(await shouldNotify(kv, 'gemini', 'models', 'shared', 600)).toBe(true)
+    expect(reported).toEqual([op, op])
+  })
+
+  it('the in-memory window expires', async () => {
+    vi.useFakeTimers()
+    const kv: KVLike = { get: boom, put: boom }
+    expect(await shouldNotify(kv, 'gemini', 'answer', 'shared', 600)).toBe(true)
+    vi.advanceTimersByTime(601_000)
+    expect(await shouldNotify(kv, 'gemini', 'answer', 'shared', 600)).toBe(true)
+    vi.useRealTimers()
+  })
+})
+
+describe('shouldAlertKvFailure', () => {
+  beforeEach(() => resetDiscordMemory())
+  it('allows one alert per isolate per hour', () => {
+    expect(shouldAlertKvFailure(1_000_000)).toBe(true)
+    expect(shouldAlertKvFailure(1_000_000 + KV_ALERT_WINDOW_MS - 1)).toBe(false)
+    expect(shouldAlertKvFailure(1_000_000 + KV_ALERT_WINDOW_MS)).toBe(true)
+  })
+
+  it('the KV alert payload carries no IP, key or error text', () => {
+    const body = JSON.stringify(buildDiscordPayload(KV_FAILURE_PAYLOAD, '2026-10-27T00:00:00.000Z'))
+    expect(body).toContain('Workers KV call failed')
+    expect(body).not.toMatch(/\d+\.\d+\.\d+\.\d+|ratelimit:|KV down/)
   })
 })

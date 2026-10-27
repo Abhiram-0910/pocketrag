@@ -30,25 +30,70 @@ function nextUtcMidnight(): string {
   return midnight.toISOString()
 }
 
+export type KvOp = 'get' | 'put'
+// Called once per failed KV call — index.ts logs and (rarely) alerts. Never throws.
+export type KvErrorReporter = (op: KvOp) => void
+
+// ponytail: the fallback limiter is WEAK — one Map per isolate, and Cloudflare runs many
+// short-lived isolates, so a determined client spread across them sees far more than the
+// daily limit. It is a floor against a tight loop hitting one isolate while KV is down,
+// not a quota. Exact limits across isolates need a Durable Object (TODO.md).
+export const FALLBACK_MAX_ENTRIES = 10_000
+const fallbackCounts = new Map<string, number>()
+
+function fallbackCheck(key: string, limit: number, resetAt: string): RateLimitResult {
+  const current = fallbackCounts.get(key) ?? 0
+  if (current >= limit) return { allowed: false, remaining: 0, resetAt }
+  // Re-insert so the Map's insertion order tracks recency; evict the oldest past the cap.
+  fallbackCounts.delete(key)
+  fallbackCounts.set(key, current + 1)
+  if (fallbackCounts.size > FALLBACK_MAX_ENTRIES) fallbackCounts.delete(fallbackCounts.keys().next().value!)
+  return { allowed: true, remaining: limit - current - 1, resetAt }
+}
+
+/** Test-only: the fallback Map is module state shared across tests. */
+export function resetFallbackLimiter(): void {
+  fallbackCounts.clear()
+}
+export function fallbackLimiterSize(): number {
+  return fallbackCounts.size
+}
+
 // ponytail: KV get-then-put isn't atomic, so concurrent requests from the same IP
 // in the same second could both read the same count and both be allowed — a soft
 // cap, not an exact one. Fine for abuse protection; switch to a Durable Object if
 // exact per-request accounting is ever needed.
+//
+// Fails OPEN: a KV error never throws. A failed get or put hands the request to the
+// fallback limiter instead. A request KV counted (put succeeded) never touches the
+// fallback, so nothing is counted twice.
 export async function checkRateLimit(
   kv: KVLike,
   ip: string,
   bucket: string,
   limit = DEFAULT_DAILY_LIMIT,
+  onKvError: KvErrorReporter = () => {},
 ): Promise<RateLimitResult> {
   const day = new Date().toISOString().slice(0, 10)
   const key = `ratelimit:${bucket}:${ip}:${day}`
   const resetAt = nextUtcMidnight()
 
-  const current = Number((await kv.get(key)) ?? '0')
+  let current: number
+  try {
+    current = Number((await kv.get(key)) ?? '0')
+  } catch {
+    onKvError('get')
+    return fallbackCheck(key, limit, resetAt)
+  }
   if (current >= limit) {
     return { allowed: false, remaining: 0, resetAt }
   }
 
-  await kv.put(key, String(current + 1), { expirationTtl: SECONDS_PER_DAY })
+  try {
+    await kv.put(key, String(current + 1), { expirationTtl: SECONDS_PER_DAY })
+  } catch {
+    onKvError('put')
+    return fallbackCheck(key, limit, resetAt)
+  }
   return { allowed: true, remaining: limit - current - 1, resetAt }
 }

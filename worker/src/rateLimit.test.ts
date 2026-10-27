@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { checkRateLimit, type KVLike } from './rateLimit'
+import { checkRateLimit, fallbackLimiterSize, resetFallbackLimiter, FALLBACK_MAX_ENTRIES, type KVLike } from './rateLimit'
 
 function fakeKV(initial: Record<string, string> = {}): KVLike & { store: Record<string, string> } {
   const store = { ...initial }
@@ -14,6 +14,7 @@ function fakeKV(initial: Record<string, string> = {}): KVLike & { store: Record<
 
 afterEach(() => {
   vi.useRealTimers()
+  resetFallbackLimiter()
 })
 
 describe('checkRateLimit', () => {
@@ -84,5 +85,75 @@ describe('checkRateLimit', () => {
     expect(denied.allowed).toBe(false)
     expect(denied.resetAt).toBe('2026-08-12T00:00:00.000Z')
     vi.useRealTimers()
+  })
+})
+
+describe('checkRateLimit — KV failures fail open', () => {
+  const boom = async (): Promise<never> => {
+    throw new Error('KV put() limit exceeded for the day.')
+  }
+  const getThrows = (): KVLike => ({ get: boom, put: async () => {} })
+  const putThrows = (): KVLike & { store: Record<string, string> } => ({ ...fakeKV(), put: boom })
+  const bothThrow = (): KVLike => ({ get: boom, put: boom })
+
+  it.each([
+    ['get throws', getThrows, ['get']],
+    ['put throws', putThrows, ['put']],
+    ['both throw', bothThrow, ['get']],
+  ] as const)('%s: allows, reports the op, never throws', async (_name, make, ops) => {
+    const reported: string[] = []
+    const result = await checkRateLimit(make(), '1.2.3.4', 'shared', 5, (op) => reported.push(op))
+    expect(result).toMatchObject({ allowed: true, remaining: 4 })
+    expect(reported).toEqual(ops)
+  })
+
+  it.each(['shared', 'byok', 'ocr'])('the fallback enforces the same limit per (bucket, IP): %s', async (bucket) => {
+    const kv = bothThrow()
+    for (let i = 0; i < 3; i++) expect((await checkRateLimit(kv, '1.2.3.4', bucket, 3)).allowed).toBe(true)
+    expect(await checkRateLimit(kv, '1.2.3.4', bucket, 3)).toMatchObject({ allowed: false, remaining: 0 })
+    // Another IP and another bucket each have their own fallback count.
+    expect((await checkRateLimit(kv, '5.6.7.8', bucket, 3)).allowed).toBe(true)
+    expect((await checkRateLimit(kv, '1.2.3.4', `${bucket}-other`, 3)).allowed).toBe(true)
+  })
+
+  it('never counts a request KV counted: only failed puts reach the fallback', async () => {
+    let putFails = false
+    const base = fakeKV()
+    const kv: KVLike = {
+      get: base.get,
+      put: async (k, v) => {
+        if (putFails) throw new Error('down')
+        await base.put(k, v)
+      },
+    }
+    await checkRateLimit(kv, '1.2.3.4', 'shared', 3)
+    await checkRateLimit(kv, '1.2.3.4', 'shared', 3)
+    expect(fallbackLimiterSize()).toBe(0)
+    expect(base.store).toMatchObject({ [Object.keys(base.store)[0]]: '2' })
+    putFails = true
+    // KV still reads 2 (< 3); the put fails, so the fallback counts this one — from 0.
+    expect(await checkRateLimit(kv, '1.2.3.4', 'shared', 3)).toMatchObject({ allowed: true, remaining: 2 })
+    expect(fallbackLimiterSize()).toBe(1)
+  })
+
+  it('a KV read showing the limit still denies, even when puts fail', async () => {
+    const kv = putThrows()
+    const day = new Date().toISOString().slice(0, 10)
+    kv.store[`ratelimit:shared:1.2.3.4:${day}`] = '5'
+    expect((await checkRateLimit(kv, '1.2.3.4', 'shared', 5)).allowed).toBe(false)
+    expect(fallbackLimiterSize()).toBe(0)
+  })
+
+  it('caps the fallback Map and evicts the oldest entry', async () => {
+    const kv = bothThrow()
+    for (let i = 0; i < FALLBACK_MAX_ENTRIES; i++) await checkRateLimit(kv, `ip-${i}`, 'shared', 1)
+    expect(fallbackLimiterSize()).toBe(FALLBACK_MAX_ENTRIES)
+    // ip-0 is spent; one more distinct IP evicts it (the oldest), so ip-0 starts over.
+    expect((await checkRateLimit(kv, 'ip-0', 'shared', 1)).allowed).toBe(false)
+    await checkRateLimit(kv, 'ip-new', 'shared', 1)
+    expect(fallbackLimiterSize()).toBe(FALLBACK_MAX_ENTRIES)
+    // A denied check doesn't refresh recency, so ip-0 was still the oldest and got evicted.
+    expect((await checkRateLimit(kv, 'ip-0', 'shared', 1)).allowed).toBe(true)
+    expect((await checkRateLimit(kv, 'ip-2', 'shared', 1)).allowed).toBe(false)
   })
 })

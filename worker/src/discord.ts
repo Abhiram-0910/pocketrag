@@ -1,4 +1,4 @@
-import type { KVLike } from './rateLimit'
+import type { KVLike, KvErrorReporter } from './rateLimit'
 import { redactKeys } from './providers/errors'
 
 export type DiscordTier = 'shared' | 'own'
@@ -16,6 +16,8 @@ export interface DiscordFailurePayload {
   // optional since /ocr's deliberately narrow alert carries neither.
   code?: string
   providerCode?: string
+  // Overrides the "Provider call failed" title (the KV-failure alert isn't a provider call).
+  title?: string
 }
 
 const DISCORD_COLOR_RED = 0xed4245
@@ -28,7 +30,7 @@ export function buildDiscordPayload(payload: DiscordFailurePayload, timestamp: s
   return {
     embeds: [
       {
-        title: `Provider call failed: ${payload.provider}`,
+        title: payload.title ?? `Provider call failed: ${payload.provider}`,
         color: DISCORD_COLOR_RED,
         fields: [
           { name: 'Provider', value: payload.provider, inline: true },
@@ -94,9 +96,59 @@ export async function shouldNotify(
   endpoint: DiscordEndpoint,
   slot: DiscordSuppressionSlot,
   windowSeconds: number = DISCORD_SUPPRESS_WINDOW_SECONDS,
+  onKvError: KvErrorReporter = () => {},
 ): Promise<boolean> {
   const key = `discord-notify:${provider}:${endpoint}:${slot}`
-  if (await kv.get(key)) return false
-  await kv.put(key, '1', { expirationTtl: windowSeconds })
+  try {
+    if (await kv.get(key)) return false
+  } catch {
+    onKvError('get')
+    return memoryShouldNotify(key, windowSeconds)
+  }
+  try {
+    await kv.put(key, '1', { expirationTtl: windowSeconds })
+  } catch {
+    onKvError('put')
+    return memoryShouldNotify(key, windowSeconds)
+  }
   return true
+}
+
+// KV down → the same windows, per isolate, in memory. A handful of slot keys exist
+// (provider × endpoint × slot), so this Map stays tiny without a cap.
+const memorySlots = new Map<string, number>()
+function memoryShouldNotify(key: string, windowSeconds: number, now = Date.now()): boolean {
+  const until = memorySlots.get(key)
+  if (until !== undefined && until > now) return false
+  memorySlots.set(key, now + windowSeconds * 1000)
+  return true
+}
+
+export const KV_ALERT_WINDOW_MS = 60 * 60 * 1000
+let lastKvAlertAt = Number.NEGATIVE_INFINITY
+
+/**
+ * One Discord alert per isolate per hour when Workers KV fails. Deliberately not
+ * suppressed through KV (that's what is failing) — in memory only, so a fleet of
+ * isolates can each send one. Fixed text: no IP, no key, no error message.
+ */
+export function shouldAlertKvFailure(now = Date.now()): boolean {
+  if (now - lastKvAlertAt < KV_ALERT_WINDOW_MS) return false
+  lastKvAlertAt = now
+  return true
+}
+
+export const KV_FAILURE_PAYLOAD: DiscordFailurePayload = {
+  title: 'Workers KV call failed',
+  provider: 'workers-kv',
+  model: null,
+  status: null,
+  message: 'A KV get or put threw. Rate limits fell back to the weak in-memory limiter; requests were allowed.',
+  tier: 'shared',
+}
+
+/** Test-only: resets the in-memory Discord state. */
+export function resetDiscordMemory(): void {
+  memorySlots.clear()
+  lastKvAlertAt = Number.NEGATIVE_INFINITY
 }

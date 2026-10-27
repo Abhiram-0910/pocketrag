@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import worker from './index'
 import { DEFAULT_SHARED_MODEL } from './providers/gemini'
-import type { KVLike } from './rateLimit'
+import { resetFallbackLimiter, type KVLike } from './rateLimit'
+import { resetDiscordMemory } from './discord'
 
 // No real Workers runtime in these tests (plain node vitest, no Miniflare), so
 // ExecutionContext is hand-mocked. Every makeCtx() call in a test pushes into the
@@ -1370,5 +1371,125 @@ describe('worker fetch handler — region restriction (shared tier only)', () =>
   it('validates the body before the region check (a malformed request is still a 400)', async () => {
     const res = await worker.fetch(fromCountry(answerRequest({ question: '' }), 'DE'), makeEnv(), makeCtx())
     expect(res.status).toBe(400)
+  })
+})
+
+describe('worker fetch handler — KV failures fail open; safety net', () => {
+  beforeEach(() => {
+    resetFallbackLimiter()
+    resetDiscordMemory()
+  })
+
+  const boom = async (): Promise<never> => {
+    throw new Error('KV put() limit exceeded for the day. secret-ish 10.0.0.1')
+  }
+  const kvs = {
+    'get throws': { get: boom, put: async () => {} },
+    'put throws': { get: async () => null, put: boom },
+    'both throw': { get: boom, put: boom },
+  }
+
+  function geminiOk() {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: 'It makes ATP (Doc 1, page 1).' }] } }] }),
+      text: async () => '',
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    return fetchSpy
+  }
+
+  const cases: [string, () => IncomingRequest][] = [
+    ['shared /answer', () => answerRequest(validBody)],
+    ['BYOK /answer', () => answerRequest(byokBody)],
+    ['/ocr', () => ocrRequest(validOcrBody)],
+  ]
+
+  for (const [kvName, kv] of Object.entries(kvs)) {
+    it.each(cases)(`${kvName}: %s is allowed, never a thrown 500`, async (_name, make) => {
+      geminiOk()
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const res = await worker.fetch(make(), makeEnv({ RATE_LIMIT_KV: kv as unknown as Env['RATE_LIMIT_KV'] }), makeCtx())
+      expect(res.status).toBe(200)
+      expect(res.headers.get('Access-Control-Allow-Origin')).toBe('http://localhost:5173')
+      // Number-only line: no IP, no key name, no error text.
+      const lines = warn.mock.calls.map((c) => String(c[0]))
+      expect(lines.length).toBeGreaterThan(0)
+      for (const line of lines) {
+        expect(JSON.parse(line)).toMatchObject({ event: 'kv_call_failed' })
+        expect(line).not.toMatch(/ratelimit:|10\.0\.0\.1|limit exceeded|unknown/)
+      }
+      warn.mockRestore()
+    })
+  }
+
+  it('the fallback limiter still caps a tight loop on one isolate (shared: 50/day)', async () => {
+    geminiOk()
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const env = makeEnv({ RATE_LIMIT_KV: kvs['both throw'] as unknown as Env['RATE_LIMIT_KV'] })
+    const statuses: number[] = []
+    for (let i = 0; i < 51; i++) statuses.push((await worker.fetch(answerRequest(validBody), env, makeCtx())).status)
+    expect(statuses.filter((s) => s === 200)).toHaveLength(50)
+    expect(statuses.at(-1)).toBe(429)
+    vi.restoreAllMocks()
+  })
+
+  it('sends at most one KV-failure Discord alert per isolate per hour, without touching KV', async () => {
+    const fetchSpy = geminiOk()
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const env = makeEnv({
+      RATE_LIMIT_KV: kvs['both throw'] as unknown as Env['RATE_LIMIT_KV'],
+      DISCORD_WEBHOOK_URL: 'https://discord.test/hook',
+    })
+    for (let i = 0; i < 3; i++) await worker.fetch(answerRequest(validBody), env, makeCtx())
+    await flushWaitUntil()
+    const discordCalls = fetchSpy.mock.calls.filter(([url]) => url === 'https://discord.test/hook')
+    expect(discordCalls).toHaveLength(1)
+    const body = String((discordCalls[0][1] as RequestInit).body)
+    expect(body).toContain('Workers KV call failed')
+    expect(body).not.toMatch(/limit exceeded|10\.0\.0\.1/)
+    vi.restoreAllMocks()
+  })
+
+  it('a provider failure with KV down still logs and alerts (suppression falls back to memory)', async () => {
+    const fetchSpy = vi.fn(async (url: string) =>
+      url === 'https://discord.test/hook'
+        ? new Response(null, { status: 204 })
+        : new Response(JSON.stringify({ error: { code: 503, message: 'overloaded', status: 'UNAVAILABLE' } }), { status: 503 }),
+    )
+    vi.stubGlobal('fetch', fetchSpy)
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const env = makeEnv({
+      RATE_LIMIT_KV: kvs['both throw'] as unknown as Env['RATE_LIMIT_KV'],
+      DISCORD_WEBHOOK_URL: 'https://discord.test/hook',
+    })
+    const res = await worker.fetch(answerRequest(validBody), env, makeCtx())
+    await flushWaitUntil()
+    expect(res.status).toBe(502)
+    expect(errorSpy).toHaveBeenCalled()
+    // One KV-failure alert + one provider-failure alert.
+    expect(fetchSpy.mock.calls.filter(([url]) => url === 'https://discord.test/hook')).toHaveLength(2)
+    vi.restoreAllMocks()
+  })
+
+  it('safety net: an unexpected throw becomes a JSON 500 with CORS headers and fixed copy, nothing echoed', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const exploding = {
+      method: 'POST',
+      headers: new Headers({ Origin: 'http://localhost:5173', 'Content-Type': 'application/json' }),
+      get url(): string {
+        throw new Error('boom AIzaSyFakeKeyFakeKeyFakeKey1234 question text')
+      },
+    } as unknown as IncomingRequest
+    const res = await worker.fetch(exploding, makeEnv(), makeCtx())
+    expect(res.status).toBe(500)
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('http://localhost:5173')
+    expect(res.headers.get('Content-Type')).toBe('application/json')
+    expect(await res.json()).toEqual({ error: "PocketRAG's server had a problem. Try again." })
+    const logged = errorSpy.mock.calls.map((c) => String(c[0])).join('\n')
+    expect(logged).toBe(JSON.stringify({ event: 'worker_unhandled_error' }))
+    errorSpy.mockRestore()
   })
 })

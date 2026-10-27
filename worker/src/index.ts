@@ -9,7 +9,7 @@ import {
 import { buildPrompt } from './prompt'
 import { checkGrounding } from './grounding'
 import { assignDocLabels } from './labels'
-import { checkRateLimit, BYOK_DAILY_LIMIT, OCR_DAILY_LIMIT } from './rateLimit'
+import { checkRateLimit, BYOK_DAILY_LIMIT, DEFAULT_DAILY_LIMIT, OCR_DAILY_LIMIT, type KvErrorReporter } from './rateLimit'
 import {
   callGemini,
   listGeminiModels,
@@ -26,6 +26,8 @@ import { corsHeaders, resolveCorsOrigin } from './cors'
 import {
   sendDiscordAlert,
   shouldNotify,
+  shouldAlertKvFailure,
+  KV_FAILURE_PAYLOAD,
   DISCORD_SHARED_RATE_LIMIT_WINDOW_SECONDS,
   DISCORD_SUPPRESS_WINDOW_SECONDS,
   type DiscordEndpoint,
@@ -54,6 +56,7 @@ const PROVIDER_UNAVAILABLE_MESSAGE = "The provider couldn't respond right now. P
 const SHARED_UNAVAILABLE_MESSAGE =
   "The free tier couldn't respond right now. Try again in a moment, or use your own API key."
 const OCR_UNAVAILABLE_MESSAGE = "OCR isn't available right now. Please try again in a moment."
+const SERVER_ERROR_MESSAGE = "PocketRAG's server had a problem. Try again."
 const REGION_RESTRICTED_MESSAGE =
   "The free shared tier isn't available in your region because of Google's terms. Use your own API key instead."
 // /ocr has no own-key path, so its copy can't point at one.
@@ -215,7 +218,7 @@ function notifyDiscordOfFailure(
   const slot = sharedRateLimit ? 'shared-ratelimit' : failure.keySource
   const window = sharedRateLimit ? DISCORD_SHARED_RATE_LIMIT_WINDOW_SECONDS : DISCORD_SUPPRESS_WINDOW_SECONDS
   ctx.waitUntil(
-    shouldNotify(env.RATE_LIMIT_KV, failure.provider, endpoint, slot, window).then((notify) =>
+    shouldNotify(env.RATE_LIMIT_KV, failure.provider, endpoint, slot, window, kvErrorReporter(ctx, env)).then((notify) =>
       notify
         ? sendDiscordAlert(fetch, env.DISCORD_WEBHOOK_URL, {
             provider: failure.provider,
@@ -249,7 +252,7 @@ function logOcrFailure(status: string | null): void {
 function notifyDiscordOfOcrFailure(ctx: ExecutionContext, env: Env, status: string | null): void {
   if (!env.DISCORD_WEBHOOK_URL) return
   ctx.waitUntil(
-    shouldNotify(env.RATE_LIMIT_KV, 'gemini', 'ocr', 'shared').then((notify) =>
+    shouldNotify(env.RATE_LIMIT_KV, 'gemini', 'ocr', 'shared', undefined, kvErrorReporter(ctx, env)).then((notify) =>
       notify
         ? sendDiscordAlert(fetch, env.DISCORD_WEBHOOK_URL, {
             provider: 'gemini',
@@ -261,6 +264,20 @@ function notifyDiscordOfOcrFailure(ctx: ExecutionContext, env: Env, status: stri
         : undefined,
     ),
   )
+}
+
+/**
+ * KV fails open (rateLimit.ts, discord.ts): a failed call is reported here instead of
+ * thrown. Number-only log line — no IP, no key name, no error text — and at most one
+ * Discord alert per isolate per hour, suppressed in memory since KV is what's failing.
+ */
+function kvErrorReporter(ctx: ExecutionContext, env: Env): KvErrorReporter {
+  return (op) => {
+    console.warn(JSON.stringify({ event: 'kv_call_failed', get: op === 'get' ? 1 : 0, put: op === 'put' ? 1 : 0 }))
+    if (env.DISCORD_WEBHOOK_URL && shouldAlertKvFailure()) {
+      ctx.waitUntil(sendDiscordAlert(fetch, env.DISCORD_WEBHOOK_URL, KV_FAILURE_PAYLOAD))
+    }
+  }
 }
 
 function json(body: unknown, status: number, origin: string | null): Response {
@@ -299,8 +316,8 @@ async function handleAnswer(
   // limit for others behind the same IP (or vice versa).
   const rateLimit =
     validation.keySource === 'own'
-      ? await checkRateLimit(env.RATE_LIMIT_KV, ip, 'byok', BYOK_DAILY_LIMIT)
-      : await checkRateLimit(env.RATE_LIMIT_KV, ip, 'shared')
+      ? await checkRateLimit(env.RATE_LIMIT_KV, ip, 'byok', BYOK_DAILY_LIMIT, kvErrorReporter(ctx, env))
+      : await checkRateLimit(env.RATE_LIMIT_KV, ip, 'shared', DEFAULT_DAILY_LIMIT, kvErrorReporter(ctx, env))
   if (!rateLimit.allowed) {
     return json({ error: RATE_LIMIT_MESSAGE, resetAt: rateLimit.resetAt }, 429, origin)
   }
@@ -426,7 +443,7 @@ async function handleModels(
 
   // Model listing only exists for BYOK, so it always shares the BYOK bucket — same
   // reasoning as /answer's BYOK path (abuse guard on our Worker, not quota protection).
-  const rateLimit = await checkRateLimit(env.RATE_LIMIT_KV, ip, 'byok', BYOK_DAILY_LIMIT)
+  const rateLimit = await checkRateLimit(env.RATE_LIMIT_KV, ip, 'byok', BYOK_DAILY_LIMIT, kvErrorReporter(ctx, env))
   if (!rateLimit.allowed) {
     return json({ error: RATE_LIMIT_MESSAGE, resetAt: rateLimit.resetAt }, 429, origin)
   }
@@ -487,7 +504,7 @@ async function handleOcr(
 
   // OCR has its own bucket (separate from 'shared' and 'byok') — a materially heavier
   // request than /answer, so it gets its own, lower daily limit (see rateLimit.ts).
-  const rateLimit = await checkRateLimit(env.RATE_LIMIT_KV, ip, 'ocr', OCR_DAILY_LIMIT)
+  const rateLimit = await checkRateLimit(env.RATE_LIMIT_KV, ip, 'ocr', OCR_DAILY_LIMIT, kvErrorReporter(ctx, env))
   if (!rateLimit.allowed) {
     return json({ error: RATE_LIMIT_MESSAGE, resetAt: rateLimit.resetAt }, 429, origin)
   }
@@ -506,28 +523,39 @@ async function handleOcr(
   }
 }
 
+async function route(request: Request, env: Env, ctx: ExecutionContext, origin: string | null): Promise<Response> {
+  if (request.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders(origin) })
+  }
+
+  const url = new URL(request.url)
+  const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown'
+  // Absent in local dev and in tests that don't set it — isRegionRestricted allows that.
+  const country = request.cf?.country
+
+  if (request.method === 'POST' && url.pathname === '/answer') {
+    return handleAnswer(request, env, origin, ip, country, ctx)
+  }
+  if (request.method === 'POST' && url.pathname === '/models') {
+    return handleModels(request, env, origin, ip, ctx)
+  }
+  if (request.method === 'POST' && url.pathname === '/ocr') {
+    return handleOcr(request, env, origin, ip, country, ctx)
+  }
+  return json({ error: 'Not found.' }, 404, origin)
+}
+
 export default {
   async fetch(request, env, ctx): Promise<Response> {
     const origin = resolveCorsOrigin(request.headers.get('Origin'), env.PAGES_ORIGIN)
-
-    if (request.method === 'OPTIONS') {
-      return new Response(null, { headers: corsHeaders(origin) })
+    // Safety net: nothing uncaught may reach the browser as the runtime's CORS-less 500
+    // (it reads as a network error). Fixed copy, no error text; the log line carries no
+    // message either, since an error can quote a request body or a key.
+    try {
+      return await route(request, env, ctx, origin)
+    } catch {
+      console.error(JSON.stringify({ event: 'worker_unhandled_error' }))
+      return json({ error: SERVER_ERROR_MESSAGE }, 500, origin)
     }
-
-    const url = new URL(request.url)
-    const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown'
-    // Absent in local dev and in tests that don't set it — isRegionRestricted allows that.
-    const country = request.cf?.country
-
-    if (request.method === 'POST' && url.pathname === '/answer') {
-      return handleAnswer(request, env, origin, ip, country, ctx)
-    }
-    if (request.method === 'POST' && url.pathname === '/models') {
-      return handleModels(request, env, origin, ip, ctx)
-    }
-    if (request.method === 'POST' && url.pathname === '/ocr') {
-      return handleOcr(request, env, origin, ip, country, ctx)
-    }
-    return json({ error: 'Not found.' }, 404, origin)
   },
 } satisfies ExportedHandler<Env>
