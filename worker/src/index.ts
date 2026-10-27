@@ -21,7 +21,8 @@ import { callOpenAI, listOpenAIModels } from './providers/openai'
 import { callAnthropic, listAnthropicModels } from './providers/anthropic'
 import { callGrok, listGrokModels } from './providers/grok'
 import { callOpenRouter, listOpenRouterModels } from './providers/openrouter'
-import { ProviderError, redactKeys } from './providers/errors'
+import { ProviderError, redactKeys, type RetryHint } from './providers/errors'
+import { cooldownFields, isActive, readCooldown, tripBreaker, type RetryFields } from './breaker'
 import { corsHeaders, resolveCorsOrigin } from './cors'
 import {
   sendDiscordAlert,
@@ -56,6 +57,8 @@ const PROVIDER_UNAVAILABLE_MESSAGE = "The provider couldn't respond right now. P
 const SHARED_UNAVAILABLE_MESSAGE =
   "The free tier couldn't respond right now. Try again in a moment, or use your own API key."
 const OCR_UNAVAILABLE_MESSAGE = "OCR isn't available right now. Please try again in a moment."
+const OCR_RATE_LIMITED_MESSAGE = 'OCR runs on the free shared tier, which is at capacity right now.'
+const MAX_OUR_RETRY_AFTER_SECONDS = 86_400
 const SERVER_ERROR_MESSAGE = "PocketRAG's server had a problem. Try again."
 const REGION_RESTRICTED_MESSAGE =
   "The free shared tier isn't available in your region because of Google's terms. Use your own API key instead."
@@ -80,6 +83,8 @@ interface ProviderFailure {
   // True when nothing about the failure maps to a known cause (not a ProviderError, or
   // a status outside the table below) — the only case that gets the Experimental copy.
   unclassified: boolean
+  // The provider's own retry signal (numbers only, errors.ts's parseRetryHint).
+  retryHint: RetryHint
 }
 
 // A 400 is a bad key on Gemini (API_KEY_INVALID) and Grok (message only — its code is
@@ -127,6 +132,7 @@ function classify(err: unknown, provider: SupportedProvider, model: string | nul
       status: null,
       safeMessage: message.slice(0, MAX_UNCLASSIFIED_MESSAGE_LENGTH),
       unclassified: true,
+      retryHint: { source: 'none' },
     }
   }
   const { code, unclassified } = classifyStatus(keySource, err.status, err.providerCode, err.safeMessage)
@@ -139,6 +145,7 @@ function classify(err: unknown, provider: SupportedProvider, model: string | nul
     providerCode: err.providerCode,
     safeMessage: err.safeMessage,
     unclassified,
+    retryHint: err.retryHint,
   }
 }
 
@@ -159,17 +166,36 @@ function failureMessage(failure: ProviderFailure, endpoint: 'answer' | 'models')
 }
 
 // Status stays 502 for every provider failure (the frontend's errorTaxonomy keys off
-// it); `code` and, for rate limits, `source` are additive fields.
-function failureResponse(failure: ProviderFailure, endpoint: 'answer' | 'models', origin: string | null): Response {
+// it); `code` and, for rate limits, `source` and any known retry fields are additive.
+// Retry fields are only ever sent when known — never invented (AGENTS.md).
+function failureResponse(
+  failure: ProviderFailure,
+  endpoint: 'answer' | 'models',
+  origin: string | null,
+  retry: RetryFields = {},
+): Response {
   return json(
     {
       error: failureMessage(failure, endpoint),
       code: failure.code,
-      ...(failure.code === 'provider_rate_limited' ? { source: failure.keySource } : {}),
+      ...(failure.code === 'provider_rate_limited' ? { source: failure.keySource, ...retry } : {}),
     },
     502,
     origin,
   )
+}
+
+// The breaker's short-circuit: same body as a real shared Gemini 429, no provider call.
+function sharedCooldownResponse(message: string, retry: RetryFields, origin: string | null): Response {
+  return json({ error: message, code: 'provider_rate_limited' satisfies FailureCode, source: 'shared', ...retry }, 502, origin)
+}
+
+// Our own per-IP limit. retryAfterSeconds is the same instant as resetAt (next UTC
+// midnight), as seconds from now — the client counts from its own clock, not ours.
+function ourRateLimitResponse(resetAt: string, origin: string | null): Response {
+  const seconds = Math.ceil((Date.parse(resetAt) - Date.now()) / 1000)
+  const retryAfterSeconds = Math.min(MAX_OUR_RETRY_AFTER_SECONDS, Math.max(0, seconds))
+  return json({ error: RATE_LIMIT_MESSAGE, resetAt, retryAfterSeconds }, 429, origin)
 }
 
 /**
@@ -188,6 +214,9 @@ function logProviderError(failure: ProviderFailure): void {
       status: failure.status,
       providerCode: failure.providerCode === undefined ? undefined : redactKeys(failure.providerCode),
       message: redactKeys(failure.safeMessage),
+      // Numbers and a fixed enum only — nothing from the provider's text.
+      retryHintSeconds: failure.retryHint.seconds ?? null,
+      retryHintSource: failure.retryHint.source,
     }),
   )
 }
@@ -310,16 +339,25 @@ async function handleAnswer(
   if (validation.keySource === 'shared' && isRegionRestricted(country)) {
     return regionRestrictedResponse(REGION_RESTRICTED_MESSAGE, origin)
   }
+  const reportKv = kvErrorReporter(ctx, env)
+  // Shared tier only: an active Gemini cooldown answers before the rate-limit counter,
+  // so a request that hits it spends nothing.
+  if (validation.keySource === 'shared') {
+    const cooldown = await readCooldown(env.RATE_LIMIT_KV, reportKv)
+    if (cooldown !== null && isActive(cooldown)) {
+      return sharedCooldownResponse(SHARED_RATE_LIMITED_MESSAGE, cooldownFields(cooldown), origin)
+    }
+  }
 
   // Shared and BYOK requests from the same IP track independent quotas: BYOK doesn't
   // touch our Gemini quota, and a BYOK user's own traffic shouldn't burn the shared-tier
   // limit for others behind the same IP (or vice versa).
   const rateLimit =
     validation.keySource === 'own'
-      ? await checkRateLimit(env.RATE_LIMIT_KV, ip, 'byok', BYOK_DAILY_LIMIT, kvErrorReporter(ctx, env))
-      : await checkRateLimit(env.RATE_LIMIT_KV, ip, 'shared', DEFAULT_DAILY_LIMIT, kvErrorReporter(ctx, env))
+      ? await checkRateLimit(env.RATE_LIMIT_KV, ip, 'byok', BYOK_DAILY_LIMIT, reportKv)
+      : await checkRateLimit(env.RATE_LIMIT_KV, ip, 'shared', DEFAULT_DAILY_LIMIT, reportKv)
   if (!rateLimit.allowed) {
-    return json({ error: RATE_LIMIT_MESSAGE, resetAt: rateLimit.resetAt }, 429, origin)
+    return ourRateLimitResponse(rateLimit.resetAt, origin)
   }
 
   // The Worker owns the Doc N labelling — it builds the prompt and grounds against
@@ -418,7 +456,15 @@ async function handleAnswer(
     const failure = classify(err, provider, model, validation.keySource)
     logProviderError(failure)
     notifyDiscordOfFailure(ctx, env, failure, 'answer')
-    return failureResponse(failure, 'answer', origin)
+    let retry: RetryFields = {}
+    if (failure.code === 'provider_rate_limited') {
+      if (validation.keySource === 'shared' && failure.status === 429) {
+        retry = cooldownFields(await tripBreaker(env.RATE_LIMIT_KV, failure.retryHint.seconds, reportKv))
+      } else if (failure.retryHint.seconds !== undefined) {
+        retry = { retryAfterSeconds: failure.retryHint.seconds }
+      }
+    }
+    return failureResponse(failure, 'answer', origin, retry)
   }
 }
 
@@ -445,7 +491,7 @@ async function handleModels(
   // reasoning as /answer's BYOK path (abuse guard on our Worker, not quota protection).
   const rateLimit = await checkRateLimit(env.RATE_LIMIT_KV, ip, 'byok', BYOK_DAILY_LIMIT, kvErrorReporter(ctx, env))
   if (!rateLimit.allowed) {
-    return json({ error: RATE_LIMIT_MESSAGE, resetAt: rateLimit.resetAt }, 429, origin)
+    return ourRateLimitResponse(rateLimit.resetAt, origin)
   }
 
   try {
@@ -501,12 +547,17 @@ async function handleOcr(
   if (isRegionRestricted(country)) {
     return regionRestrictedResponse(OCR_REGION_RESTRICTED_MESSAGE, origin)
   }
+  const reportKv = kvErrorReporter(ctx, env)
+  const cooldown = await readCooldown(env.RATE_LIMIT_KV, reportKv)
+  if (cooldown !== null && isActive(cooldown)) {
+    return sharedCooldownResponse(OCR_RATE_LIMITED_MESSAGE, cooldownFields(cooldown), origin)
+  }
 
   // OCR has its own bucket (separate from 'shared' and 'byok') — a materially heavier
   // request than /answer, so it gets its own, lower daily limit (see rateLimit.ts).
-  const rateLimit = await checkRateLimit(env.RATE_LIMIT_KV, ip, 'ocr', OCR_DAILY_LIMIT, kvErrorReporter(ctx, env))
+  const rateLimit = await checkRateLimit(env.RATE_LIMIT_KV, ip, 'ocr', OCR_DAILY_LIMIT, reportKv)
   if (!rateLimit.allowed) {
-    return json({ error: RATE_LIMIT_MESSAGE, resetAt: rateLimit.resetAt }, 429, origin)
+    return ourRateLimitResponse(rateLimit.resetAt, origin)
   }
 
   try {
@@ -519,6 +570,10 @@ async function handleOcr(
     const status = err instanceof ProviderError ? String(err.status) : null
     logOcrFailure(status)
     notifyDiscordOfOcrFailure(ctx, env, status)
+    if (err instanceof ProviderError && err.status === 429) {
+      const tripped = await tripBreaker(env.RATE_LIMIT_KV, err.retryHint.seconds, reportKv)
+      return sharedCooldownResponse(OCR_RATE_LIMITED_MESSAGE, cooldownFields(tripped), origin)
+    }
     return json({ error: OCR_UNAVAILABLE_MESSAGE }, 502, origin)
   }
 }

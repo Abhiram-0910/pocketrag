@@ -24,20 +24,86 @@ export function redactKeys(text: string): string {
   return text.replace(KEY_PATTERN, REDACTED)
 }
 
+export type RetryHintSource = 'retry-info' | 'header' | 'none'
+export interface RetryHint {
+  // Whole seconds, 1–3600. Absent when source is 'none'.
+  seconds?: number
+  source: RetryHintSource
+}
+const NO_HINT: RetryHint = { source: 'none' }
+
 export class ProviderError extends Error {
   readonly provider: string
   readonly status: number
   readonly providerCode?: string
   readonly safeMessage: string
+  readonly retryHint: RetryHint
 
-  constructor(provider: string, status: number, safeMessage: string, providerCode?: string) {
+  constructor(provider: string, status: number, safeMessage: string, providerCode?: string, retryHint: RetryHint = NO_HINT) {
     super(`${provider} API error ${status}: ${safeMessage}`)
     this.name = 'ProviderError'
     this.provider = provider
     this.status = status
     this.providerCode = providerCode
     this.safeMessage = safeMessage
+    this.retryHint = retryHint
   }
+}
+
+export const MIN_RETRY_HINT_SECONDS = 1
+export const MAX_RETRY_HINT_SECONDS = 3600
+// google.rpc.RetryInfo's retryDelay is a protobuf Duration in JSON form: "37s", "1.5s".
+const RETRY_DELAY_PATTERN = /^\d{1,6}(\.\d{1,9})?s$/
+const DELTA_SECONDS_PATTERN = /^\d{1,10}$/
+// A rate limit that waiting doesn't fix (out of credit/quota) gets no timer even if the
+// provider sends a Retry-After.
+const NO_TIMER_PROVIDER_CODES = new Set(['insufficient_quota'])
+
+const clampHint = (seconds: number): number =>
+  Math.min(MAX_RETRY_HINT_SECONDS, Math.max(MIN_RETRY_HINT_SECONDS, Math.ceil(seconds)))
+
+function retryInfoSeconds(body: unknown): number | undefined {
+  const details = (body as { error?: { details?: unknown } } | undefined)?.error?.details
+  if (!Array.isArray(details)) return undefined
+  for (const d of details) {
+    const entry = d as Record<string, unknown> | null
+    if (typeof entry?.['@type'] !== 'string' || !entry['@type'].endsWith('google.rpc.RetryInfo')) continue
+    const delay = entry.retryDelay
+    if (typeof delay === 'string' && RETRY_DELAY_PATTERN.test(delay)) return clampHint(Number(delay.slice(0, -1)))
+  }
+  return undefined
+}
+
+function retryAfterHeaderSeconds(value: string | null, now: number): number | undefined {
+  if (value === null) return undefined
+  const v = value.trim()
+  if (DELTA_SECONDS_PATTERN.test(v)) return clampHint(Number(v))
+  // HTTP-date. Date.parse also accepts ISO and other shapes; only the RFC 7231 IMF-fixdate
+  // form ("Sun, 06 Nov 1994 08:49:37 GMT") is taken.
+  if (!/^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/.test(v)) return undefined
+  const at = Date.parse(v)
+  if (Number.isNaN(at)) return undefined
+  return clampHint((at - now) / 1000)
+}
+
+/**
+ * The provider's own "retry after" signal on a 429, as a number and its source — never
+ * any provider text. RetryInfo (Gemini, AIP-193) and Retry-After (header, delta-seconds or
+ * HTTP-date) both rounded up and clamped to 1–3600 s; when both are present the larger wins.
+ */
+export function parseRetryHint(
+  status: number,
+  body: unknown,
+  retryAfter: string | null,
+  providerCode?: string,
+  now = Date.now(),
+): RetryHint {
+  if (status !== 429 || (providerCode !== undefined && NO_TIMER_PROVIDER_CODES.has(providerCode))) return NO_HINT
+  const info = retryInfoSeconds(body)
+  const header = retryAfterHeaderSeconds(retryAfter, now)
+  if (info === undefined && header === undefined) return NO_HINT
+  if (header === undefined || (info !== undefined && info >= header)) return { seconds: info, source: 'retry-info' }
+  return { seconds: header, source: 'header' }
 }
 
 // Covers every error shape the 5 providers were observed returning live (2026-10-18):
@@ -97,5 +163,8 @@ export async function providerError(
   const raw = typeof message === 'string' && message.length > 0 ? message : `HTTP ${response.status}`
   const scrubbed = (apiKey ? raw.replaceAll(apiKey, REDACTED) : raw).slice(0, MAX_SAFE_MESSAGE_LENGTH)
   const safeMessage = prompt && echoesPrompt(scrubbed, prompt) ? ECHO_WITHHELD : scrubbed
-  return new ProviderError(provider, response.status, safeMessage, sanitizeProviderCode(code, apiKey))
+  const providerCode = sanitizeProviderCode(code, apiKey)
+  // Optional chaining: a hint is never worth a throw on an odd Response shape.
+  const retryHint = parseRetryHint(response.status, body, response.headers?.get?.('retry-after') ?? null, providerCode)
+  return new ProviderError(provider, response.status, safeMessage, providerCode, retryHint)
 }

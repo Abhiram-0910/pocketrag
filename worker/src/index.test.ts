@@ -3,6 +3,13 @@ import worker from './index'
 import { DEFAULT_SHARED_MODEL } from './providers/gemini'
 import { resetFallbackLimiter, type KVLike } from './rateLimit'
 import { resetDiscordMemory } from './discord'
+import {
+  ANTHROPIC_RATE_LIMIT,
+  GEMINI_429_RECONSTRUCTED,
+  GEMINI_429_WITH_RETRY_INFO,
+  OPENAI_INSUFFICIENT_QUOTA,
+  OPENROUTER_402,
+} from './fixtures/rateLimitBodies'
 
 // No real Workers runtime in these tests (plain node vitest, no Miniflare), so
 // ExecutionContext is hand-mocked. Every makeCtx() call in a test pushes into the
@@ -476,6 +483,8 @@ describe('worker fetch handler — /answer, BYOK', () => {
       status: 400,
       providerCode: 'invalid-argument',
       message: 'Incorrect API key provided. You can obtain an API key from https://console.x.ai.',
+      retryHintSeconds: null,
+      retryHintSource: 'none',
     })
     expect(logged).not.toContain(realSecretKey)
 
@@ -1127,7 +1136,13 @@ describe('provider failure classification (Step A): status → code, client copy
     async (tier, provider, status, body, code, source, copy, alerts) => {
       const out = await failWith(tier, provider, status, body)
       expect(out.status).toBe(502)
-      expect(out.json).toEqual(source === undefined ? { error: copy, code } : { error: copy, code, source })
+      // Retry fields have their own tests (Step D); here: only a shared 429 carries them
+      // (no hint → the breaker's first 60 s step plus the midnight-Pacific bound).
+      const { retryAfterSeconds, resetAt, ...rest } = out.json
+      expect(rest).toEqual(source === undefined ? { error: copy, code } : { error: copy, code, source })
+      const sharedRateLimit = tier === 'shared' && status === 429
+      expect(retryAfterSeconds).toBe(sharedRateLimit ? 60 : undefined)
+      expect(typeof resetAt).toBe(sharedRateLimit ? 'string' : 'undefined')
       expect(out.alerted).toBe(alerts)
     },
   )
@@ -1177,7 +1192,11 @@ describe('provider failure classification (Step A): status → code, client copy
     await worker.fetch(answerRequest(validBody), env, makeCtx())
     await flushWaitUntil()
     providerStatus = 503
+    // Past the breaker's 60 s cooldown, or the second request would never reach Gemini.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(Date.now() + 61_000)
     await worker.fetch(answerRequest(validBody), env, makeCtx())
+    vi.useRealTimers()
     await flushWaitUntil()
 
     const alerts = fetchSpy.mock.calls.filter(([url]) => url === discordWebhookUrl)
@@ -1491,5 +1510,231 @@ describe('worker fetch handler — KV failures fail open; safety net', () => {
     const logged = errorSpy.mock.calls.map((c) => String(c[0])).join('\n')
     expect(logged).toBe(JSON.stringify({ event: 'worker_unhandled_error' }))
     errorSpy.mockRestore()
+  })
+})
+
+describe('Step D — retry fields, the shared Gemini breaker, our own 429', () => {
+  beforeEach(() => {
+    resetFallbackLimiter()
+    resetDiscordMemory()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
+
+  function storeKV() {
+    const store: Record<string, string> = {}
+    const kv: KVLike = {
+      get: async (k) => store[k] ?? null,
+      put: async (k, v) => {
+        store[k] = v
+      },
+    }
+    return { kv, store, env: makeEnv({ RATE_LIMIT_KV: kv as unknown as Env['RATE_LIMIT_KV'] }) }
+  }
+  const sharedCount = (store: Record<string, string>) =>
+    Number(Object.entries(store).find(([k]) => k.startsWith('ratelimit:shared:'))?.[1] ?? 0)
+
+  // Every non-Discord fetch answers with `provider()`; counts provider calls.
+  function stubProvider(provider: () => Response) {
+    const spy = vi.fn(async (url: string) => (url.includes('discord') ? new Response(null, { status: 204 }) : provider()))
+    vi.stubGlobal('fetch', spy)
+    return { spy, providerCalls: () => spy.mock.calls.filter(([url]) => !String(url).includes('discord')).length }
+  }
+  const gemini429 = (body: unknown = GEMINI_429_RECONSTRUCTED, headers: Record<string, string> = {}) => () =>
+    new Response(JSON.stringify(body), { status: 429, headers })
+  const geminiOkResponse = () =>
+    new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: 'ATP (Doc 1, page 1).' }] } }] }), { status: 200 })
+
+  const quiet = () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+  }
+
+  it('a shared Gemini 429 with no hint writes the breaker once and returns the 60 s step + midnight Pacific', async () => {
+    quiet()
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-31T23:00:00.000Z'))
+    const { env, store } = storeKV()
+    stubProvider(gemini429())
+    const res = await worker.fetch(answerRequest(validBody), env, makeCtx())
+    expect(res.status).toBe(502)
+    expect(res.headers.get('Retry-After')).toBeNull()
+    expect(await res.json()).toEqual({
+      error: SHARED_RATE_LIMITED_COPY,
+      code: 'provider_rate_limited',
+      source: 'shared',
+      retryAfterSeconds: 60,
+      resetAt: '2026-11-01T07:00:00.000Z',
+    })
+    expect(JSON.parse(store['cooldown:shared:gemini'])).toEqual({ until: Date.now() + 60_000, step: 0, hinted: false })
+  })
+
+  it('while active: shared /answer short-circuits — no Gemini call, no quota spent, not extended by spam', async () => {
+    quiet()
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-27T12:00:00.000Z'))
+    const { env, store } = storeKV()
+    const { providerCalls } = stubProvider(gemini429())
+    await worker.fetch(answerRequest(validBody), env, makeCtx())
+    const breakerBefore = store['cooldown:shared:gemini']
+    const countBefore = sharedCount(store)
+    expect(providerCalls()).toBe(1)
+
+    vi.setSystemTime(Date.now() + 20_000)
+    for (let i = 0; i < 30; i++) {
+      const res = await worker.fetch(answerRequest(validBody), env, makeCtx())
+      expect(res.status).toBe(502)
+      const body = (await res.json()) as Record<string, unknown>
+      expect(body).toMatchObject({ code: 'provider_rate_limited', source: 'shared', retryAfterSeconds: 40 })
+    }
+    expect(providerCalls()).toBe(1)
+    expect(sharedCount(store)).toBe(countBefore)
+    expect(store['cooldown:shared:gemini']).toBe(breakerBefore)
+
+    // After it ends, the next shared request reaches Gemini again.
+    vi.setSystemTime(Date.now() + 41_000)
+    stubProvider(geminiOkResponse)
+    expect((await worker.fetch(answerRequest(validBody), env, makeCtx())).status).toBe(200)
+  })
+
+  it('BYOK never reads or writes the breaker: an own-key request goes through during a cooldown', async () => {
+    quiet()
+    const { env, store, kv } = storeKV()
+    stubProvider(gemini429())
+    await worker.fetch(answerRequest(validBody), env, makeCtx())
+    expect(store['cooldown:shared:gemini']).toBeDefined()
+    const getSpy = vi.spyOn(kv, 'get')
+    const { providerCalls } = stubProvider(geminiOkResponse)
+    expect((await worker.fetch(answerRequest(byokBody), env, makeCtx())).status).toBe(200)
+    expect(providerCalls()).toBe(1)
+    expect(getSpy.mock.calls.map(([k]) => k)).not.toContain('cooldown:shared:gemini')
+  })
+
+  it('a BYOK Gemini 429 never writes the breaker', async () => {
+    quiet()
+    const { env, store } = storeKV()
+    stubProvider(gemini429())
+    const res = await worker.fetch(answerRequest(byokBody), env, makeCtx())
+    expect(await res.json()).toEqual({ error: OWN_RATE_LIMITED_COPY, code: 'provider_rate_limited', source: 'own' })
+    expect(store['cooldown:shared:gemini']).toBeUndefined()
+  })
+
+  it('a hinted shared 429 (documented RetryInfo) → the hint, no midnight bound', async () => {
+    quiet()
+    const { env } = storeKV()
+    stubProvider(gemini429(GEMINI_429_WITH_RETRY_INFO))
+    const body = (await (await worker.fetch(answerRequest(validBody), env, makeCtx())).json()) as Record<string, unknown>
+    expect(body.retryAfterSeconds).toBe(37)
+    expect(body.resetAt).toBeUndefined()
+  })
+
+  it('escalates to the cap and then sends resetAt only (used up for today)', async () => {
+    quiet()
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-11-01T12:00:00.000Z'))
+    const { env } = storeKV()
+    stubProvider(gemini429())
+    const seen: Record<string, unknown>[] = []
+    for (const wait of [60, 120, 240, 480, 900]) {
+      seen.push((await (await worker.fetch(answerRequest(validBody), env, makeCtx())).json()) as Record<string, unknown>)
+      vi.setSystemTime(Date.now() + wait * 1000 + 1)
+    }
+    expect(seen.slice(0, 4).map((b) => b.retryAfterSeconds)).toEqual([60, 120, 240, 480])
+    // After the DST change: next midnight Pacific is 08:00Z.
+    expect(seen[4]).toEqual({
+      error: SHARED_RATE_LIMITED_COPY,
+      code: 'provider_rate_limited',
+      source: 'shared',
+      resetAt: '2026-11-02T08:00:00.000Z',
+    })
+  })
+
+  it('/ocr: a Gemini 429 trips the breaker, and /ocr short-circuits on it', async () => {
+    quiet()
+    const { env, store } = storeKV()
+    const { providerCalls } = stubProvider(gemini429())
+    const first = await worker.fetch(ocrRequest(validOcrBody), env, makeCtx())
+    expect(await first.json()).toMatchObject({
+      error: 'OCR runs on the free shared tier, which is at capacity right now.',
+      code: 'provider_rate_limited',
+      source: 'shared',
+      retryAfterSeconds: 60,
+    })
+    expect(store['cooldown:shared:gemini']).toBeDefined()
+    const second = await worker.fetch(ocrRequest(validOcrBody), env, makeCtx())
+    expect(second.status).toBe(502)
+    expect(providerCalls()).toBe(1)
+    // …and the shared /answer path honours a cooldown /ocr wrote.
+    expect(((await (await worker.fetch(answerRequest(validBody), env, makeCtx())).json()) as { code: string }).code).toBe(
+      'provider_rate_limited',
+    )
+    expect(providerCalls()).toBe(1)
+  })
+
+  it('KV down: the breaker reads as "no cooldown", writes are swallowed, the response still has the fields', async () => {
+    quiet()
+    const boom = (): Promise<never> => Promise.reject(new Error('KV down'))
+    const env = makeEnv({ RATE_LIMIT_KV: { get: boom, put: boom } as unknown as Env['RATE_LIMIT_KV'] })
+    stubProvider(gemini429())
+    const res = await worker.fetch(answerRequest(validBody), env, makeCtx())
+    expect(res.status).toBe(502)
+    expect(await res.json()).toMatchObject({ retryAfterSeconds: 60 })
+  })
+
+  it.each([
+    ['openai', 429, OPENAI_INSUFFICIENT_QUOTA, { 'retry-after': '20' }, undefined],
+    ['anthropic', 429, ANTHROPIC_RATE_LIMIT, { 'retry-after': '20' }, 20],
+    ['anthropic', 429, ANTHROPIC_RATE_LIMIT, {}, undefined],
+    ['openrouter', 402, OPENROUTER_402, { 'retry-after': '60' }, undefined],
+  ] as const)('BYOK %s %i: retryAfterSeconds only when known', async (provider, status, body, headers, expected) => {
+    quiet()
+    const { env } = storeKV()
+    stubProvider(() => new Response(JSON.stringify(body), { status, headers }))
+    const models = { openai: 'gpt-4o-mini', anthropic: 'claude-sonnet-4-5', openrouter: 'openai/gpt-4o-mini' }
+    const res = await worker.fetch(answerRequest({ ...byokBody, provider, model: models[provider] }), env, makeCtx())
+    const json = (await res.json()) as Record<string, unknown>
+    expect(json.code).toBe('provider_rate_limited')
+    expect(json.retryAfterSeconds).toBe(expected)
+    expect(json.resetAt).toBeUndefined()
+  })
+
+  it('logProviderError records hint presence and source as numbers / a fixed enum only', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { env } = storeKV()
+    stubProvider(gemini429(GEMINI_429_WITH_RETRY_INFO))
+    await worker.fetch(answerRequest(validBody), env, makeCtx())
+    const line = JSON.parse(String(errorSpy.mock.calls[0][0])) as Record<string, unknown>
+    expect(line).toMatchObject({ retryHintSeconds: 37, retryHintSource: 'retry-info' })
+  })
+
+  it('our own 429: keeps resetAt and adds retryAfterSeconds for the same instant (0–86400)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-27T23:59:30.250Z'))
+    const { env } = storeKV()
+    stubProvider(geminiOkResponse)
+    for (let i = 0; i < 50; i++) await worker.fetch(answerRequest(validBody), env, makeCtx())
+    const res = await worker.fetch(answerRequest(validBody), env, makeCtx())
+    expect(res.status).toBe(429)
+    expect(res.headers.get('Retry-After')).toBeNull()
+    const body = (await res.json()) as { resetAt: string; retryAfterSeconds: number }
+    expect(body.resetAt).toBe('2026-10-28T00:00:00.000Z')
+    expect(body.retryAfterSeconds).toBe(30) // 29.75 s, rounded up
+    expect(Date.now() + body.retryAfterSeconds * 1000).toBeGreaterThanOrEqual(Date.parse(body.resetAt))
+  })
+
+  it('our own 429 on /ocr and /models carries retryAfterSeconds too', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-27T12:00:00.000Z'))
+    const day = '2026-10-27'
+    const { env, store } = storeKV()
+    store[`ratelimit:ocr:unknown:${day}`] = '20'
+    store[`ratelimit:byok:unknown:${day}`] = '500'
+    for (const req of [ocrRequest(validOcrBody), request('/models', { provider: 'gemini', apiKey: 'user-key' })]) {
+      const res = await worker.fetch(req, env, makeCtx())
+      expect(res.status).toBe(429)
+      expect(await res.json()).toMatchObject({ resetAt: '2026-10-28T00:00:00.000Z', retryAfterSeconds: 43_200 })
+    }
   })
 })
