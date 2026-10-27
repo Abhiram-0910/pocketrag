@@ -44,7 +44,7 @@ pocketrag/
 ├── e2e/                      # Manual Playwright checks (global install, not a dependency)
 ├── worker/                   # Cloudflare Worker — separate npm project, separate deploy
 │   └── src/                  # index.ts, validate.ts, prompt.ts, labels.ts, grounding.ts,
-│                              # rateLimit.ts, cors.ts, discord.ts,
+│                              # rateLimit.ts, region.ts, cors.ts, discord.ts,
 │                              # providers/{gemini,openai,anthropic,grok,openrouter}.ts
 ├── scripts/                  # check-bundle-size.mjs (build-time Pages size guard)
 ├── README.md
@@ -106,7 +106,8 @@ pocketrag/
 | `worker/src/prompt.ts` | Grounded-QA prompt: answer only from passages, cite `(Doc N, page M)`, admit gaps |
 | `worker/src/labels.ts` | `assignDocLabels()` — `Doc N` ↔ documentId map, frozen per conversation via an `existing` param (see Key Architectural Decisions) |
 | `worker/src/grounding.ts` | `checkGrounding()` — citation-level groundedness heuristic over `(Doc N, page)` pairs |
-| `worker/src/rateLimit.ts` | KV counter-per-IP-per-day — independent buckets per tier/endpoint (shared `/answer`, BYOK, `/ocr`) |
+| `worker/src/rateLimit.ts` | KV counter-per-IP-per-day — independent buckets per tier/endpoint (shared `/answer`, BYOK, `/ocr`). An uncaught KV `get`/`put` error (including the Free plan's daily write limit) propagates out of the handler: the request fails closed as a runtime 500 with no CORS headers (see Known Technical Debt) |
+| `worker/src/region.ts` | `isRegionRestricted(request.cf.country)` — EU27 + IS/LI/NO + CH + GB; missing/unknown (undefined, `XX`, `T1`) allowed. Gates the shared tier only (Phase 3b) |
 | `worker/src/providers/*.ts` | One file per BYOK provider (gemini, openai, anthropic, grok, openrouter) — each a thin, injectable-`fetch` wrapper around that provider's chat + model-list endpoints, same two-key-leak-test discipline |
 | `worker/src/providers/errors.ts` | `providerError()` — the only way provider files throw: parses a non-2xx body for message/code, exact-key scrubs, caps at 200 chars, applies the prompt-echo guard, then drops the body. Also `redactKeys()`, the pattern backstop used at the log and Discord sinks |
 | `worker/src/discord.ts` | Fire-and-forget (`ctx.waitUntil`) sanitized failure alerts to an optional webhook, suppressed per `(provider, endpoint, slot)` — 10 min for `shared`/`own`, 6 h for `shared-ratelimit` |
@@ -596,6 +597,28 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
   README screenshots live in `docs/screenshots/`. Tailwind scans Markdown and HTML too:
   after this change the CSS was byte-identical (`index-iACYgoQC.css`), so no utility came
   from the new text.
+- **Shared tier refused in the EEA, Switzerland and the UK (Phase 3b, Worker `6beeb4b6`,
+  Pages `f3f4aa6a`).** The Gemini API terms' Use Restrictions: "You may use only Paid
+  Services when making API Clients available to users in the European Economic Area,
+  Switzerland, or the United Kingdom." The shared key is unpaid, so `/answer` with
+  `keySource: 'shared'` and every `/ocr` (always the shared key) return **403**
+  `{ error, code: 'region_restricted' }` when `request.cf.country` is in
+  `worker/src/region.ts`'s set. The check runs right after body validation (which is
+  what says the request is shared) and before the rate-limit counter, any KV access or
+  any provider call, so a refused request spends nothing; no log line or Discord alert
+  is written, so the country and IP are never recorded. Missing or non-country values
+  (local dev, `XX`, `T1`) fail open. BYOK `/answer` and `/models` are never checked. Copy:
+  "The free shared tier isn't available in your region because of Google's terms. Use
+  your own API key instead." — `/ocr` gets its own sentence without the own-key advice,
+  since OCR has no own-key path. Client: `parseWorkerErrorResponse` reads
+  `region_restricted` only on a 403 (and no other code on a 403); `failureAction` →
+  use-own-key; `errorTaxonomy` → `region-restricted`. Limits: geo-IP, not proof of
+  location — a VPN, or a wrong geo-IP entry, gets past it or wrongly trips it.
+  `ByokPanel` shows one line while the shared tier is active ("Free shared tier: Google
+  uses what's sent to improve its products and human reviewers may read it. Use your own
+  paid key to avoid that."), hidden once "Use your own API key" is on. Landing + README
+  now say the page image goes only if diagram images are on (default off), and that the
+  shared tier isn't available in those regions.
 
 ---
 
@@ -652,6 +675,14 @@ directly reachable from here now.
 ---
 
 ## Known Technical Debt
+- [ ] **KV errors fail closed.** `checkRateLimit` (`rateLimit.ts:48`, `:53`) awaits
+      `kv.get`/`kv.put` with no try/catch, and every handler awaits it directly, so a KV
+      failure — including the Workers Free plan's 1,000 writes/day once spent — throws out
+      of `fetch`: the runtime answers 500 with no CORS headers and the browser sees a
+      network error. Today each allowed `/answer`, `/models` or `/ocr` writes 1 key (a
+      refused one, 0); a failure that alerts adds up to 1 more (`discord.ts`
+      `shouldNotify`, inside `waitUntil`, so its throw doesn't reach the response). Raised
+      in Phase 3b Step 0; Step D (which adds breaker writes) waits on the decision.
 - [x] ~~`embedding.worker.ts` bundles onnxruntime-web's WASM runtime (22.47 MiB)~~ —
       resolved in Step C: that file was emitted into `dist/` but never fetched
       (transformers.js loads ORT from jsDelivr), and the extern-wasm resolve condition

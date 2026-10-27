@@ -570,6 +570,29 @@ simulated only; navigations and WebRTC outside CSP; history plaintext at rest.
 
 ---
 
+## 9. Shared tier region restriction (Phase 3b, 2026-10-27)
+
+- **Basis:** Gemini API Additional Terms, Use Restrictions: "You may use only Paid
+  Services when making API Clients available to users in the European Economic Area,
+  Switzerland, or the United Kingdom." The shared tier runs on an unpaid key.
+- **Control:** `worker/src/region.ts` + `index.ts`. A shared `/answer` and every `/ocr`
+  get **403 `region_restricted`** when `request.cf.country` is EU27, IS, LI, NO, CH or
+  GB. The check sits after body validation and before `checkRateLimit`, any KV access and
+  any provider `fetch`; unit tests assert zero KV `get`/`put`, zero `fetch`, zero
+  `console.error` and zero `waitUntil` (no Discord) for a refused request, and that 60
+  refusals leave the shared bucket untouched. Nothing records the country or IP.
+- **Not restricted:** BYOK `/answer` and `/models` (the user's own key and terms).
+- **What it can't catch:** it trusts Cloudflare's geo-IP. A VPN or proxy exit outside
+  the region gets through; a wrong geo-IP entry can refuse someone outside it (they can
+  still use their own key). Missing or non-country values (`undefined` in local dev,
+  `XX` unknown, `T1` Tor) **fail open** on purpose, so Tor users in the region get
+  through too. It is a good-faith gate on the service's availability, not proof of
+  where a user is.
+- **Live check:** one shared `/answer` from India (this machine) against production
+  after the deploy — see AGENTS.md Session 37.
+
+---
+
 ## Summary
 
 | # | Area | Verdict | Action |
@@ -582,6 +605,7 @@ simulated only; navigations and WebRTC outside CSP; history plaintext at rest.
 | 5 | CORS & origin validation | PASS | none |
 | 6 | Client-supplied data reaching a provider without revalidation | PASS | none |
 | 7 | Content-Security-Policy & security headers (Step C) | **ENFORCED — PASS, with listed gaps** | production `8c992a01`; ORT bytes not integrity-checked, Safari unverified, Firefox worker reports unobservable, no production violation collection |
+| 9 | Shared tier region restriction (EEA/CH/UK, Gemini terms) | **PASS, with listed gaps** | Worker `6beeb4b6`: 403 `region_restricted` before KV/provider, no logging of country/IP; can't see through VPNs/proxies, trusts geo-IP, fails open on missing/`XX`/`T1` |
 | 8 | Egress ledger visibility, chat history at rest (Phase 1, 2a, 2b, 2c) | **PASS, with listed gaps** | Worker echo live (`483afdc9`); history + Receipts UI in production (`785e99d2`, rollback `8c992a01`); every observed request reconciled to a ledger row on Chromium and Firefox; one real CORS preflight observed (CDP, Chromium) and paired with its POST, not recorded in the ledger by design; navigations/WebRTC outside CSP; history plaintext at rest; Safari unverified |
 
 **Status: audit complete, both gaps found this session are fixed, verified, and

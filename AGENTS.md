@@ -129,6 +129,12 @@ provider error text; the UI shows it verbatim with a per-code action (Step B). 6
 - **e2e: keep the live `/models` check in its own route-free tab.** On the long-lived,
   route-mocked main page that real request intermittently never completed in Chromium
   (in-flight in the app's own log for 30s+; curl answered in ~1s).
+- **A shared-tier request must pass the region check before anything else** (Phase 3b).
+  In `worker/src/index.ts`, `isRegionRestricted(country)` runs right after body
+  validation — before `checkRateLimit`, any other KV access, logging, Discord, or a
+  provider call — for `/answer` with `keySource: 'shared'` and for every `/ocr`. Never
+  log or alert on a `region_restricted` refusal (no country, no IP). A new shared-key
+  endpoint gets the same check. BYOK paths are never region-checked.
 - **Local `wrangler pages dev` needs `--compatibility-date=2026-07-29`** with the
   installed wrangler 4.114.0: without it, wrangler defaults to today's date, which its
   bundled workerd doesn't support, and the server never starts (step-c then fails every
@@ -3872,6 +3878,62 @@ README's existing Notes-tab paragraph already states that exception. The page im
 opt-in (toggle, default off); the approved wording doesn't say so. The README screenshots
 come from a local build with the server mocked to fail once, and the README says that.
 The og-image and smoke scripts stay in the session scratchpad.
+
+### Session 37 — 2026-10-27 (Claude Code)
+**Goal:** Phase 3b — Step 0 investigation, deploy 1 (EEA/CH/UK region restriction +
+disclosure/copy), then Step D only if Step 0 allowed it.
+
+**Step 0:** Workers plan not readable — the wrangler OAuth token gets "Authentication
+error" on `/accounts/{id}/subscriptions` (no billing scope); `workers/account-settings`
+says only `default_usage_model: standard`, which both plans report. Assumed **Free**.
+`checkRateLimit` has no try/catch and every handler awaits it, so a KV get/put error
+(including the Free plan's daily write cap) throws out of `fetch`: **fail-closed**, as a
+runtime 500 with no CORS headers. KV writes: 1 per allowed `/answer` (also `/models`,
+`/ocr`), 0 when refused or over the limit, plus up to 1 for a Discord-suppression key on
+an alerting failure (inside `waitUntil`). Fail-closed + Free → **Step D not started**,
+per the prompt; logged in ARCHITECTURE.md Known Technical Debt.
+
+**Built:** `773d7d1` Worker `region.ts` + 403 `region_restricted` on shared `/answer` and
+`/ocr` before the rate limit/KV/fetch, no log/alert (tests: every class, boundary
+countries, `XX`/`T1`/missing allowed, BYOK + `/models` unaffected, 0 KV/fetch/log/
+waitUntil on refusal, 60 refusals don't spend the bucket). `5090bb1` client parity,
+403-gated parse, `failureAction` → use-own-key, `errorTaxonomy` `region-restricted`;
+step-b scenario + disclosure visibility. `e70d23c` ByokPanel shared-tier line; landing +
+README diagram-image ("only if you turn on diagram images") and region copy.
+
+**Verification:** frontend 263/263, Worker 412/412, `tsc`/`oxlint` clean both sides
+(`npm run lint` exits 1 under rtk only — rtk fails to parse oxlint's output; oxlint
+itself: 0 warnings, 0 errors, exit 0), build + size guard pass. JS `index-DWxJQQtb.js` →
+`index-O96w5yQI.js`; CSS `index-iACYgoQC.css` unchanged. `git diff 6158529 --
+public/_headers` empty. step-b Chromium `exit=0` (17 scenarios, `failures: []`); step-c
+Chromium and Firefox `exit=0`, 15/15 flows, 25/25 matched, 0 unexpected violations.
+Disclosure screenshots `~/NewProjects/pocketrag-shots/region/disclosure-*-{360,1280}.png`.
+
+**Deployed:** Worker `483afdc9` → **`6beeb4b6-275b-4a0b-9030-8e7f62723400`**; Pages
+`1fd1b422` → **`f3f4aa6a-558b-41ac-b657-5edb5e32de30`** (Production, `main`, source
+`e70d23c`). Served CSP byte-identical (446 B); XFO, Referrer-Policy, Permissions-Policy,
+COOP, nosniff present; index serves `index-O96w5yQI.js`. Rollback:
+```bash
+cd worker && npx wrangler rollback 483afdc9-8dea-4afe-b02a-cb67e199a17b
+npx wrangler whoami >/dev/null   # refreshes the OAuth token
+TOKEN=$(grep -oP '^oauth_token = "\K[^"]+' ~/.config/.wrangler/config/default.toml)
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+  https://api.cloudflare.com/client/v4/accounts/da55acd99cee5a43df7d397dd80af4e3/pages/projects/pocketrag/deployments/1fd1b422-b0db-4b5f-ae54-ae956722b698/rollback
+```
+
+**Production check** (Chromium, real Worker): Worker preflight 200, invalid body 400,
+BYOK `/models` fake key → 502 `key_rejected`. One shared `/answer` from India → 200,
+`gemini`/`gemini-3.5-flash-lite`, Receipt shows the model and Worker host (no false
+positive). Landing lines and disclosure (shown on shared, hidden on own key) served;
+Delete everything → 0 documents; 0 CSP reports/events, 0 page errors.
+
+**Deviations:** `/ocr`'s refusal copy is its own sentence ("OCR runs on the free shared
+tier, which isn't available in your region because of Google's terms.") — OCR has no
+own-key path, so "Use your own API key instead" would point at nothing; same code and
+status. The in-app line omits "and the answers", which the landing line includes (used
+the prompt's wording verbatim). A restricted-country 403 was never observed live (no
+EEA egress here); it's covered by unit and mocked e2e tests only. The commits are not
+pushed.
 
 ---
 

@@ -53,6 +53,11 @@ Read this at the start of every session to know what to work on next.
       into the `value` attribute.
 - [ ] COOP/COEP cross-origin-isolation experiment for threaded wasm (our cross-origin
       loads are all CORS fetches, so COEP may not break them — untested).
+- [ ] **Decide: KV failure mode before Step D.** `checkRateLimit` fails closed (uncaught
+      KV error → runtime 500, no CORS), and the plan is assumed Free (1,000 KV writes/day;
+      the plan wasn't readable with wrangler's token). Step D adds breaker writes, so it
+      waits on: fail-open with a caught error, move to Paid, or accept. See ARCHITECTURE.md
+      Known Technical Debt, AGENTS.md Session 37.
 - [ ] **Step D** — server-issued `retryAfterSeconds` + `date` on rate-limit responses
       and a live countdown in the UI, for our own buckets only (not provider limits).
   - [ ] Decide whether shared-tier provider failures refund the per-IP quota: today
@@ -86,12 +91,12 @@ Read this at the start of every session to know what to work on next.
       (`8e51588`) with the README Receipts showcase (`bf29927`) and index.html meta/OG
       (`5efe65a`); production `1fd1b422` (rollback target `785e99d2`). The free-tier
       data-use line was checked against the primary Gemini API terms (2026-03-23 version).
-- [ ] **Gemini terms: EEA/CH/UK users.** The Additional Terms say "You may use only Paid
-      Services when making API Clients available to users in the European Economic Area,
-      Switzerland, or the United Kingdom." The shared tier is an unpaid key with no
-      geo-gating, so it is available to those users today. Decide: geo-block the shared
-      tier there (Worker `request.cf.country`), move the shared key to a paid project, or
-      accept the risk. Not addressed by copy.
+- [x] **Gemini terms: EEA/CH/UK users.** Geo-blocked (Phase 3b): the shared `/answer`
+      and `/ocr` return 403 `region_restricted` for EU27 + IS/LI/NO + CH + GB
+      (`worker/src/region.ts`), before the rate limit or any provider call; BYOK and
+      `/models` unaffected. Landing + README say so; `ByokPanel` shows the free-tier
+      data-use line while the shared tier is on. Worker `6beeb4b6`, Pages `f3f4aa6a`. Gaps
+      (VPNs, wrong geo-IP, fail-open on unknown country) in SECURITY_REVIEW.md §9.
 - [ ] Favicon is still Vite's default logo (`public/favicon.svg`); replace with a
       PocketRAG mark (the og-image uses the `LockSimple` icon).
 - [ ] Re-check the free-tier data-use copy whenever the Gemini API terms change (the
