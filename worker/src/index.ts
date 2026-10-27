@@ -31,6 +31,7 @@ import {
   type DiscordEndpoint,
 } from './discord'
 import type { FailureCode } from './failureCodes'
+import { isRegionRestricted } from './region'
 
 const RATE_LIMIT_MESSAGE = "You've hit today's request limit. Please try again tomorrow."
 // Client-facing copy per failure code. The provider's own text (safeMessage) never goes
@@ -53,6 +54,17 @@ const PROVIDER_UNAVAILABLE_MESSAGE = "The provider couldn't respond right now. P
 const SHARED_UNAVAILABLE_MESSAGE =
   "The free tier couldn't respond right now. Try again in a moment, or use your own API key."
 const OCR_UNAVAILABLE_MESSAGE = "OCR isn't available right now. Please try again in a moment."
+const REGION_RESTRICTED_MESSAGE =
+  "The free shared tier isn't available in your region because of Google's terms. Use your own API key instead."
+// /ocr has no own-key path, so its copy can't point at one.
+const OCR_REGION_RESTRICTED_MESSAGE =
+  "OCR runs on the free shared tier, which isn't available in your region because of Google's terms."
+
+// Shared tier only, and before the rate-limit counter or any provider call — a refused
+// request spends nothing. No log, no Discord alert: the country and IP are never recorded.
+function regionRestrictedResponse(message: string, origin: string | null): Response {
+  return json({ error: message, code: 'region_restricted' satisfies FailureCode }, 403, origin)
+}
 
 interface ProviderFailure {
   provider: SupportedProvider
@@ -263,6 +275,7 @@ async function handleAnswer(
   env: Env,
   origin: string | null,
   ip: string,
+  country: unknown,
   ctx: ExecutionContext,
 ): Promise<Response> {
   let body: unknown
@@ -275,6 +288,10 @@ async function handleAnswer(
   const validation = validateAnswerRequest(body)
   if (!validation.ok) {
     return json({ error: validation.error }, 400, origin)
+  }
+
+  if (validation.keySource === 'shared' && isRegionRestricted(country)) {
+    return regionRestrictedResponse(REGION_RESTRICTED_MESSAGE, origin)
   }
 
   // Shared and BYOK requests from the same IP track independent quotas: BYOK doesn't
@@ -448,6 +465,7 @@ async function handleOcr(
   env: Env,
   origin: string | null,
   ip: string,
+  country: unknown,
   ctx: ExecutionContext,
 ): Promise<Response> {
   let body: unknown
@@ -460,6 +478,11 @@ async function handleOcr(
   const validation = validateOcrRequest(body)
   if (!validation.ok) {
     return json({ error: validation.error }, 400, origin)
+  }
+
+  // /ocr always runs on the shared key.
+  if (isRegionRestricted(country)) {
+    return regionRestrictedResponse(OCR_REGION_RESTRICTED_MESSAGE, origin)
   }
 
   // OCR has its own bucket (separate from 'shared' and 'byok') — a materially heavier
@@ -493,15 +516,17 @@ export default {
 
     const url = new URL(request.url)
     const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown'
+    // Absent in local dev and in tests that don't set it — isRegionRestricted allows that.
+    const country = request.cf?.country
 
     if (request.method === 'POST' && url.pathname === '/answer') {
-      return handleAnswer(request, env, origin, ip, ctx)
+      return handleAnswer(request, env, origin, ip, country, ctx)
     }
     if (request.method === 'POST' && url.pathname === '/models') {
       return handleModels(request, env, origin, ip, ctx)
     }
     if (request.method === 'POST' && url.pathname === '/ocr') {
-      return handleOcr(request, env, origin, ip, ctx)
+      return handleOcr(request, env, origin, ip, country, ctx)
     }
     return json({ error: 'Not found.' }, 404, origin)
   },

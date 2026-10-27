@@ -1251,3 +1251,124 @@ describe('BYOK key validation end-to-end (Step A tests b and e)', () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 })
+
+describe('worker fetch handler — region restriction (shared tier only)', () => {
+  const REGION_COPY =
+    "The free shared tier isn't available in your region because of Google's terms. Use your own API key instead."
+  const OCR_REGION_COPY =
+    "OCR runs on the free shared tier, which isn't available in your region because of Google's terms."
+
+  // Cloudflare's edge sets request.cf; a locally built Request has none, so attach it.
+  function fromCountry(req: IncomingRequest, country: string | undefined): IncomingRequest {
+    Object.defineProperty(req, 'cf', { value: country === undefined ? undefined : { country } })
+    return req
+  }
+
+  function spyKV() {
+    const kv = fakeKV()
+    const get = vi.fn(kv.get)
+    const put = vi.fn(kv.put)
+    return { kv: { get, put } as KVLike, get, put }
+  }
+
+  function stubFetch(json: unknown) {
+    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => json, text: async () => '' })
+    vi.stubGlobal('fetch', fetchSpy)
+    return fetchSpy
+  }
+
+  const geminiAnswer = { candidates: [{ content: { parts: [{ text: 'It makes ATP (Doc 1, page 1).' }] } }] }
+
+  it.each(['DE', 'FR', 'IE', 'MT', 'NO', 'IS', 'LI', 'CH', 'GB'])(
+    'refuses a shared /answer from %s with 403 region_restricted, before KV or any fetch',
+    async (country) => {
+      const fetchSpy = stubFetch(geminiAnswer)
+      const { kv, get, put } = spyKV()
+      const env = makeEnv({ RATE_LIMIT_KV: kv as unknown as Env['RATE_LIMIT_KV'], DISCORD_WEBHOOK_URL: 'https://discord.test/hook' })
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const res = await worker.fetch(fromCountry(answerRequest(validBody), country), env, makeCtx())
+      await flushWaitUntil()
+
+      expect(res.status).toBe(403)
+      expect(res.headers.get('Access-Control-Allow-Origin')).toBe('http://localhost:5173')
+      expect(await res.json()).toEqual({ error: REGION_COPY, code: 'region_restricted' })
+      expect(get).not.toHaveBeenCalled()
+      expect(put).not.toHaveBeenCalled()
+      expect(fetchSpy).not.toHaveBeenCalled()
+      expect(errorSpy).not.toHaveBeenCalled()
+      expect(waitUntilPromises).toHaveLength(0)
+      errorSpy.mockRestore()
+    },
+  )
+
+  it.each(['IN', 'US', 'BR', 'TR', 'UA', 'XX', 'T1', undefined])('allows a shared /answer from %s', async (country) => {
+    const fetchSpy = stubFetch(geminiAnswer)
+    const res = await worker.fetch(fromCountry(answerRequest(validBody), country), makeEnv(), makeCtx())
+    expect(res.status).toBe(200)
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('allows a shared /answer with no cf object at all (local dev)', async () => {
+    stubFetch(geminiAnswer)
+    const res = await worker.fetch(answerRequest(validBody), makeEnv(), makeCtx())
+    expect(res.status).toBe(200)
+  })
+
+  it('leaves a BYOK /answer from a restricted country alone', async () => {
+    const fetchSpy = stubFetch(geminiAnswer)
+    const res = await worker.fetch(fromCountry(answerRequest(byokBody), 'DE'), makeEnv(), makeCtx())
+    expect(res.status).toBe(200)
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves /models from a restricted country alone', async () => {
+    const fetchSpy = stubFetch({
+      models: [{ name: 'models/gemini-3.5-pro', displayName: 'Gemini 3.5 Pro', supportedGenerationMethods: ['generateContent'] }],
+    })
+    const res = await worker.fetch(
+      fromCountry(request('/models', { provider: 'gemini', apiKey: 'user-key' }), 'GB'),
+      makeEnv(),
+      makeCtx(),
+    )
+    expect(res.status).toBe(200)
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('refuses /ocr from a restricted country (always shared), before KV or any fetch', async () => {
+    const fetchSpy = stubFetch(geminiAnswer)
+    const { kv, get, put } = spyKV()
+    const res = await worker.fetch(
+      fromCountry(ocrRequest(validOcrBody), 'CH'),
+      makeEnv({ RATE_LIMIT_KV: kv as unknown as Env['RATE_LIMIT_KV'] }),
+      makeCtx(),
+    )
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({ error: OCR_REGION_COPY, code: 'region_restricted' })
+    expect(get).not.toHaveBeenCalled()
+    expect(put).not.toHaveBeenCalled()
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('allows /ocr from India', async () => {
+    const fetchSpy = stubFetch(geminiAnswer)
+    const res = await worker.fetch(fromCountry(ocrRequest(validOcrBody), 'IN'), makeEnv(), makeCtx())
+    expect(res.status).toBe(200)
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not spend the shared bucket: 60 refused requests, then one from India still succeeds', async () => {
+    stubFetch(geminiAnswer)
+    const env = makeEnv()
+    for (let i = 0; i < 60; i++) {
+      const res = await worker.fetch(fromCountry(answerRequest(validBody), 'DE'), env, makeCtx())
+      expect(res.status).toBe(403)
+    }
+    const res = await worker.fetch(fromCountry(answerRequest(validBody), 'IN'), env, makeCtx())
+    expect(res.status).toBe(200)
+  })
+
+  it('validates the body before the region check (a malformed request is still a 400)', async () => {
+    const res = await worker.fetch(fromCountry(answerRequest({ question: '' }), 'DE'), makeEnv(), makeCtx())
+    expect(res.status).toBe(400)
+  })
+})
