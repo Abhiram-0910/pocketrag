@@ -1,6 +1,6 @@
 // The Worker's provider-failure codes (worker/src/failureCodes.ts) — kept as a separate
 // copy so the frontend never imports Worker code; failureCodes.test.ts enforces parity.
-export const FAILURE_CODES = ['key_rejected', 'provider_rate_limited', 'request_rejected', 'provider_unavailable'] as const
+export const FAILURE_CODES = ['key_rejected', 'provider_rate_limited', 'request_rejected', 'provider_unavailable', 'region_restricted'] as const
 export type FailureCode = (typeof FAILURE_CODES)[number]
 export type FailureSource = 'shared' | 'own'
 
@@ -29,8 +29,9 @@ function isFailureCode(value: unknown): value is FailureCode {
 
 /** Parses a non-ok Worker response into a WorkerRequestError, shared by every API call site.
  * Fields are read by status: resetAt only on our own 429, code/source only on a provider
- * 502 — so a provider rate limit can never be mistaken for ours. Unknown values (or an
- * older Worker that sends no code) leave the field undefined. */
+ * 502 — so a provider rate limit can never be mistaken for ours — and region_restricted
+ * only on the shared tier's 403. Unknown values (or an older Worker that sends no code)
+ * leave the field undefined. */
 export async function parseWorkerErrorResponse(res: Response, fallbackMessage: string): Promise<WorkerRequestError> {
   const data = (await res.json().catch(() => null)) as {
     error?: unknown
@@ -40,7 +41,11 @@ export async function parseWorkerErrorResponse(res: Response, fallbackMessage: s
   } | null
   const message = typeof data?.error === 'string' ? data.error : fallbackMessage
   const resetAt = res.status === 429 && typeof data?.resetAt === 'string' ? data.resetAt : undefined
-  const code = res.status === 502 && isFailureCode(data?.code) ? data.code : undefined
+  const rawCode = isFailureCode(data?.code) ? data.code : undefined
+  const code =
+    (res.status === 502 && rawCode !== 'region_restricted') || (res.status === 403 && rawCode === 'region_restricted')
+      ? rawCode
+      : undefined
   const source =
     code === 'provider_rate_limited' && (data?.source === 'shared' || data?.source === 'own') ? data.source : undefined
   return new WorkerRequestError(message, res.status, resetAt, code, source)
@@ -60,6 +65,8 @@ export function failureAction(code: FailureCode | undefined, source: FailureSour
       return 'choose-model'
     case 'provider_unavailable':
       return 'retry'
+    case 'region_restricted':
+      return 'use-own-key'
     default:
       return null
   }

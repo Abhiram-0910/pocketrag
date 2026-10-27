@@ -111,6 +111,28 @@ describe('parseWorkerErrorResponse', () => {
   })
 })
 
+describe('parseWorkerErrorResponse — region_restricted (shared tier 403)', () => {
+  const REGION = "The free shared tier isn't available in your region because of Google's terms. Use your own API key instead."
+
+  it('parses the real 403 body: code kept, no resetAt or source', async () => {
+    const err = await parseWorkerErrorResponse(jsonResponse(403, { error: REGION, code: 'region_restricted' }), 'fallback')
+    expect(err).toMatchObject({ status: 403, message: REGION, code: 'region_restricted' })
+    expect(err.resetAt).toBeUndefined()
+    expect(err.source).toBeUndefined()
+    expect(failureAction(err.code, err.source)).toBe('use-own-key')
+  })
+
+  it('reads region_restricted only on a 403, and a 403 carries no other code', async () => {
+    const on502 = await parseWorkerErrorResponse(jsonResponse(502, { error: REGION, code: 'region_restricted' }), 'f')
+    expect(on502.code).toBeUndefined()
+    const on429 = await parseWorkerErrorResponse(jsonResponse(429, { error: REGION, code: 'region_restricted' }), 'f')
+    expect(on429.code).toBeUndefined()
+    const other403 = await parseWorkerErrorResponse(jsonResponse(403, { error: KEY_REJECTED, code: 'key_rejected' }), 'f')
+    expect(other403.code).toBeUndefined()
+    expect(failureAction(other403.code, other403.source)).toBeNull()
+  })
+})
+
 describe('failureAction', () => {
   it.each<[FailureCode | undefined, FailureSource | undefined, ReturnType<typeof failureAction>]>([
     ['key_rejected', undefined, 'check-key'],
@@ -119,6 +141,7 @@ describe('failureAction', () => {
     ['provider_rate_limited', undefined, null],
     ['request_rejected', undefined, 'choose-model'],
     ['provider_unavailable', undefined, 'retry'],
+    ['region_restricted', undefined, 'use-own-key'],
     [undefined, undefined, null],
   ])('%s / %s → %s', (code, source, expected) => {
     expect(failureAction(code, source)).toBe(expected)

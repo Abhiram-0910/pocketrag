@@ -39,7 +39,12 @@ const COPY = {
   ownUn: "The provider couldn't respond right now. Please try again in a moment.",
   exp: "This provider isn't fully supported yet. Please try Gemini or OpenAI for now — we're working on it.",
   ours: "You've hit today's request limit. Please try again tomorrow.",
+  region: "The free shared tier isn't available in your region because of Google's terms. Use your own API key instead.",
 }
+// ByokPanel's shared-tier line, shown only while the shared tier is active.
+const DISCLOSURE =
+  "Free shared tier: Google uses what's sent to improve its products and human reviewers may read it. Use your own paid key to avoid that."
+
 
 // A one-page text PDF, built here so no binary fixture lives in the repo.
 function writeTestPdf() {
@@ -249,6 +254,28 @@ async function main() {
     focus: 'Provider',
     after: async () => ({ byokChecked: await byokToggle.isChecked(), searchDisabledAfter: await searchDisabled() }),
   })
+  await byokToggle.uncheck()
+
+  // The shared tier's EEA/CH/UK refusal: a 403, not a 502, with the same action.
+  const disclosure = page.getByText(DISCLOSURE, { exact: true })
+  {
+    const row = { scenario: 'shared-tier disclosure', visibleOnShared: await disclosure.isVisible() }
+    await byokToggle.check()
+    row.visibleOnOwnKey = await disclosure.isVisible()
+    await byokToggle.uncheck()
+    row.visibleAgainOnShared = await disclosure.isVisible()
+    check(row.visibleOnShared && !row.visibleOnOwnKey && row.visibleAgainOnShared, `disclosure visibility ${JSON.stringify(row)}`)
+    results.push(row)
+  }
+  await ask('region_restricted / shared (403)', err(403, { error: COPY.region, code: 'region_restricted' }), {
+    text: COPY.region,
+    shot: 'region-restricted',
+    click: 'Use your own key',
+    focus: 'Provider',
+    after: async () => ({ byokChecked: await byokToggle.isChecked(), disclosureVisibleAfter: await disclosure.isVisible() }),
+  })
+  check(results.at(-1).byokChecked === true && results.at(-1).disclosureVisibleAfter === false, 'region_restricted: own key not switched on')
+  check(results.at(-1).text === COPY.region + ' Showing raw matched passages below. Use your own key', `region_restricted: banner not verbatim: ${results.at(-1).text}`)
   await byokToggle.uncheck()
 
   await ask('provider_unavailable / shared copy', err(502, { error: COPY.sharedUn, code: 'provider_unavailable' }), {

@@ -1,4 +1,4 @@
-export type ErrorTaxonomyType = 'rate-limit' | 'provider-unavailable' | 'network' | 'corrupt-pdf' | 'webgpu-unsupported' | 'unknown'
+export type ErrorTaxonomyType = 'rate-limit' | 'provider-unavailable' | 'region-restricted' | 'network' | 'corrupt-pdf' | 'webgpu-unsupported' | 'unknown'
 export type ErrorSeverity = 'error' | 'warning' | 'info'
 
 export interface TaxonomyResult {
@@ -15,6 +15,8 @@ export interface ClassifiableError {
 
 const RATE_LIMIT_STATUS = 429
 const PROVIDER_UNAVAILABLE_STATUS = 502
+// The Worker's only 403: the shared tier refusing an EEA/CH/UK request (region_restricted).
+const REGION_RESTRICTED_STATUS = 403
 
 /**
  * Classifies a Worker API failure (from /answer or /models) into a plain-language
@@ -35,6 +37,9 @@ export function classify(input: ClassifiableError): TaxonomyResult {
   }
   if (input.status === PROVIDER_UNAVAILABLE_STATUS) {
     return { type: 'provider-unavailable', severity: 'warning', message: input.message }
+  }
+  if (input.status === REGION_RESTRICTED_STATUS) {
+    return { type: 'region-restricted', severity: 'warning', message: input.message }
   }
   if (input.status !== undefined) {
     return { type: 'unknown', severity: 'error', message: input.message }

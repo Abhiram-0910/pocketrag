@@ -30,6 +30,11 @@ describe('classify', () => {
     expect(result.message).not.toContain('Resets at')
   })
 
+  it('classifies a 403 (shared tier region refusal) as region-restricted, message as-is', () => {
+    const message = "The free shared tier isn't available in your region because of Google's terms. Use your own API key instead."
+    expect(classify({ message, status: 403 })).toEqual({ type: 'region-restricted', severity: 'warning', message })
+  })
+
   it('classifies any other Worker status as unknown, preserving the message', () => {
     const result = classify({ message: 'question must be a non-empty string.', status: 400 })
     expect(result.type).toBe('unknown')
