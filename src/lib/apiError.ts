@@ -12,15 +12,37 @@ export class WorkerRequestError extends Error {
   resetAt?: string
   code?: FailureCode
   source?: FailureSource
+  // Whole seconds until a retry makes sense, when the Worker knows (Step D). Absent = unknown.
+  retryAfterSeconds?: number
 
-  constructor(message: string, status: number, resetAt?: string, code?: FailureCode, source?: FailureSource) {
+  constructor(
+    message: string,
+    status: number,
+    resetAt?: string,
+    code?: FailureCode,
+    source?: FailureSource,
+    retryAfterSeconds?: number,
+  ) {
     super(message)
     this.name = 'WorkerRequestError'
     this.status = status
     this.resetAt = resetAt
     this.code = code
     this.source = source
+    this.retryAfterSeconds = retryAfterSeconds
   }
+}
+
+// Our own 429 waits until UTC midnight (≤ 1 day); a provider hint or our breaker ≤ 1 hour.
+const MAX_OUR_RETRY_AFTER = 86_400
+const MAX_PROVIDER_RETRY_AFTER = 3600
+
+function boundedSeconds(value: unknown, min: number, max: number): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max ? value : undefined
+}
+
+function isDateString(value: unknown): value is string {
+  return typeof value === 'string' && !Number.isNaN(Date.parse(value))
 }
 
 function isFailureCode(value: unknown): value is FailureCode {
@@ -28,19 +50,20 @@ function isFailureCode(value: unknown): value is FailureCode {
 }
 
 /** Parses a non-ok Worker response into a WorkerRequestError, shared by every API call site.
- * Fields are read by status: resetAt only on our own 429, code/source only on a provider
- * 502 — so a provider rate limit can never be mistaken for ours — and region_restricted
- * only on the shared tier's 403. Unknown values (or an older Worker that sends no code)
- * leave the field undefined. */
+ * Fields are read by status: code/source only on a provider 502 — so a provider rate
+ * limit can never be mistaken for ours — and region_restricted only on the shared tier's
+ * 403. resetAt and retryAfterSeconds only on our own 429 or a provider_rate_limited 502
+ * (resetAt there only from the shared tier: its midnight-Pacific bound). Unknown or
+ * out-of-range values (or an older Worker) leave the field undefined — never a guess. */
 export async function parseWorkerErrorResponse(res: Response, fallbackMessage: string): Promise<WorkerRequestError> {
   const data = (await res.json().catch(() => null)) as {
     error?: unknown
     resetAt?: unknown
     code?: unknown
     source?: unknown
+    retryAfterSeconds?: unknown
   } | null
   const message = typeof data?.error === 'string' ? data.error : fallbackMessage
-  const resetAt = res.status === 429 && typeof data?.resetAt === 'string' ? data.resetAt : undefined
   const rawCode = isFailureCode(data?.code) ? data.code : undefined
   const code =
     (res.status === 502 && rawCode !== 'region_restricted') || (res.status === 403 && rawCode === 'region_restricted')
@@ -48,7 +71,15 @@ export async function parseWorkerErrorResponse(res: Response, fallbackMessage: s
       : undefined
   const source =
     code === 'provider_rate_limited' && (data?.source === 'shared' || data?.source === 'own') ? data.source : undefined
-  return new WorkerRequestError(message, res.status, resetAt, code, source)
+  const ours = res.status === 429
+  const providerRateLimited = res.status === 502 && code === 'provider_rate_limited'
+  const resetAt = (ours || (providerRateLimited && source === 'shared')) && isDateString(data?.resetAt) ? data.resetAt : undefined
+  const retryAfterSeconds = ours
+    ? boundedSeconds(data?.retryAfterSeconds, 0, MAX_OUR_RETRY_AFTER)
+    : providerRateLimited
+      ? boundedSeconds(data?.retryAfterSeconds, 1, MAX_PROVIDER_RETRY_AFTER)
+      : undefined
+  return new WorkerRequestError(message, res.status, resetAt, code, source, retryAfterSeconds)
 }
 
 export type FailureAction = 'check-key' | 'use-own-key' | 'choose-model' | 'retry'

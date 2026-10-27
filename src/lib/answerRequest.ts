@@ -108,6 +108,7 @@ export type AnswerAttemptResult =
       resetAt?: string
       code?: FailureCode
       source?: FailureSource
+      retryAfterSeconds?: number
     }
 
 function isAbortError(err: unknown): boolean {
@@ -159,6 +160,7 @@ export async function attemptAnswer(
         resetAt: err.resetAt,
         code: err.code,
         source: err.source,
+        retryAfterSeconds: err.retryAfterSeconds,
       }
     }
     return { outcome: 'error', message: err instanceof Error ? err.message : 'unknown error' }

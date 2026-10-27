@@ -1,4 +1,4 @@
-import { WorkerRequestError, parseWorkerErrorResponse } from './apiError'
+import { WorkerRequestError, parseWorkerErrorResponse, type FailureCode, type FailureSource } from './apiError'
 import { egressFetch } from './egress'
 
 export interface OcrResponse {
@@ -10,7 +10,15 @@ export type FetchOcrFn = (mimeType: string, base64: string, signal: AbortSignal)
 export type OcrAttemptResult =
   | { outcome: 'success'; text: string }
   | { outcome: 'timeout' }
-  | { outcome: 'error'; message: string; status?: number; resetAt?: string }
+  | {
+      outcome: 'error'
+      message: string
+      status?: number
+      resetAt?: string
+      code?: FailureCode
+      source?: FailureSource
+      retryAfterSeconds?: number
+    }
 
 function isAbortError(err: unknown): boolean {
   return err instanceof DOMException && err.name === 'AbortError'
@@ -31,7 +39,15 @@ export async function attemptOcr(
   } catch (err) {
     if (isAbortError(err)) return { outcome: 'timeout' }
     if (err instanceof WorkerRequestError) {
-      return { outcome: 'error', message: err.message, status: err.status, resetAt: err.resetAt }
+      return {
+        outcome: 'error',
+        message: err.message,
+        status: err.status,
+        resetAt: err.resetAt,
+        code: err.code,
+        source: err.source,
+        retryAfterSeconds: err.retryAfterSeconds,
+      }
     }
     return { outcome: 'error', message: err instanceof Error ? err.message : 'unknown error' }
   } finally {

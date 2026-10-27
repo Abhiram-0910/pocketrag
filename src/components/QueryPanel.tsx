@@ -16,6 +16,8 @@ import { buildConversationPdf, type ExportSource } from '../lib/pdfExport'
 import { canRunQuery } from '../lib/queryScope'
 import { classify, type TaxonomyResult } from '../lib/errorTaxonomy'
 import { failureAction, type FailureAction } from '../lib/apiError'
+import { formatClock, formatRemaining, retryCopy, retryTimingFor, type RetryTiming } from '../lib/retryTiming'
+import { useRetryCountdown } from './useRetryCountdown'
 import { getSessionFile } from '../lib/sessionFiles'
 import type { TurnRecord } from '../lib/historyDb'
 import { useDocumentStore } from '../store/documentStore'
@@ -132,7 +134,11 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
   // always-mounted live region (announced); any other turn's stored failure renders
   // outside it, so opening an old conversation announces nothing.
   const [liveTurnId, setLiveTurnId] = useState<string | null>(null)
-  const [answerError, setAnswerError] = useState<(TaxonomyResult & { turnId: string; action: FailureAction | null }) | null>(null)
+  // timing: this session's live failure only — a restored one never gets a timer.
+  // shared: the turn went to the shared tier, so "Use your own key" is always offered.
+  const [answerError, setAnswerError] = useState<
+    (TaxonomyResult & { turnId: string; action: FailureAction | null; timing: RetryTiming | null; shared: boolean }) | null
+  >(null)
   const [timedOutTurnId, setTimedOutTurnId] = useState<string | null>(null)
   const [sources, setSources] = useState<TurnSources | null>(null)
   // Milestone 10 Phase B state. diagramImagesEnabled reads localStorage once at mount;
@@ -300,6 +306,8 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
             severity: 'warning',
             message: 'Answer generation timed out again.',
             action: null,
+            timing: null,
+            shared: false,
           })
         } else {
           setTimedOutTurnId(turnId)
@@ -307,7 +315,14 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
         await settleTurn(turnId, { status: 'timed-out' })
       } else {
         const classified = classify({ message: result.message, status: result.status, resetAt: result.resetAt })
-        setAnswerError({ turnId, ...classified, action: failureAction(result.code, result.source) })
+        setAnswerError({
+          turnId,
+          ...classified,
+          action: failureAction(result.code, result.source),
+          // From this browser's clock at arrival; null whenever the Worker sent no wait.
+          timing: retryTimingFor(result, Date.now()),
+          shared: activeKeyConfig.keySource === 'shared',
+        })
         await settleTurn(turnId, {
           status: 'failed',
           failure: {
@@ -524,6 +539,11 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
 
   const liveError = answerError !== null && answerError.turnId === leaf?.id ? answerError : null
   const answerAction = liveError?.action ?? null
+  const liveTiming = liveError?.timing ?? null
+  const countdown = useRetryCountdown(liveTiming)
+  const retryReady = countdown?.ready ?? false
+  const liveCopy = liveError && liveTiming ? retryCopy(liveTiming, liveError.message, { ownKeyOption: liveError.shared }) : null
+  const offerOwnKey = answerAction === 'use-own-key' || (liveTiming !== null && liveError?.shared === true)
   const leafTimedOut = leaf !== null && timedOutTurnId === leaf.id
   const grounded = leaf ? groundedSession.get(leaf.id) : undefined
   // The question just submitted is still in the input; a restored one isn't anywhere else.
@@ -786,20 +806,54 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
         <div aria-live="polite" aria-atomic="true">
           {liveError && (
             <StatusBanner variant={liveError.severity} className="mt-4" inLiveRegion>
-              <span className="block">{liveError.message}</span>
+              <span className="block">{liveCopy?.message ?? liveError.message}</span>
+              {liveCopy?.lines.map((line) => (
+                <span key={line} className="block">
+                  {line}
+                </span>
+              ))}
+              {/* The live region's only change after it appears: once, at zero. */}
+              {liveTiming && retryReady && <span className="block">You can try again now.</span>}
               <span className="block">Showing raw matched passages below.</span>
-              {answerAction && (
-                <Button
-                  variant="secondary"
-                  className="mt-2"
-                  onClick={() => (answerAction === 'retry' ? void handleRetry() : onFailureAction?.(answerAction))}
-                >
-                  {FAILURE_ACTION_LABELS[answerAction]}
-                </Button>
+              {liveTiming ? (
+                <span className="mt-2 flex flex-wrap gap-2">
+                  <Button
+                    variant="secondary"
+                    aria-disabled={retryReady ? undefined : true}
+                    className="aria-disabled:cursor-not-allowed aria-disabled:text-slate-400"
+                    onClick={() => {
+                      if (retryReady) void handleRetry()
+                    }}
+                  >
+                    {retryReady ? FAILURE_ACTION_LABELS.retry : `${FAILURE_ACTION_LABELS.retry} at ${formatClock(liveTiming.retryAt)}`}
+                  </Button>
+                  {offerOwnKey && (
+                    <Button variant="secondary" onClick={() => onFailureAction?.('use-own-key')}>
+                      {FAILURE_ACTION_LABELS['use-own-key']}
+                    </Button>
+                  )}
+                </span>
+              ) : (
+                answerAction && (
+                  <Button
+                    variant="secondary"
+                    className="mt-2"
+                    onClick={() => (answerAction === 'retry' ? void handleRetry() : onFailureAction?.(answerAction))}
+                  >
+                    {FAILURE_ACTION_LABELS[answerAction]}
+                  </Button>
+                )
               )}
             </StatusBanner>
           )}
         </div>
+        {/* Outside the live region and aria-hidden: a per-second change must never be
+            announced. The absolute time above is what assistive tech reads. */}
+        {liveTiming?.tick && countdown && !countdown.ready && (
+          <p aria-hidden="true" className="mt-1 text-xs tabular-nums text-slate-600 dark:text-slate-400">
+            Try again in {formatRemaining(countdown.remainingMs)}
+          </p>
+        )}
 
         {/* This session's own failed, timed-out or in-flight answer: its receipt sits under
             the live region (the banner above it is what gets announced). */}

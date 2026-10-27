@@ -3,6 +3,7 @@ import { UploadSimple } from '@phosphor-icons/react'
 import { embedDocument } from '../lib/embeddingClient'
 import { saveDocument, type ChunkRecord } from '../lib/db'
 import { attemptOcr, fetchOcrFromWorker } from '../lib/ocrRequest'
+import { retryCopy, retryTimingFor } from '../lib/retryTiming'
 import { useDocumentStore } from '../store/documentStore'
 import { StatusBanner } from './ui/StatusBanner'
 import { Button } from './ui/Button'
@@ -83,7 +84,11 @@ export function NotesDropZone() {
               return
             }
             if (result.outcome === 'error') {
-              updateDocument(id, { status: 'error', error: result.message })
+              // A known wait becomes absolute times in the status (no ticking here); OCR has
+              // no own-key path, so the copy never offers one.
+              const timing = retryTimingFor(result, Date.now())
+              const copy = timing ? retryCopy(timing, result.message, { ownKeyOption: false }) : null
+              updateDocument(id, { status: 'error', error: copy ? [copy.message, ...copy.lines].join(' ') : result.message })
               resolve()
               return
             }

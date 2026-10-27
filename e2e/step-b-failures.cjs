@@ -313,8 +313,11 @@ async function main() {
   results.push(timeoutRow)
   for (const route of hung.splice(0)) await route.abort().catch(() => {})
 
+  // Step D: a known reset gives a timed "Try again" (this resetAt is already past, so it's
+  // enabled from the start). Countdowns themselves are checked in stepD below.
   await ask('our own 429 (resetAt)', err(429, { error: COPY.ours, resetAt: '2026-10-20T00:00:00.000Z' }), {
     text: "You've hit today's request limit",
+    button: 'Try again',
   })
   await ask('old Worker body, no code', err(502, { error: COPY.exp }), { text: COPY.exp })
 
@@ -484,10 +487,219 @@ async function main() {
     await later.close()
   }
 
+  await stepD(browser, pageErrors)
+
   check(pageErrors.length === 0, `page errors: ${pageErrors.join('; ')}`)
   console.log(JSON.stringify({ results, answerCalls, pageErrors, failures }, null, 2))
   await browser.close()
   if (failures.length) process.exit(1)
+}
+
+// ---- Step D: retry countdowns, under Playwright's clock ----
+// Own context: a fixed zone (IST, UTC+5:30 all year) so local times are exact, and the
+// clock installed before load. Time flows normally until fastForward jumps it. All
+// mocked; the Worker's resetAt values are what breaker.ts computes for these instants.
+async function stepD(browser, pageErrors) {
+  const T0 = new Date('2026-10-31T23:00:00.000Z') // the night before US DST ends
+  const MIDNIGHT_PDT = '2026-11-01T07:00:00.000Z' // = 12:30 PM IST
+  const MIDNIGHT_PST = '2026-11-02T08:00:00.000Z' // = 1:30 PM IST
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, timezoneId: 'Asia/Kolkata', locale: 'en-US' })
+  await context.addInitScript(() => localStorage.setItem('pocketrag:has-visited-app', 'true'))
+  let handler = null
+  let calls = 0
+  const route = async (r) => {
+    const req = r.request()
+    if (req.method() === 'OPTIONS') return r.fulfill({ status: 204, headers: CORS })
+    if (req.url().endsWith('/models')) {
+      return r.fulfill({ status: 200, headers: { ...CORS, 'Content-Type': 'application/json' }, body: JSON.stringify({ models: [{ id: 'model-a', displayName: 'model-a' }] }) })
+    }
+    calls++
+    if (!handler) return r.abort()
+    const reply = handler(req)
+    return r.fulfill({ status: reply.status, headers: { ...CORS, 'Content-Type': 'application/json' }, body: JSON.stringify(reply.body) })
+  }
+  await context.route(`${API}/**`, route)
+  const page = await context.newPage()
+  page.on('pageerror', (e) => pageErrors.push(`stepD: ${String(e)}`))
+  await page.clock.install({ time: T0 })
+  await page.goto(APP)
+  await page.setInputFiles('input[type="file"][accept="application/pdf"]', writeTestPdf())
+  await page.waitForFunction(() => document.querySelector('form input[type="text"]')?.disabled === false, null, { timeout: 300_000 })
+  const input = page.locator('form input[type="text"]')
+  const ticker = page.locator('p[aria-hidden="true"]', { hasText: 'Try again in' })
+  const err = (status, body) => () => ({ status, body })
+
+  // Records each aria-live container's text on every mutation, so we can count what a
+  // screen reader would be handed.
+  const watchLive = () =>
+    page.evaluate(() => {
+      window.__live = []
+      window.__liveObs?.disconnect()
+      const regions = [...document.querySelectorAll('[aria-live]')]
+      window.__liveObs = new MutationObserver(() => {
+        regions.forEach((el, i) => {
+          const t = el.textContent
+          const log = (window.__live[i] ||= [])
+          if (log.at(-1) !== t) log.push(t)
+        })
+      })
+      regions.forEach((el) => window.__liveObs.observe(el, { subtree: true, childList: true, characterData: true, attributes: true }))
+    })
+  // Distinct non-empty texts of the region holding the banner (start, then any change).
+  const liveChanges = (needle) =>
+    page.evaluate((n) => (window.__live.find((log) => log.some((t) => t.includes(n))) || []).filter((t) => t.includes(n)), needle)
+
+  async function askD(name, reply, expect) {
+    handler = reply
+    const before = calls
+    await watchLive()
+    await input.fill(`What does the mitochondrion do? (D: ${name})`)
+    await page.getByRole('button', { name: 'Search' }).click()
+    // Two scenarios in a row can share a banner prefix: wait for this one's request (the
+    // app clears the previous banner before sending), so the locator can't match the old one.
+    for (let i = 0; i < 300 && calls === before; i++) await page.waitForTimeout(100)
+    await page.waitForTimeout(300)
+    const banner = page.locator('[aria-live="polite"] p', { hasText: expect.text.slice(0, 30) }).first()
+    await banner.waitFor({ timeout: 60_000 })
+    const row = {
+      scenario: `Step D: ${name}`,
+      text: (await banner.innerText()).replace(/\s+/g, ' ').trim(),
+      buttons: await banner.locator('button').allInnerTexts(),
+      ariaDisabled: await banner.locator('button').first().getAttribute('aria-disabled').catch(() => null),
+      tickerVisible: await ticker.isVisible(),
+      calls: calls - before,
+    }
+    check(row.calls === 1, `${name}: ${row.calls} /answer calls`)
+    for (const piece of expect.contains ?? [expect.text]) check(row.text.includes(piece), `${name}: banner lacks ${JSON.stringify(piece)}: ${row.text}`)
+    if (expect.buttons) check(JSON.stringify(row.buttons.map((b) => b.replace(/\d{1,2}:\d{2}\s?[AP]M/, 'TIME'))) === JSON.stringify(expect.buttons), `${name}: buttons ${JSON.stringify(row.buttons)}`)
+    check(row.tickerVisible === Boolean(expect.ticker), `${name}: ticker visible ${row.tickerVisible}`)
+    results.push(row)
+    return { row, banner }
+  }
+
+  // A. Breaker below the cap: ticks, enables at zero, announces only at start and zero.
+  {
+    const name = 'breaker 120 s (shared, no hint)'
+    const { row, banner } = await askD(
+      name,
+      err(502, { error: COPY.sharedRl, code: 'provider_rate_limited', source: 'shared', retryAfterSeconds: 120, resetAt: MIDNIGHT_PDT }),
+      {
+        text: COPY.sharedRl,
+        contains: [COPY.sharedRl, 'PocketRAG will try Google again at', "If the free tier's daily quota is used up, it resets at midnight Pacific (12:30 PM your time)."],
+        buttons: ['Try again at TIME', 'Use your own key'],
+        ticker: true,
+      },
+    )
+    check(row.ariaDisabled === 'true', `${name}: Try again not aria-disabled`)
+    check((await ticker.evaluate((el) => !el.closest('[aria-live]'))) === true, `${name}: ticker inside a live region`)
+    const t0 = await ticker.innerText()
+    // An aria-disabled click does nothing.
+    const beforeClick = calls
+    // force: Playwright treats aria-disabled as not clickable; a real click still lands.
+    await banner.locator('button').first().click({ force: true })
+    await page.waitForTimeout(300)
+    check(calls === beforeClick, `${name}: disabled Try again sent a request`)
+    await page.clock.fastForward(60_000)
+    const t60 = await ticker.innerText()
+    row.tickerAt0 = t0
+    row.tickerAfter60s = t60
+    check(t0 !== t60 && /^Try again in 1:0\d$/.test(t60), `${name}: ticker didn't count down (${t0} → ${t60})`)
+
+    // Reload (fresh tab, same history DB): the restored failure has no timer.
+    const tab = await context.newPage()
+    await tab.goto(APP)
+    const restored = tab.locator('p', { hasText: COPY.sharedRl.slice(0, 30) }).first()
+    await restored.waitFor({ timeout: 30_000 })
+    const restoredRow = {
+      scenario: 'Step D: restored breaker failure (fresh tab)',
+      text: (await restored.innerText()).replace(/\s+/g, ' ').trim(),
+      tickerVisible: await tab.locator('p[aria-hidden="true"]', { hasText: 'Try again in' }).isVisible(),
+    }
+    check(!restoredRow.tickerVisible, 'restored: ticker shown')
+    check(!/Try again at|try Google again|your time/.test(restoredRow.text), `restored: timer text: ${restoredRow.text}`)
+    results.push(restoredRow)
+    await tab.close()
+
+    await page.clock.fastForward(61_000)
+    await page.getByText('You can try again now.').waitFor({ timeout: 5000 })
+    row.buttonsAtZero = await banner.locator('button').allInnerTexts()
+    row.ariaDisabledAtZero = await banner.locator('button').first().getAttribute('aria-disabled')
+    row.tickerAtZero = await ticker.isVisible()
+    row.liveRegionTexts = (await liveChanges('PocketRAG will try Google again')).length
+    check(row.buttonsAtZero[0] === 'Try again' && row.ariaDisabledAtZero === null, `${name}: not enabled at zero ${JSON.stringify(row.buttonsAtZero)}`)
+    check(!row.tickerAtZero, `${name}: ticker still shown at zero`)
+    // Exactly two states handed to the live region: the banner, then the zero update.
+    check(row.liveRegionTexts === 2, `${name}: live region changed ${row.liveRegionTexts} times`)
+    handler = successFor('stepD')
+    await banner.getByRole('button', { name: 'Try again', exact: true }).click()
+    row.retryAnswerShown = await page.getByText('Retried answer stepD').first().waitFor({ timeout: 60_000 }).then(() => true, () => false)
+    check(row.retryAnswerShown, `${name}: retry after zero didn't answer`)
+  }
+
+  // B. Unknown wait: no countdown, no timed button — just the Step B action.
+  await askD('shared 502, no retry fields', err(502, { error: COPY.sharedRl, code: 'provider_rate_limited', source: 'shared' }), {
+    text: COPY.sharedRl,
+    buttons: ['Use your own key'],
+    ticker: false,
+  })
+
+  // C. Our own 429 with retryAfterSeconds: ticks and enables at zero.
+  {
+    const name = 'our 429, retryAfterSeconds 30'
+    const { row, banner } = await askD(name, err(429, { error: COPY.ours, resetAt: '2026-11-01T00:00:00.000Z', retryAfterSeconds: 30 }), {
+      text: "You've hit today's request limit",
+      buttons: ['Try again at TIME', 'Use your own key'],
+      ticker: true,
+    })
+    await page.clock.fastForward(31_000)
+    await page.getByText('You can try again now.').waitFor({ timeout: 5000 })
+    row.buttonsAtZero = await banner.locator('button').allInnerTexts()
+    check(row.buttonsAtZero[0] === 'Try again', `${name}: not enabled at zero`)
+  }
+
+  // D. Our 429 without retryAfterSeconds (older Worker): resetAt only, > 15 min → absolute time, no ticker.
+  await askD('our 429, resetAt only', err(429, { error: COPY.ours, resetAt: '2026-11-01T02:00:00.000Z' }), {
+    text: "You've hit today's request limit",
+    buttons: ['Try again at TIME', 'Use your own key'],
+    ticker: false,
+  })
+
+  // E. Breaker at its cap, no hint: the escalated copy, before the DST change.
+  await askD('escalated (cap, no hint), before DST change', err(502, { error: COPY.sharedRl, code: 'provider_rate_limited', source: 'shared', resetAt: MIDNIGHT_PDT }), {
+    text: 'The free shared tier looks used up for today.',
+    contains: ['The free shared tier looks used up for today. It normally resets at midnight Pacific (12:30 PM your time). Or use your own key.'],
+    buttons: ['Try again at TIME', 'Use your own key'],
+    ticker: false,
+  })
+
+  // F. …and after it (PST): midnight Pacific is an hour later in UTC.
+  await page.clock.setSystemTime(new Date('2026-11-01T12:00:00.000Z'))
+  await askD('escalated, after DST change', err(502, { error: COPY.sharedRl, code: 'provider_rate_limited', source: 'shared', resetAt: MIDNIGHT_PST }), {
+    text: 'The free shared tier looks used up for today.',
+    contains: ['It normally resets at midnight Pacific (1:30 PM your time). Or use your own key.'],
+    buttons: ['Try again at TIME', 'Use your own key'],
+    ticker: false,
+  })
+
+  // G. Own key: a provider hint ticks with no own-key button; no hint → no timer.
+  await page.getByLabel('Use your own API key').check()
+  await page.getByLabel('Provider', { exact: true }).selectOption('openai')
+  await page.getByLabel('OpenAI API key').fill('sk-fake-stepd-0000000000')
+  await page.getByRole('button', { name: 'Fetch models' }).click()
+  await page.getByLabel('Model', { exact: true }).waitFor()
+  await page.getByLabel('Model', { exact: true }).selectOption('model-a')
+  await askD('own-key 502, retryAfterSeconds 20', err(502, { error: COPY.ownRl, code: 'provider_rate_limited', source: 'own', retryAfterSeconds: 20 }), {
+    text: COPY.ownRl,
+    contains: [COPY.ownRl, 'Try again at'],
+    buttons: ['Try again at TIME'],
+    ticker: true,
+  })
+  await askD('own-key 502, no retry fields', err(502, { error: COPY.ownRl, code: 'provider_rate_limited', source: 'own' }), {
+    text: COPY.ownRl,
+    buttons: [],
+    ticker: false,
+  })
+  await context.close()
 }
 
 main().catch((e) => {
