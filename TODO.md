@@ -53,16 +53,24 @@ Read this at the start of every session to know what to work on next.
       into the `value` attribute.
 - [ ] COOP/COEP cross-origin-isolation experiment for threaded wasm (our cross-origin
       loads are all CORS fetches, so COEP may not break them — untested).
-- [ ] **Decide: KV failure mode before Step D.** `checkRateLimit` fails closed (uncaught
-      KV error → runtime 500, no CORS), and the plan is assumed Free (1,000 KV writes/day;
-      the plan wasn't readable with wrangler's token). Step D adds breaker writes, so it
-      waits on: fail-open with a caught error, move to Paid, or accept. See ARCHITECTURE.md
-      Known Technical Debt, AGENTS.md Session 37.
-- [ ] **Step D** — server-issued `retryAfterSeconds` + `date` on rate-limit responses
-      and a live countdown in the UI, for our own buckets only (not provider limits).
-  - [ ] Decide whether shared-tier provider failures refund the per-IP quota: today
-        every 502 spends one request (`worker/src/index.ts` counter increments before
-        dispatch, `rateLimit.ts:52`); own-key failures should NOT refund (fake-key spam).
+- [x] **Decide: KV failure mode before Step D.** Decided (Phase 3c): fail open on the
+      Free plan. Every KV call is caught; a weak per-isolate in-memory fallback limiter;
+      CORS-safe 500 safety net. See ARCHITECTURE.md "KV fails open".
+- [ ] **Durable Objects for counters** — the per-IP buckets and the breaker are KV
+      get-then-put (non-atomic, eventually consistent), and while KV fails the fallback
+      limiter is per isolate. A Durable Object per bucket makes them exact. Do it if abuse
+      shows up in the logs (`kv_call_failed` lines, shared quota burning faster than users).
+- [ ] **The real EEA 403 is still unseen live** — `region_restricted` is covered by unit and
+      mocked e2e only (no EEA egress from this machine). Check from an EU/UK/CH vantage
+      point when one is available.
+- [x] **Step D** (Phase 3c) — `retryAfterSeconds`/`resetAt` on our 429s and on
+      rate-limited 502s when known (provider hint or the shared Gemini breaker), and a
+      countdown in the UI. See ARCHITECTURE.md "Retry timing".
+  - [x] Quota refund on shared-tier failures: **deliberately not built** (decided Phase
+        3c). Every 502 still spends one request. Revisit only with evidence; own-key
+        failures should never refund (fake-key spam).
+  - [ ] A real Gemini 429 carrying RetryInfo has never been observed; the documented shape
+        is a test fixture only.
 ### Chat history + Receipts (per-answer egress ledger)
 - [x] **Phase 1** — persisted history DB (`pocketrag-history`, separate from the
       documents DB), conversation tree ops, `chatStore`, and the egress wrapper every

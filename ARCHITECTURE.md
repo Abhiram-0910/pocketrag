@@ -44,7 +44,7 @@ pocketrag/
 ├── e2e/                      # Manual Playwright checks (global install, not a dependency)
 ├── worker/                   # Cloudflare Worker — separate npm project, separate deploy
 │   └── src/                  # index.ts, validate.ts, prompt.ts, labels.ts, grounding.ts,
-│                              # rateLimit.ts, region.ts, cors.ts, discord.ts,
+│                              # rateLimit.ts, region.ts, breaker.ts, cors.ts, discord.ts,
 │                              # providers/{gemini,openai,anthropic,grok,openrouter}.ts
 ├── scripts/                  # check-bundle-size.mjs (build-time Pages size guard)
 ├── README.md
@@ -106,7 +106,9 @@ pocketrag/
 | `worker/src/prompt.ts` | Grounded-QA prompt: answer only from passages, cite `(Doc N, page M)`, admit gaps |
 | `worker/src/labels.ts` | `assignDocLabels()` — `Doc N` ↔ documentId map, frozen per conversation via an `existing` param (see Key Architectural Decisions) |
 | `worker/src/grounding.ts` | `checkGrounding()` — citation-level groundedness heuristic over `(Doc N, page)` pairs |
-| `worker/src/rateLimit.ts` | KV counter-per-IP-per-day — independent buckets per tier/endpoint (shared `/answer`, BYOK, `/ocr`). An uncaught KV `get`/`put` error (including the Free plan's daily write limit) propagates out of the handler: the request fails closed as a runtime 500 with no CORS headers (see Known Technical Debt) |
+| `worker/src/rateLimit.ts` | KV counter-per-IP-per-day — independent buckets per tier/endpoint (shared `/answer`, BYOK, `/ocr`). **Fails open** (Phase 3c): a KV `get`/`put` error is caught, reported, and the request goes to a weak per-isolate in-memory fallback counter with the same limits |
+| `worker/src/breaker.ts` | Shared-tier Gemini circuit breaker (`cooldown:shared:gemini`), escalation, `nextMidnightIn` (Intl, `America/Los_Angeles`), and the retry fields a shared rate-limited 502 carries (Step D) |
+| `src/lib/retryTiming.ts` | Client side of Step D: retry kind from the Worker's numeric fields, the time-bearing copy in the user's zone, and `startRetryCountdown` (wrapped by `src/components/useRetryCountdown.ts`) |
 | `worker/src/region.ts` | `isRegionRestricted(request.cf.country)` — EU27 + IS/LI/NO + CH + GB; missing/unknown (undefined, `XX`, `T1`) allowed. Gates the shared tier only (Phase 3b) |
 | `worker/src/providers/*.ts` | One file per BYOK provider (gemini, openai, anthropic, grok, openrouter) — each a thin, injectable-`fetch` wrapper around that provider's chat + model-list endpoints, same two-key-leak-test discipline |
 | `worker/src/providers/errors.ts` | `providerError()` — the only way provider files throw: parses a non-2xx body for message/code, exact-key scrubs, caps at 200 chars, applies the prompt-echo guard, then drops the body. Also `redactKeys()`, the pattern backstop used at the log and Discord sinks |
@@ -620,6 +622,63 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
   matches the landing line's meaning), hidden once "Use your own API key" is on. Landing + README
   now say the page image goes only if diagram images are on (default off), and that the
   shared tier isn't available in those regions.
+- **KV fails open (Phase 3c, Worker `06d7917b`, Pages `75687228`; Workers Free plan assumed: 1,000 KV writes/day).** No KV
+  `get`/`put` can throw out of a handler: `checkRateLimit`, Discord's `shouldNotify` and
+  the breaker catch, report and allow. A rate-limit call whose get or put failed is
+  counted instead by a per-isolate in-memory Map per `(bucket, IP, day)` with the same
+  daily limits (10,000 entries, oldest evicted). It is **weak**: Cloudflare runs many
+  short-lived isolates, so it is a floor against a tight loop on one isolate, not a quota.
+  A request KV counted (put succeeded) never reaches it. Discord suppression falls back to
+  an in-memory window. Each failed call logs `{"event":"kv_call_failed","get":0|1,"put":0|1}`
+  (no IP, no key name, no error text) and sends at most one "Workers KV call failed"
+  Discord alert per isolate per hour, suppressed in memory. The `fetch` handler is wrapped:
+  any uncaught error returns JSON 500 `{ error: "PocketRAG's server had a problem. Try
+  again." }` with the normal CORS headers and logs only `{"event":"worker_unhandled_error"}`.
+  KV writes per request: 1 per allowed `/answer`/`/models`/`/ocr` (0 when refused, over
+  the limit, or short-circuited by the breaker), +1 for a Discord slot on an alerting
+  failure, +1 for the breaker on a real shared Gemini 429. Reads: +1 per shared
+  `/answer`/`/ocr` for the breaker.
+- **Retry timing (Step D, Phase 3c).** Contract (all additive; FAILURE_CODES unchanged; no
+  `Retry-After` response header):
+
+  | Response | Fields |
+  |---|---|
+  | our own 429 | `resetAt` (next UTC midnight) + `retryAfterSeconds` (same instant, 0–86400) |
+  | shared rate-limited 502, Gemini hinted | `retryAfterSeconds` (1–3600) |
+  | shared, no hint, breaker below its cap | `retryAfterSeconds` (breaker) + `resetAt` (next midnight Pacific — the "if" bound) |
+  | shared, no hint, breaker at its 15 min cap | `resetAt` only ("looks used up for today") |
+  | own-key rate-limited 502 | `retryAfterSeconds` only when the provider sent one |
+  | anything else, or unknown | no fields → no countdown, ever |
+
+  **Hints** (`parseRetryHint`, `providers/errors.ts`, 429 only): `google.rpc.RetryInfo`
+  `retryDelay` matching `^\d{1,6}(\.\d{1,9})?s$`, and `Retry-After` as delta-seconds or an
+  IMF-fixdate; rounded up, clamped 1–3600, larger wins; only `{seconds, source}` leaves
+  (source `retry-info` / `header` / `none`, logged as `retryHintSeconds`/`retryHintSource`).
+  `insufficient_quota` and 402 get no timer. The Gemini 429s seen live (Session 25) had no
+  RetryInfo, so on the shared tier the breaker's no-hint path is the expected one.
+  **Breaker** (`breaker.ts`): a real shared Gemini 429 (`/answer` or `/ocr`) with no active
+  cooldown writes `cooldown:shared:gemini` = `{until, step, hinted}`: the hint, else 60 s,
+  2, 4, 8, 15 min (cap). The step outlives the cooldown by 30 min so a repeat escalates;
+  TTL clamped 60 s–2 h. Shared `/answer` and `/ocr` read it after the region check and
+  before the rate-limit counter: while active they return the same 502 without calling
+  Gemini or counting the request, so spam can't extend it. BYOK never reads or writes it.
+  Midnight Pacific is computed with `Intl` in `America/Los_Angeles` (two-pass offset, tested
+  across the 2026-11-01 and 2027-03-14 changes). **No quota refund** on shared failures:
+  deliberately omitted (the planned section 4); revisit only with evidence that 429s spend
+  real users' daily allowance.
+  **Client** (`retryTiming.ts`): the wait is fixed at response arrival from this browser's
+  clock (`retryAfterSeconds` preferred over `resetAt`, so server clock skew doesn't
+  matter). A per-second ticker only for waits ≤ 15 min, rendered outside the live region and
+  `aria-hidden`; the absolute time ("Try again at 4:32 AM", "PocketRAG will try Google
+  again at …", "midnight Pacific (12:30 PM your time)") is always visible. The live region
+  changes twice: when the banner appears and once at zero ("You can try again now.").
+  "Try again" is `aria-disabled` with its time in the label until zero; "Use your own key"
+  stays on every shared-tier banner. Paused while the tab is hidden, recomputed on show.
+  Restored (earlier-session) failures never show a timer (`retryAfterSeconds` isn't
+  persisted). These time-bearing sentences are the one place the client composes copy
+  (only the browser knows the user's zone) — from numeric fields, never from `code`; the
+  'exhausted' kind replaces the Worker's message. OCR shows absolute times in the
+  document's status and never offers an own key.
 
 ---
 
@@ -676,14 +735,12 @@ directly reachable from here now.
 ---
 
 ## Known Technical Debt
-- [ ] **KV errors fail closed.** `checkRateLimit` (`rateLimit.ts:48`, `:53`) awaits
-      `kv.get`/`kv.put` with no try/catch, and every handler awaits it directly, so a KV
-      failure — including the Workers Free plan's 1,000 writes/day once spent — throws out
-      of `fetch`: the runtime answers 500 with no CORS headers and the browser sees a
-      network error. Today each allowed `/answer`, `/models` or `/ocr` writes 1 key (a
-      refused one, 0); a failure that alerts adds up to 1 more (`discord.ts`
-      `shouldNotify`, inside `waitUntil`, so its throw doesn't reach the response). Raised
-      in Phase 3b Step 0; Step D (which adds breaker writes) waits on the decision.
+- [x] ~~**KV errors fail closed.**~~ Resolved in Phase 3c: every KV call fails open (see
+      Key Architectural Decisions, "KV fails open"). Remaining ceiling: the in-memory
+      fallback limiter is per isolate, so exact limits need a Durable Object (TODO.md).
+- [ ] Per-IP counters and the breaker are KV get-then-put (not atomic, eventually
+      consistent ~60 s across locations). A Durable Object per bucket would make both
+      exact; not needed at current traffic.
 - [x] ~~`embedding.worker.ts` bundles onnxruntime-web's WASM runtime (22.47 MiB)~~ —
       resolved in Step C: that file was emitted into `dist/` but never fetched
       (transformers.js loads ORT from jsDelivr), and the extern-wasm resolve condition

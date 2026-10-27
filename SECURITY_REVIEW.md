@@ -593,6 +593,39 @@ simulated only; navigations and WebRTC outside CSP; history plaintext at rest.
 
 ---
 
+## 10. KV fail-open, the shared-tier breaker, and retry timing (Phase 3c, 2026-10-27)
+
+- **Decision:** on the Workers Free plan (1,000 KV writes/day, assumed — the plan isn't
+  readable with wrangler's token), a KV error now means **allow**. Before, it threw out of
+  `fetch` and the runtime returned a CORS-less 500 — every user, shared or BYOK, blocked
+  for the rest of the UTC day once the write cap was spent.
+- **What fail-open costs.** While KV is failing, the per-IP daily limits are enforced only
+  by a per-isolate in-memory counter. Cloudflare spreads traffic over many short-lived
+  isolates, so an abuser hitting many isolates (or simply waiting for isolate churn) gets
+  well past 50 shared answers/day per IP. Exposure: the shared Gemini key's own quota —
+  Google's free-tier limits still cap the total, so the worst case is the shared tier
+  being used up for everyone until midnight Pacific (which the breaker then reports
+  honestly), not an unbounded bill (unpaid key). BYOK abuse spends the abuser's own key.
+  The one-per-hour-per-isolate Discord alert and the `kv_call_failed` log lines make the
+  condition visible. The KV write cap is also self-healing: it resets at 00:00 UTC.
+- **Abuse surface of the breaker.** Requests that hit an active cooldown never call Gemini
+  and never write KV (one read each), so they can't extend it, and the cooldown can only
+  be written by a real Gemini 429. A client can't set or clear it. Reads are 100,000/day
+  on Free; a spammer burning reads would trip fail-open (allow), not lock users out.
+  The cooldown is global for the shared tier: one heavy user can earn everyone a 60 s–15
+  min pause, but only by actually exhausting Gemini's quota, which would block everyone
+  anyway. KV eventual consistency (~60 s) means a few extra 429s in other colos, not a leak.
+- **Hint parsing** takes only a number from provider data: strict regexes, rounding,
+  clamp 1–3600, and only `{seconds, source}` leaves the parser. The scrub and echo guard
+  on the message are untouched (test: a key inside RetryInfo/Retry-After never reaches the
+  hint or the message).
+- **Safety net:** any uncaught exception returns JSON 500 with CORS and fixed copy; the log
+  line carries no error text (an error can quote a request body or key).
+- **Future fix:** a Durable Object per counter (and for the breaker) gives exact, atomic
+  limits independent of KV's write cap and consistency. Logged in TODO.md.
+
+---
+
 ## Summary
 
 | # | Area | Verdict | Action |
@@ -605,6 +638,7 @@ simulated only; navigations and WebRTC outside CSP; history plaintext at rest.
 | 5 | CORS & origin validation | PASS | none |
 | 6 | Client-supplied data reaching a provider without revalidation | PASS | none |
 | 7 | Content-Security-Policy & security headers (Step C) | **ENFORCED — PASS, with listed gaps** | production `8c992a01`; ORT bytes not integrity-checked, Safari unverified, Firefox worker reports unobservable, no production violation collection |
+| 10 | KV fail-open, shared-tier breaker, retry timing (Phase 3c, Worker `06d7917b`) | **PASS, with listed gaps** | KV errors allow; per-isolate fallback limiter is weak (a floor, not a quota); breaker can't be extended by spam; hints are numbers only; Durable Objects are the exact fix |
 | 9 | Shared tier region restriction (EEA/CH/UK, Gemini terms) | **PASS, with listed gaps** | Worker `6beeb4b6`: 403 `region_restricted` before KV/provider, no logging of country/IP; can't see through VPNs/proxies, trusts geo-IP, fails open on missing/`XX`/`T1` |
 | 8 | Egress ledger visibility, chat history at rest (Phase 1, 2a, 2b, 2c) | **PASS, with listed gaps** | Worker echo live (`483afdc9`); history + Receipts UI in production (`785e99d2`, rollback `8c992a01`); every observed request reconciled to a ledger row on Chromium and Firefox; one real CORS preflight observed (CDP, Chromium) and paired with its POST, not recorded in the ledger by design; navigations/WebRTC outside CSP; history plaintext at rest; Safari unverified |
 

@@ -68,7 +68,10 @@ provider error text; the UI shows it verbatim with a per-code action (Step B). 6
 
 - **The UI shows the Worker's `error` string verbatim and uses `code` only to pick an
   action** (`failureAction()` in `src/lib/apiError.ts`). Never branch copy on `code`
-  client-side, and never render provider text — the Worker owns the wording.
+  client-side, and never render provider text — the Worker owns the wording. One
+  exception (Step D): time-bearing sentences are composed in `src/lib/retryTiming.ts` from
+  the numeric `retryAfterSeconds`/`resetAt` only, because only the browser knows the
+  user's time zone.
 - **Adding a `FailureCode` means editing BOTH** `worker/src/failureCodes.ts` and the
   copy in `src/lib/apiError.ts` (plus a `failureAction` case). The frontend never
   imports Worker code; `src/lib/failureCodes.test.ts` fails if the two drift.
@@ -129,6 +132,17 @@ provider error text; the UI shows it verbatim with a per-code action (Step B). 6
 - **e2e: keep the live `/models` check in its own route-free tab.** On the long-lived,
   route-mocked main page that real request intermittently never completed in Chromium
   (in-flight in the app's own log for 30s+; curl answered in ~1s).
+- **Never invent a timer** (Step D). The Worker sends `retryAfterSeconds`/`resetAt` only
+  when a real number backs them (our bucket's reset, a provider hint, the breaker's
+  cooldown); no field means no countdown, client-side too. Restored failures never show
+  one. Only a real shared Gemini 429 with no active cooldown writes the breaker; BYOK
+  never reads or writes it. Every breaker TTL is capped.
+- **KV errors never throw** (Phase 3c). Every KV `get`/`put` — rate limits, Discord slots,
+  the breaker, anything new — sits in try/catch, reports via the `KvErrorReporter`, and
+  means "allow" (fallback limiter / no cooldown). Log lines about it stay number-only.
+- **No uncaught exception reaches the browser without CORS.** The `fetch` handler's
+  try/catch returns a JSON 500 with `corsHeaders(origin)` and fixed copy; keep new routes
+  inside `route()`. Never log `err`, request bodies, or keys from that net.
 - **A shared-tier request must pass the region check before anything else** (Phase 3b).
   In `worker/src/index.ts`, `isRegionRestricted(country)` runs right after body
   validation — before `checkRateLimit`, any other KV access, logging, Discord, or a
@@ -3934,6 +3948,66 @@ status. The in-app line omits "and the answers", which the landing line includes
 the prompt's wording verbatim). A restricted-country 403 was never observed live (no
 EEA egress here); it's covered by unit and mocked e2e tests only. The commits are not
 pushed.
+
+### Session 38 — 2026-10-27 (Claude Code)
+**Goal:** Phase 3c — push deploy 1, then KV fail-open (decided: Free plan, fail open),
+the disclosure wording fix, and Step D; production deploy with rollback gates.
+
+**Pushed:** `773d7d1`, `5090bb1`, `e70d23c`, `69e7de4` to `origin/master` first.
+
+**Built:** `7993714` Worker KV fail-open: every KV get/put caught (rate limits, Discord
+slots), per-isolate in-memory fallback limiter (same limits, 10,000 entries, oldest
+evicted, never double-counts), Discord suppression falls back to memory, number-only
+`kv_call_failed` warn line, ≤ 1 KV-failure Discord alert per isolate per hour (no KV),
+fetch handler wrapped → JSON 500 with CORS + fixed copy. `10d8102` disclosure line adds
+"and the answers". `1a9c00d` Worker Step D: `parseRetryHint`, breaker
+(`cooldown:shared:gemini`, 60 s → 15 min cap, TTL ≤ 2 h), short-circuit on shared
+`/answer` + `/ocr`, `retryAfterSeconds`/`resetAt` contract, hint fields in
+`logProviderError`, fixtures (Gemini 429 RECONSTRUCTED, RetryInfo DOCUMENTED, OpenAI
+insufficient_quota, Anthropic ± retry-after, OpenRouter 402). `5316505` client Step D
+(`retryTiming.ts`, `useRetryCountdown.ts`, QueryPanel banner, OCR status) + step-b
+`page.clock` scenarios. No quota refund (deliberately omitted).
+
+**Verification:** frontend 303/303 (was 263), Worker 534/534 (was 412); `tsc` and
+`oxlint` exit 0 both sides, run as real binaries (`node node_modules/typescript/bin/tsc`,
+`node_modules/.bin/oxlint`) — under rtk, `npm run lint` reports exit 1 and `npx tsc`
+once printed errors while reporting exit 0. Build + size guard pass. JS `index-O96w5yQI.js`
+→ `index-BbDHe76s.js`; CSS `index-iACYgoQC.css` → `index-D95y7U_R.css` (new utilities:
+`aria-disabled:*`, `flex-wrap gap-2` on the banner). `git diff 6158529 -- public/_headers`
+empty. step-b Chromium `exit=0` (26 scenarios, `failures: []`; breaker live region changed
+exactly twice, ticker 2:00 → 1:00 after 60 s, enabled at zero, restored tab no timer, DST
+copy 12:30 PM / 1:30 PM IST). step-c Chromium and Firefox `exit=0`, 15/15 flows, 25/25
+matched, 0 unexpected violations. Screenshots
+`~/NewProjects/pocketrag-shots/region/disclosure-*-v2.png`.
+
+**Deployed:** Worker `6beeb4b6` → **`06d7917b-bbcb-448b-bedb-919743bcf6b1`**; Pages
+`f3f4aa6a` → **`75687228-8647-4083-9e92-03a2d1969ecf`** (Production, `main`, source
+`5316505`). Rollback:
+```bash
+cd worker && npx wrangler rollback 6beeb4b6-275b-4a0b-9030-8e7f62723400
+npx wrangler whoami >/dev/null
+TOKEN=$(grep -oP '^oauth_token = "\K[^"]+' ~/.config/.wrangler/config/default.toml)
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+  https://api.cloudflare.com/client/v4/accounts/da55acd99cee5a43df7d397dd80af4e3/pages/projects/pocketrag/deployments/f3f4aa6a-558b-41ac-b657-5edb5e32de30/rollback
+```
+
+**Production check** (no shared answer call): Worker preflight 200 with the Pages origin,
+invalid body 400, BYOK `/models` fake key → 502 `key_rejected` (no Retry-After header).
+Pages CSP byte-identical (446 B), other headers present, index serves the new bundles.
+Smoke (Chromium, `/answer` hard-blocked, 0 Worker POSTs): landing lines served, the
+disclosure line with the new wording shown on shared and hidden on own key, PDF → 1
+chunk, Delete everything → 0 documents, 0 CSP reports/events, 0 page errors.
+
+**Deviations:** OCR's rate-limited copy is its own sentence ("OCR runs on the free shared
+tier, which is at capacity right now.") with absolute times appended, and never offers an
+own key. The 'exhausted' kind (breaker at cap, no hint) sends `resetAt` only, and its Try
+again stays disabled until midnight Pacific. A hinted shared 429 reads "PocketRAG will try
+Google again at …" (the breaker holds for the hint). Our own 429 now also gets a timed Try
+again + "Use your own key" on the shared tier. The countdown is unit-tested through
+`startRetryCountdown` (no React testing library in the repo; adding one needs approval),
+and through the real hook in step-b. `retryHintSource` is a fixed enum string beside the
+number, not a numeric code. Unverified live: the breaker against a real Gemini 429, a real
+RetryInfo, a real KV outage, and the EEA 403.
 
 ---
 
