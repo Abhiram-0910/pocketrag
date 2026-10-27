@@ -176,8 +176,8 @@ export function ByokPanel({ onChange, ref }: ByokPanelProps) {
           "Unpaid Services"); hidden once the user switches to their own key. */}
       {!useOwnKey && (
         <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
-          Free shared tier: Google uses what's sent to improve its products and human reviewers may read it. Use your
-          own paid key to avoid that.
+          Free shared tier: Google uses what's sent and the answers to improve its products, and human reviewers may
+          read them. Use your own paid key to avoid that.
         </p>
       )}
 

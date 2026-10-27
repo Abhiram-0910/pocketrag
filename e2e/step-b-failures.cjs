@@ -43,7 +43,7 @@ const COPY = {
 }
 // ByokPanel's shared-tier line, shown only while the shared tier is active.
 const DISCLOSURE =
-  "Free shared tier: Google uses what's sent to improve its products and human reviewers may read it. Use your own paid key to avoid that."
+  "Free shared tier: Google uses what's sent and the answers to improve its products, and human reviewers may read them. Use your own paid key to avoid that."
 
 
 // A one-page text PDF, built here so no binary fixture lives in the repo.

@@ -615,8 +615,9 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
   use-own-key; `errorTaxonomy` → `region-restricted`. Limits: geo-IP, not proof of
   location — a VPN, or a wrong geo-IP entry, gets past it or wrongly trips it.
   `ByokPanel` shows one line while the shared tier is active ("Free shared tier: Google
-  uses what's sent to improve its products and human reviewers may read it. Use your own
-  paid key to avoid that."), hidden once "Use your own API key" is on. Landing + README
+  uses what's sent and the answers to improve its products, and human reviewers may read
+  them. Use your own paid key to avoid that." — Phase 3c added "and the answers" so it
+  matches the landing line's meaning), hidden once "Use your own API key" is on. Landing + README
   now say the page image goes only if diagram images are on (default off), and that the
   shared tier isn't available in those regions.
 
