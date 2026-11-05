@@ -664,22 +664,42 @@ async function stepD(browser, pageErrors) {
     ticker: false,
   })
 
-  // E. Breaker at its cap, no hint: the escalated copy, before the DST change.
-  await askD('escalated (cap, no hint), before DST change', err(502, { error: COPY.sharedRl, code: 'provider_rate_limited', source: 'shared', resetAt: MIDNIGHT_PDT }), {
-    text: 'The free shared tier looks used up for today.',
-    contains: ['The free shared tier looks used up for today. It normally resets at midnight Pacific (12:30 PM your time). Or use your own key.'],
-    buttons: ['Try again at TIME', 'Use your own key'],
-    ticker: false,
-  })
+  // E. Breaker at its cap, no hint: the escalated copy, before the DST change. The button
+  // waits only for the breaker's own cooldown (cooldownSeconds), never for midnight Pacific.
+  {
+    const name = 'escalated (cap, no hint), before DST change'
+    const { row, banner } = await askD(
+      name,
+      err(502, { error: COPY.sharedRl, code: 'provider_rate_limited', source: 'shared', resetAt: MIDNIGHT_PDT, cooldownSeconds: 900 }),
+      {
+        text: 'The free shared tier looks used up for today.',
+        contains: ['The free shared tier looks used up for today. It normally resets at midnight Pacific (12:30 PM your time). Or use your own key.'],
+        buttons: ['Try again at TIME', 'Use your own key'],
+        ticker: true,
+      },
+    )
+    check(row.ariaDisabled === 'true', `${name}: Try again not aria-disabled during the cooldown`)
+    check(!row.buttons[0].includes('12:30'), `${name}: button waits for midnight: ${row.buttons[0]}`)
+    await page.clock.fastForward(901_000)
+    await page.getByText('You can try again now.').waitFor({ timeout: 5000 })
+    row.buttonsAtZero = await banner.locator('button').allInnerTexts()
+    row.ariaDisabledAtZero = await banner.locator('button').first().getAttribute('aria-disabled')
+    check(row.buttonsAtZero[0] === 'Try again' && row.ariaDisabledAtZero === null, `${name}: not enabled after the 15-min cooldown ${JSON.stringify(row.buttonsAtZero)}`)
+  }
 
-  // F. …and after it (PST): midnight Pacific is an hour later in UTC.
+  // F. …and after it (PST): midnight Pacific is an hour later in UTC. An older Worker (no
+  // cooldownSeconds) → Try again enabled at once (a retry during the cooldown is free).
   await page.clock.setSystemTime(new Date('2026-11-01T12:00:00.000Z'))
-  await askD('escalated, after DST change', err(502, { error: COPY.sharedRl, code: 'provider_rate_limited', source: 'shared', resetAt: MIDNIGHT_PST }), {
-    text: 'The free shared tier looks used up for today.',
-    contains: ['It normally resets at midnight Pacific (1:30 PM your time). Or use your own key.'],
-    buttons: ['Try again at TIME', 'Use your own key'],
-    ticker: false,
-  })
+  {
+    const name = 'escalated, after DST change, no cooldownSeconds'
+    const { row } = await askD(name, err(502, { error: COPY.sharedRl, code: 'provider_rate_limited', source: 'shared', resetAt: MIDNIGHT_PST }), {
+      text: 'The free shared tier looks used up for today.',
+      contains: ['It normally resets at midnight Pacific (1:30 PM your time). Or use your own key.'],
+      buttons: ['Try again', 'Use your own key'],
+      ticker: false,
+    })
+    check(row.ariaDisabled === null, `${name}: Try again disabled with no cooldown known`)
+  }
 
   // G. Own key: a provider hint ticks with no own-key button; no hint → no timer.
   await page.getByLabel('Use your own API key').check()

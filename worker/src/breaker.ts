@@ -27,6 +27,10 @@ export interface Cooldown {
 export interface RetryFields {
   retryAfterSeconds?: number
   resetAt?: string
+  // At the cap only: seconds until the breaker's own cooldown ends. resetAt (midnight
+  // Pacific) is a hedged upper bound, not a timer; a retry before this is free anyway
+  // (answered from the breaker, no Gemini call), so the client gates its button on this.
+  cooldownSeconds?: number
 }
 
 function parseCooldown(raw: string | null, now: number): Cooldown | null {
@@ -120,12 +124,13 @@ export function nextMidnightIn(timeZone: string, now = Date.now()): Date {
  * What a shared rate-limited 502 tells the client, by cooldown kind:
  *   hinted          → retryAfterSeconds                (Gemini said when)
  *   no hint, < cap  → retryAfterSeconds + resetAt      (our probe time + the "if" bound)
- *   no hint, at cap → resetAt                          ("looks used up for today")
- * resetAt is the next midnight Pacific.
+ *   no hint, at cap → resetAt + cooldownSeconds        ("looks used up for today")
+ * resetAt is the next midnight Pacific. cooldownSeconds is additive (Phase 5a): older
+ * clients ignore it, and it keeps the cap's absence of retryAfterSeconds intact.
  */
 export function cooldownFields(c: Cooldown, now = Date.now()): RetryFields {
   const retryAfterSeconds = Math.min(3600, Math.max(1, Math.ceil((c.until - now) / 1000)))
   if (c.hinted) return { retryAfterSeconds }
   const resetAt = nextMidnightIn(QUOTA_TIME_ZONE, now).toISOString()
-  return c.step >= CAP_STEP ? { resetAt } : { retryAfterSeconds, resetAt }
+  return c.step >= CAP_STEP ? { resetAt, cooldownSeconds: retryAfterSeconds } : { retryAfterSeconds, resetAt }
 }

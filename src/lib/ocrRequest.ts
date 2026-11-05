@@ -18,6 +18,7 @@ export type OcrAttemptResult =
       code?: FailureCode
       source?: FailureSource
       retryAfterSeconds?: number
+      cooldownSeconds?: number
     }
 
 function isAbortError(err: unknown): boolean {
@@ -47,6 +48,7 @@ export async function attemptOcr(
         code: err.code,
         source: err.source,
         retryAfterSeconds: err.retryAfterSeconds,
+        cooldownSeconds: err.cooldownSeconds,
       }
     }
     return { outcome: 'error', message: err instanceof Error ? err.message : 'unknown error' }

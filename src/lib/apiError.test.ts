@@ -99,6 +99,17 @@ describe('parseWorkerErrorResponse', () => {
     expect(ours.source).toBeUndefined()
   })
 
+  it('reads cooldownSeconds only on a shared rate-limited 502, in range (Phase 5a cap)', async () => {
+    const body = { error: SHARED_RATE_LIMITED, code: 'provider_rate_limited', resetAt: RESET_AT, cooldownSeconds: 900 }
+    expect((await parseWorkerErrorResponse(jsonResponse(502, { ...body, source: 'shared' }), 'f')).cooldownSeconds).toBe(900)
+    expect((await parseWorkerErrorResponse(jsonResponse(502, { ...body, source: 'own' }), 'f')).cooldownSeconds).toBeUndefined()
+    expect((await parseWorkerErrorResponse(jsonResponse(429, { ...body, source: 'shared' }), 'f')).cooldownSeconds).toBeUndefined()
+    for (const bad of [0, 3601, 1.5, '900']) {
+      const res = jsonResponse(502, { ...body, source: 'shared', cooldownSeconds: bad })
+      expect((await parseWorkerErrorResponse(res, 'f')).cooldownSeconds).toBeUndefined()
+    }
+  })
+
   it('falls back to the given message for a non-JSON body', async () => {
     const err = await parseWorkerErrorResponse(new Response('<html>Bad Gateway</html>', { status: 502 }), 'fallback')
     expect(err).toMatchObject({ status: 502, message: 'fallback' })

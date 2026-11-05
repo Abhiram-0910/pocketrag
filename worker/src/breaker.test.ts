@@ -143,9 +143,10 @@ describe('cooldownFields', () => {
       resetAt: '2026-11-01T07:00:00.000Z',
     })
   })
-  it('no hint at the cap → resetAt only ("looks used up for today")', () => {
+  it('no hint at the cap → resetAt + the breaker\'s own cooldownSeconds, no retryAfterSeconds', () => {
     expect(cooldownFields({ until: now + 900_000, step: CAP_STEP, hinted: false }, now)).toEqual({
       resetAt: '2026-11-01T07:00:00.000Z',
+      cooldownSeconds: 900,
     })
   })
   it('rounds up and never sends 0', () => {

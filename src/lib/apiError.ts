@@ -14,6 +14,8 @@ export class WorkerRequestError extends Error {
   source?: FailureSource
   // Whole seconds until a retry makes sense, when the Worker knows (Step D). Absent = unknown.
   retryAfterSeconds?: number
+  // Shared breaker at its cap only: seconds until its cooldown ends (Phase 5a). Absent = older Worker.
+  cooldownSeconds?: number
 
   constructor(
     message: string,
@@ -22,6 +24,7 @@ export class WorkerRequestError extends Error {
     code?: FailureCode,
     source?: FailureSource,
     retryAfterSeconds?: number,
+    cooldownSeconds?: number,
   ) {
     super(message)
     this.name = 'WorkerRequestError'
@@ -30,6 +33,7 @@ export class WorkerRequestError extends Error {
     this.code = code
     this.source = source
     this.retryAfterSeconds = retryAfterSeconds
+    this.cooldownSeconds = cooldownSeconds
   }
 }
 
@@ -62,6 +66,7 @@ export async function parseWorkerErrorResponse(res: Response, fallbackMessage: s
     code?: unknown
     source?: unknown
     retryAfterSeconds?: unknown
+    cooldownSeconds?: unknown
   } | null
   const message = typeof data?.error === 'string' ? data.error : fallbackMessage
   const rawCode = isFailureCode(data?.code) ? data.code : undefined
@@ -79,7 +84,9 @@ export async function parseWorkerErrorResponse(res: Response, fallbackMessage: s
     : providerRateLimited
       ? boundedSeconds(data?.retryAfterSeconds, 1, MAX_PROVIDER_RETRY_AFTER)
       : undefined
-  return new WorkerRequestError(message, res.status, resetAt, code, source, retryAfterSeconds)
+  const cooldownSeconds =
+    providerRateLimited && source === 'shared' ? boundedSeconds(data?.cooldownSeconds, 1, MAX_PROVIDER_RETRY_AFTER) : undefined
+  return new WorkerRequestError(message, res.status, resetAt, code, source, retryAfterSeconds, cooldownSeconds)
 }
 
 export type FailureAction = 'check-key' | 'use-own-key' | 'choose-model' | 'retry'

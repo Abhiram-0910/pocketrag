@@ -1630,12 +1630,12 @@ describe('Step D — retry fields, the shared Gemini breaker, our own 429', () =
     expect(body.resetAt).toBeUndefined()
   })
 
-  it('escalates to the cap and then sends resetAt only (used up for today)', async () => {
+  it('escalates to the cap and then sends resetAt + cooldownSeconds (used up for today)', async () => {
     quiet()
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-11-01T12:00:00.000Z'))
     const { env } = storeKV()
-    stubProvider(gemini429())
+    const { providerCalls } = stubProvider(gemini429())
     const seen: Record<string, unknown>[] = []
     for (const wait of [60, 120, 240, 480, 900]) {
       seen.push((await (await worker.fetch(answerRequest(validBody), env, makeCtx())).json()) as Record<string, unknown>)
@@ -1648,7 +1648,17 @@ describe('Step D — retry fields, the shared Gemini breaker, our own 429', () =
       code: 'provider_rate_limited',
       source: 'shared',
       resetAt: '2026-11-02T08:00:00.000Z',
+      cooldownSeconds: 900,
     })
+    // A retry inside the cap's cooldown is answered by the breaker (no Gemini call) and
+    // carries the remaining cooldown, not midnight.
+    // The loop left the clock just past the cap's 900 s; step back to 300 s before its end.
+    vi.setSystemTime(Date.now() - 300_001)
+    const callsBefore = providerCalls()
+    const during = (await (await worker.fetch(answerRequest(validBody), env, makeCtx())).json()) as Record<string, unknown>
+    expect(during.cooldownSeconds).toBe(300)
+    expect(during.retryAfterSeconds).toBeUndefined()
+    expect(providerCalls()).toBe(callsBefore)
   })
 
   it('/ocr: a Gemini 429 trips the breaker, and /ocr short-circuits on it', async () => {

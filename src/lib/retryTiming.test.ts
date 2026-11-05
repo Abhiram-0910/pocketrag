@@ -85,11 +85,18 @@ describe('retryTimingFor', () => {
       tick: true,
     })
     expect(retryTimingFor({ ...base, retryAfterSeconds: 37 }, T)).toMatchObject({ kind: 'provider', shared: true })
-    expect(retryTimingFor({ ...base, resetAt: MIDNIGHT }, T)).toMatchObject({
+    expect(retryTimingFor({ ...base, resetAt: MIDNIGHT, cooldownSeconds: 900 }, T)).toMatchObject({
       kind: 'exhausted',
-      retryAt: Date.parse(MIDNIGHT),
-      tick: false, // 8 h away → absolute time only
+      retryAt: T + 900_000, // the breaker's cooldown, not midnight Pacific
+      quotaResetAt: Date.parse(MIDNIGHT),
+      tick: true,
     })
+  })
+
+  it('exhausted never waits for midnight: no cooldownSeconds (older Worker) → retry enabled now', () => {
+    const t = retryTimingFor({ status: 502, code: 'provider_rate_limited', source: 'shared', resetAt: MIDNIGHT }, T)
+    expect(t).toMatchObject({ kind: 'exhausted', retryAt: T, quotaResetAt: Date.parse(MIDNIGHT) })
+    expect(t!.retryAt).toBeLessThan(Date.parse(MIDNIGHT))
   })
 
   it('unknown wait → no timer at all', () => {

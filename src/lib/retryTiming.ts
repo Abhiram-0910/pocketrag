@@ -12,7 +12,7 @@ export type RetryTimingKind =
   | 'ours' // our own per-IP 429 (UTC midnight)
   | 'provider' // the provider said when (hint), shared or own key
   | 'breaker' // shared tier, no hint: our breaker's next probe, plus the midnight-Pacific bound
-  | 'exhausted' // shared tier, breaker at its cap with no hint: "looks used up for today"
+  | 'exhausted' // shared tier, breaker at its cap with no hint: "looks used up for today" (retryAt = cooldown end)
 
 export interface RetryTiming {
   kind: RetryTimingKind
@@ -28,6 +28,7 @@ export interface RetryFields {
   source?: FailureSource
   retryAfterSeconds?: number
   resetAt?: string
+  cooldownSeconds?: number
 }
 
 /** Fixed at response arrival: retryAfterSeconds counts from `arrivedAt`, not the server clock. */
@@ -49,7 +50,13 @@ export function retryTimingFor(f: RetryFields, arrivedAt: number): RetryTiming |
   if (f.source === 'shared') {
     if (after !== undefined && reset !== undefined) return make('breaker', after, reset)
     if (after !== undefined) return make('provider', after)
-    if (reset !== undefined) return make('exhausted', reset, reset)
+    // At the cap the button waits only for the breaker's own cooldown: midnight Pacific is a
+    // hedged bound for the copy, never a timer, and a retry during the cooldown is free (the
+    // breaker answers, no Gemini call). No cooldownSeconds (older Worker) → enabled now.
+    if (reset !== undefined) {
+      const cooldownEnd = f.cooldownSeconds === undefined ? arrivedAt : arrivedAt + f.cooldownSeconds * 1000
+      return make('exhausted', cooldownEnd, reset)
+    }
     return null
   }
   return after === undefined ? null : make('provider', after)
