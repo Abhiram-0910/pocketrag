@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, ReactNode } from 'react'
+import type { ButtonHTMLAttributes, ReactNode, Ref } from 'react'
 import { CircleNotch } from '@phosphor-icons/react'
 
 type ButtonVariant = 'primary' | 'secondary' | 'destructive'
@@ -7,6 +7,7 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant
   loading?: boolean
   children: ReactNode
+  ref?: Ref<HTMLButtonElement>
 }
 
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {

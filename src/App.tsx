@@ -21,7 +21,7 @@ function App() {
   // Matches ByokPanel's default (unchecked) state — the shared key until the user
   // opts into BYOK and completes key entry.
   const [keyConfig, setKeyConfig] = useState<KeyConfig | null>({ keySource: 'shared' })
-  // The key and model list live only in ByokPanel's local state (never shared state), so
+  // The key and chosen model live only in ByokPanel's local state (never shared state), so
   // QueryPanel's answer-failure actions reach them through this handle.
   const byokPanel = useRef<ByokPanelHandle>(null)
   // Milestone 9: the tab only gates which upload/list UI is shown — QueryPanel below

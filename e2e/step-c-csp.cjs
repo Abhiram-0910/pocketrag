@@ -150,7 +150,7 @@ async function main() {
         ...(groundedAnswers ? { searchEntryPointHtml: WIDGET } : {}),
       })
     }
-    if (req.url().endsWith('/models')) return json({ models: [{ id: 'model-a', displayName: 'model-a' }] })
+    if (req.url().endsWith('/models')) return json({ models: [{ id: 'gpt-5-mini', displayName: 'gpt-5-mini' }] })
     if (req.url().endsWith('/ocr')) return json({ text: 'Transcribed notes: the Krebs cycle runs in the mitochondrial matrix.' })
     return route.abort()
   })
@@ -245,8 +245,9 @@ async function main() {
     await page.getByLabel('Use your own API key').check()
     await page.getByLabel('Provider', { exact: true }).selectOption('openai')
     await page.getByLabel('OpenAI API key').fill('sk-fake-stepc-0000000000')
-    await page.getByRole('button', { name: 'Fetch models' }).click()
-    await page.getByLabel('Model', { exact: true }).waitFor()
+    await page.getByRole('button', { name: 'Find a model' }).click()
+    await page.getByRole('button', { name: 'Use this model' }).click()
+    await page.getByRole('button', { name: 'Change', exact: true }).waitFor()
     await page.getByLabel('Use your own API key').uncheck()
   })
   await flow('Notes OCR: image + PDF (mocked)', async () => {

@@ -134,11 +134,18 @@ async function main() {
     return route.fulfill({ status: reply.status, headers: { ...CORS, 'Content-Type': 'application/json' }, body: JSON.stringify(reply.body) })
   }
   await page.route(`${API}/answer`, routeAnswer)
-  const MODELS = { models: [{ id: 'model-a', displayName: 'model-a' }, { id: 'model-b', displayName: 'model-b' }] }
+  // Realistic per-provider lists, junk included; the picker (src/lib/modelLadder.ts) ranks them.
+  const MODEL_LISTS = {
+    openai: ['gpt-5-nano', 'gpt-5-mini', 'gpt-5.1', 'gpt-5.1-codex-mini', 'gpt-4o-mini-search-preview', 'o3', 'gpt-4o-2024-08-06'],
+    anthropic: ['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5', 'claude-sonnet-4-5-20250929', 'claude-fable-5-1'],
+    grok: ['grok-2-image-1212', 'grok-code-fast-1'], // nothing qualifies → manual entry
+  }
   // Page-level (only this tab fetches models), so the live check below can unroute it.
   await page.route(`${API}/models`, (route) => {
     if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS })
-    return route.fulfill({ status: 200, headers: { ...CORS, 'Content-Type': 'application/json' }, body: JSON.stringify(MODELS) })
+    const { provider } = JSON.parse(route.request().postData() || '{}')
+    const models = (MODEL_LISTS[provider] ?? []).map((id) => ({ id, displayName: id }))
+    return route.fulfill({ status: 200, headers: { ...CORS, 'Content-Type': 'application/json' }, body: JSON.stringify({ models }) })
   })
 
   await context.addInitScript(() => localStorage.setItem('pocketrag:has-visited-app', 'true'))
@@ -151,7 +158,20 @@ async function main() {
 
   const byokToggle = page.getByLabel('Use your own API key')
   const search = page.getByRole('button', { name: 'Search' })
-  const modelSelect = page.getByLabel('Model', { exact: true })
+  // The picker's sentence (always-mounted live region) and its buttons.
+  const proposal = page.locator('p[aria-live="polite"]').filter({ hasText: /We'll use|Using |Couldn't pick/ })
+  const proposalText = async () => (await proposal.innerText()).replace(/\s+/g, ' ').trim()
+  const findModel = () => page.getByRole('button', { name: 'Find a model' }).click()
+  const useModel = page.getByRole('button', { name: 'Use this model' })
+  const higher = page.getByRole('button', { name: 'Use a higher model' })
+  const lower = page.getByRole('button', { name: 'Use a lower model' })
+  const changeModel = page.getByRole('button', { name: 'Change', exact: true })
+  // The question box itself (the Search button is also disabled by an empty question).
+  // Polls briefly: the key config reaches QueryPanel through an effect, a tick after the click.
+  const questionDisabled = (want = true) =>
+    page
+      .waitForFunction((w) => document.querySelector('form input[type="text"]').disabled === w, want, { timeout: 3000 })
+      .then(() => want, () => !want)
   const searchDisabled = () => search.isDisabled()
   const focused = () =>
     page.evaluate(() => {
@@ -193,6 +213,8 @@ async function main() {
     await page.evaluate(() => document.querySelectorAll('[aria-live]').forEach((el) => el.setAttribute('data-pre', '1')))
     await queryInput.fill(`What does the mitochondrion do? (${name})`)
     await search.click()
+    // The previous banner may carry the same text; wait for this question's request first.
+    for (let i = 0; i < 100 && answerCalls === before; i++) await page.waitForTimeout(100)
     const banner = page.locator('[aria-live="polite"] p', { hasText: expected.text.slice(0, 30) }).first()
     await banner.waitFor({ timeout: 120_000 })
     const text = (await banner.innerText()).replace(/\s+/g, ' ').trim()
@@ -321,23 +343,79 @@ async function main() {
   })
   await ask('old Worker body, no code', err(502, { error: COPY.exp }), { text: COPY.exp })
 
-  // ---- BYOK OpenAI (mocked /models + /answer) ----
+  // ---- BYOK OpenAI (mocked /models + /answer): the automatic model picker ----
   await byokToggle.check()
   await page.getByLabel('Provider', { exact: true }).selectOption('openai')
   const keyInput = page.getByLabel('OpenAI API key')
   await keyInput.fill('sk-fake-stepb-0000000000')
-  await page.getByRole('button', { name: 'Fetch models' }).click()
-  await modelSelect.waitFor()
-  const fetchRow = {
-    scenario: 'model fetch (openai, mocked)',
-    selectedAfterFetch: await modelSelect.inputValue(),
-    placeholderText: await modelSelect.locator('option:checked').innerText(),
-    searchDisabledBeforeChoice: await searchDisabled(),
+  // Every text the picker's live region is handed, in order.
+  await page.evaluate(() => {
+    const el = document.querySelector('p[aria-live="polite"]')
+    window.__pickerLive = []
+    new MutationObserver(() => window.__pickerLive.push(el.textContent)).observe(el, { childList: true, characterData: true, subtree: true })
+  })
+  await findModel()
+  await useModel.waitFor()
+  {
+    const row = { scenario: 'picker: propose → higher → lower → confirm (openai, mocked)' }
+    row.first = await proposalText()
+    row.focusFirst = await page.evaluate(() => document.activeElement?.textContent)
+    row.searchDisabledBeforeConfirm = await questionDisabled()
+    row.modelSelects = await page.locator('select[aria-label="Model"]').count()
+    row.optionsInPanel = await page.getByLabel('Provider', { exact: true }).locator('xpath=ancestor::div[contains(@class, "rounded border")][1]').locator('option').count()
+    check(row.first === "We'll use gpt-5-mini (Balanced) · Recommended", `picker: first proposal ${row.first}`)
+    check(row.focusFirst === 'Use this model', `picker: focus after find ${row.focusFirst}`)
+    check(row.searchDisabledBeforeConfirm, 'picker: search enabled before a model was confirmed')
+    check(row.modelSelects === 0 && row.optionsInPanel === 5, `picker: a model list is rendered (${row.modelSelects} selects, ${row.optionsInPanel} options)`)
+    check(await page.getByText('Higher models usually cost more per question.').isVisible(), 'picker: cost note missing')
+    await shot('byok-model-proposal', proposal.locator('xpath=ancestor::div[contains(@class, "rounded border")][1]'))
+    // 360px: no horizontal scroll. README_SHOTS=docs/screenshots writes the README pair.
+    for (const width of [360, 1280]) {
+      await page.setViewportSize({ width, height: 900 })
+      const panel = proposal.locator('xpath=ancestor::div[contains(@class, "rounded border")][1]')
+      await panel.scrollIntoViewIfNeeded()
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+      check(overflow <= 0, `picker ${width}px: page scrolls horizontally by ${overflow}px`)
+      row[`overflowPx${width}`] = overflow
+      if (process.env.README_SHOTS) await panel.screenshot({ path: path.join(process.env.README_SHOTS, `byok-model-proposal-${width}.png`) })
+    }
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await higher.click()
+    row.higher = await proposalText()
+    row.higherDisabledAtTop = await higher.isDisabled()
+    row.topNote = await page.getByText('This is the highest model we found for your key.').isVisible()
+    row.focusAfterHigher = await page.evaluate(() => document.activeElement?.textContent)
+    row.searchDisabledAfterHigher = await questionDisabled()
+    check(row.higher === "We'll use gpt-5.1 (Large)" && row.higherDisabledAtTop && row.topNote, `picker: top ${JSON.stringify(row)}`)
+    check(row.focusAfterHigher === 'Use this model', `picker: focus after higher on ${row.focusAfterHigher}`)
+    await lower.click()
+    await lower.click()
+    row.bottom = await proposalText()
+    row.lowerDisabledAtBottom = await lower.isDisabled()
+    row.bottomNote = await page.getByText('This is the lowest model we found for your key.').isVisible()
+    check(row.bottom === "We'll use gpt-5-nano (Light)" && row.lowerDisabledAtBottom && row.bottomNote, `picker: bottom ${JSON.stringify(row)}`)
+    // Keyboard only from here: Tab to "Use a higher model", Enter, then Enter on the focused confirm.
+    await page.keyboard.press('Tab')
+    await page.keyboard.press('Enter')
+    row.backToRecommended = await proposalText()
+    await page.keyboard.press('Enter')
+    row.confirmed = await proposalText()
+    row.focusAfterConfirm = await page.evaluate(() => document.activeElement?.textContent)
+    row.searchEnabledAfterConfirm = !(await questionDisabled(false))
+    check(row.backToRecommended === "We'll use gpt-5-mini (Balanced) · Recommended", `picker: keyboard higher ${row.backToRecommended}`)
+    check(row.confirmed === 'Using gpt-5-mini.' && row.focusAfterConfirm === 'Change' && row.searchEnabledAfterConfirm, `picker: confirm ${JSON.stringify(row)}`)
+    row.announcements = await page.evaluate(() => window.__pickerLive.filter((t, i, a) => t !== a[i - 1]))
+    const want = [
+      "We'll use gpt-5-mini (Balanced) · Recommended",
+      "We'll use gpt-5.1 (Large)",
+      "We'll use gpt-5-mini (Balanced) · Recommended",
+      "We'll use gpt-5-nano (Light)",
+      "We'll use gpt-5-mini (Balanced) · Recommended",
+      'Using gpt-5-mini.',
+    ]
+    check(JSON.stringify(row.announcements.filter(Boolean)) === JSON.stringify(want), `picker: announcements ${JSON.stringify(row.announcements)}`)
+    results.push(row)
   }
-  check(fetchRow.selectedAfterFetch === '' && fetchRow.searchDisabledBeforeChoice, 'model fetch: auto-selected a model')
-  results.push(fetchRow)
-  await shot('byok-choose-model', modelSelect.locator('xpath=ancestor::div[contains(@class, "rounded border")][1]'))
-  await modelSelect.selectOption('model-b')
 
   await ask('key_rejected', err(502, { error: COPY.key, code: 'key_rejected' }), {
     text: COPY.key,
@@ -345,24 +423,62 @@ async function main() {
     click: 'Check your key',
     focus: 'OpenAI API key',
     after: async () => {
-      const r = { modelSelectVisible: await modelSelect.isVisible(), searchDisabledAfter: await searchDisabled() }
-      // Same key, no retyping — Fetch models must still work.
+      const r = { proposalAfter: await proposal.count(), searchDisabledAfter: await questionDisabled() }
+      // Same key, no retyping — Find a model must still work.
       r.keyUnchanged = (await keyInput.inputValue()) === 'sk-fake-stepb-0000000000'
-      await page.getByRole('button', { name: 'Fetch models' }).click()
-      await modelSelect.waitFor()
-      r.refetchSameKeyWorked = await modelSelect.isVisible()
-      check(r.keyUnchanged && r.refetchSameKeyWorked && !r.modelSelectVisible, 'key_rejected: key/model reset')
-      await modelSelect.selectOption('model-b')
+      await findModel()
+      await useModel.waitFor()
+      r.refindSameKeyWorked = (await proposalText()).startsWith("We'll use gpt-5-mini")
+      check(r.keyUnchanged && r.refindSameKeyWorked && r.proposalAfter === 0 && r.searchDisabledAfter, `key_rejected: key/model reset ${JSON.stringify(r)}`)
+      await useModel.click()
       return r
     },
   })
 
+  // Model rejected → the picker reopens one rung LOWER, unconfirmed, focus on confirm.
   await ask('request_rejected', err(502, { error: COPY.req, code: 'request_rejected' }), {
     text: COPY.req,
     click: 'Choose another model',
-    focus: 'Model',
-    after: async () => ({ modelStillSelected: await modelSelect.inputValue() }),
+    focus: 'BUTTON',
+    after: async () => {
+      const r = {
+        proposalAfterReject: await proposalText(),
+        focusText: await page.evaluate(() => document.activeElement?.textContent),
+        rejectedNote: await page.getByText('The provider rejected the last request with').isVisible(),
+        searchDisabledUntilConfirm: await questionDisabled(),
+      }
+      check(r.proposalAfterReject === "We'll use gpt-5-nano (Light)" && r.focusText === 'Use this model', `request_rejected: step down ${JSON.stringify(r)}`)
+      check(r.rejectedNote && r.searchDisabledUntilConfirm, `request_rejected: note/search ${JSON.stringify(r)}`)
+      await useModel.click()
+      r.confirmedLower = await proposalText()
+      check(r.confirmedLower === 'Using gpt-5-nano.', `request_rejected: confirm ${r.confirmedLower}`)
+      return r
+    },
   })
+  // Manual entry: validated by the model-id pattern; a rejected manual model reopens the input.
+  {
+    const row = { scenario: 'picker: manual model ID' }
+    await changeModel.click()
+    await page.getByText('Enter a model ID yourself').click()
+    const manual = page.getByLabel('Model ID')
+    await manual.fill('bad id!')
+    await page.getByRole('button', { name: 'Use this ID' }).click()
+    row.invalidError = await page.getByText('A model ID is 1-128 letters').isVisible()
+    row.searchDisabledOnInvalid = await questionDisabled()
+    await manual.fill('my-custom-model')
+    await manual.press('Enter')
+    row.confirmed = await proposalText()
+    row.searchEnabled = !(await questionDisabled(false))
+    check(row.invalidError && row.searchDisabledOnInvalid && row.confirmed === 'Using my-custom-model.' && row.searchEnabled, `manual: ${JSON.stringify(row)}`)
+    results.push(row)
+  }
+  await ask('request_rejected (manual model)', err(502, { error: COPY.req, code: 'request_rejected' }), {
+    text: COPY.req,
+    click: 'Choose another model',
+    focus: 'Model ID',
+  })
+  await page.getByLabel('Model ID').fill('gpt-5-mini')
+  await page.getByRole('button', { name: 'Use this ID' }).click()
   await ask('provider_rate_limited / own', err(502, { error: COPY.ownRl, code: 'provider_rate_limited', source: 'own' }), {
     text: COPY.ownRl,
   })
@@ -371,12 +487,25 @@ async function main() {
     ...retrySucceeds('own', 'provider couldn'),
   })
 
+  // ---- No rung qualifies → manual entry, focused ----
+  await page.getByLabel('Provider', { exact: true }).selectOption('grok')
+  await page.getByLabel('Grok API key').fill('xai-fake-stepb-000000000')
+  await findModel()
+  await proposal.waitFor()
+  {
+    const row = { scenario: 'picker: nothing qualifies (grok, mocked)', text: await proposalText(), focus: await focused() }
+    check(row.text === "Couldn't pick a model automatically. Enter a model ID below." && row.focus === 'Model ID', `no rungs: ${JSON.stringify(row)}`)
+    check(await questionDisabled(), 'no rungs: search enabled')
+    results.push(row)
+  }
+
   // ---- Experimental provider, unclassified ----
   await page.getByLabel('Provider', { exact: true }).selectOption('anthropic')
   await page.getByLabel('Claude API key').fill('sk-ant-fake-stepb-000000')
-  await page.getByRole('button', { name: 'Fetch models' }).click()
-  await modelSelect.waitFor()
-  await modelSelect.selectOption('model-a')
+  await findModel()
+  await useModel.waitFor()
+  check((await proposalText()) === "We'll use claude-sonnet-5-5 (Balanced) · Recommended", `anthropic proposal: ${await proposalText()}`)
+  await useModel.click()
   await ask('Experimental unclassified (anthropic)', err(502, { error: COPY.exp, code: 'provider_unavailable' }), {
     text: COPY.exp,
     button: 'Try again',
@@ -397,7 +526,7 @@ async function main() {
     await live.getByLabel('Provider', { exact: true }).selectOption('openai')
     await live.getByLabel('OpenAI API key').fill('sk-fake-stepb-live-0000000000')
     const liveResp = live.waitForResponse((r) => r.url() === `${API}/models` && r.request().method() === 'POST')
-    await live.getByRole('button', { name: 'Fetch models' }).click()
+    await live.getByRole('button', { name: 'Find a model' }).click()
     const resp = await liveResp
     const liveBody = await resp.json()
     const liveBanner = live.locator('[aria-live="polite"] p', { hasText: 'rejected your API key' }).first()
@@ -511,7 +640,7 @@ async function stepD(browser, pageErrors) {
     const req = r.request()
     if (req.method() === 'OPTIONS') return r.fulfill({ status: 204, headers: CORS })
     if (req.url().endsWith('/models')) {
-      return r.fulfill({ status: 200, headers: { ...CORS, 'Content-Type': 'application/json' }, body: JSON.stringify({ models: [{ id: 'model-a', displayName: 'model-a' }] }) })
+      return r.fulfill({ status: 200, headers: { ...CORS, 'Content-Type': 'application/json' }, body: JSON.stringify({ models: [{ id: 'gpt-5-mini', displayName: 'gpt-5-mini' }] }) })
     }
     calls++
     if (!handler) return r.abort()
@@ -705,9 +834,8 @@ async function stepD(browser, pageErrors) {
   await page.getByLabel('Use your own API key').check()
   await page.getByLabel('Provider', { exact: true }).selectOption('openai')
   await page.getByLabel('OpenAI API key').fill('sk-fake-stepd-0000000000')
-  await page.getByRole('button', { name: 'Fetch models' }).click()
-  await page.getByLabel('Model', { exact: true }).waitFor()
-  await page.getByLabel('Model', { exact: true }).selectOption('model-a')
+  await page.getByRole('button', { name: 'Find a model' }).click()
+  await page.getByRole('button', { name: 'Use this model' }).click()
   await askD('own-key 502, retryAfterSeconds 20', err(502, { error: COPY.ownRl, code: 'provider_rate_limited', source: 'own', retryAfterSeconds: 20 }), {
     text: COPY.ownRl,
     contains: [COPY.ownRl, 'Try again at'],

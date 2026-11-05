@@ -1,8 +1,9 @@
-import { useImperativeHandle, useRef, useState, type Ref } from 'react'
+import { useEffect, useImperativeHandle, useReducer, useRef, useState, type Ref } from 'react'
 import { flushSync } from 'react-dom'
 import { Eye, EyeSlash } from '@phosphor-icons/react'
 import type { KeyConfig } from '../lib/answerRequest'
-import { defaultModelFor, fetchModelsFromWorker, type ModelInfo, type Provider } from '../lib/models'
+import { fetchModelsFromWorker, type Provider } from '../lib/models'
+import { buildLadder, INITIAL_PICKER, isValidModelId, pickerReducer, type Rung } from '../lib/modelLadder'
 import { WorkerRequestError, failureAction, type FailureAction } from '../lib/apiError'
 import { classify, type TaxonomyResult } from '../lib/errorTaxonomy'
 import { StatusBanner } from './ui/StatusBanner'
@@ -38,8 +39,10 @@ const PROVIDER_LABELS: Record<Provider, string> = {
 const EXPERIMENTAL_PROVIDERS: Provider[] = ['anthropic', 'grok', 'openrouter']
 
 /**
- * Own-key entry: provider picker, key input, "fetch models" call, model picker. The key
- * lives only in this component's local state — never Zustand, never IndexedDB — so it
+ * Own-key entry: provider picker, key input, "Find a model" (the Worker's /models, then
+ * modelLadder.ts ranks the list), one proposal at a time with Higher/Lower, confirmed
+ * before use; plus a manual model-id escape hatch. No model list is ever rendered. The key
+ * and model live only in this component's local state — never Zustand, never IndexedDB — so it
  * can't be picked up by a devtools/logging integration attached to shared state later,
  * and it disappears on reload by construction (nothing persists it). `onChange` reports
  * `null` whenever BYOK is selected but not yet complete (no key, or key not yet resolved
@@ -49,109 +52,117 @@ export function ByokPanel({ onChange, ref }: ByokPanelProps) {
   const [useOwnKey, setUseOwnKey] = useState(false)
   const [provider, setProvider] = useState<Provider>('gemini')
   const [apiKey, setApiKey] = useState('')
-  const [models, setModels] = useState<ModelInfo[]>([])
-  const [selectedModel, setSelectedModel] = useState('')
+  const [picker, dispatch] = useReducer(pickerReducer, INITIAL_PICKER)
   const [fetching, setFetching] = useState(false)
   const [error, setError] = useState<PanelError | null>(null)
   const [showKey, setShowKey] = useState(false)
+  const [manualId, setManualId] = useState('')
+  const [manualError, setManualError] = useState<string | null>(null)
   const providerSelectRef = useRef<HTMLSelectElement>(null)
   const keyInputRef = useRef<HTMLInputElement>(null)
-  const modelSelectRef = useRef<HTMLSelectElement>(null)
+  const confirmRef = useRef<HTMLButtonElement>(null)
+  const changeRef = useRef<HTMLButtonElement>(null)
+  const manualInputRef = useRef<HTMLInputElement>(null)
+
+  // The question box follows this: null (disabled) until a model is confirmed.
+  useEffect(() => {
+    if (!useOwnKey) onChange({ keySource: 'shared' })
+    else onChange(picker.confirmed ? { keySource: 'own', apiKey: apiKey.trim(), provider, model: picker.confirmed } : null)
+  }, [useOwnKey, picker.confirmed, apiKey, provider, onChange])
+
+  const resetPicker = () => {
+    dispatch({ type: 'reset' })
+    setManualId('')
+    setManualError(null)
+    setError(null)
+  }
+
+  // Each step re-renders synchronously, then focus lands on the next thing to press.
+  const step = (action: Parameters<typeof dispatch>[0], focus: () => HTMLElement | null = () => confirmRef.current) => {
+    flushSync(() => dispatch(action))
+    focus()?.focus()
+  }
 
   const handleToggle = (next: boolean) => {
     setUseOwnKey(next)
-    setModels([])
-    setSelectedModel('')
-    setError(null)
-    onChange(next ? null : { keySource: 'shared' })
+    resetPicker()
   }
 
+  // A changed provider or key invalidates the found model.
   const handleProviderChange = (next: Provider) => {
     setProvider(next)
-    // A changed provider invalidates any previously fetched model list — a Gemini
-    // model id means nothing once OpenAI is selected, and vice versa.
-    setModels([])
-    setSelectedModel('')
-    setError(null)
-    onChange(null)
+    resetPicker()
   }
 
   const handleApiKeyChange = (value: string) => {
     setApiKey(value)
-    // A changed key invalidates any previously fetched model list — force a re-fetch
-    // rather than letting a stale model id ride along with a new key.
-    setModels([])
-    setSelectedModel('')
-    setError(null)
-    onChange(null)
+    resetPicker()
   }
 
-  const handleFetchModels = async () => {
+  const handleFindModel = async () => {
     const trimmedKey = apiKey.trim()
     if (!trimmedKey) return
     setFetching(true)
-    setError(null)
+    resetPicker()
     try {
       const fetched = await fetchModelsFromWorker(provider, trimmedKey)
-      if (fetched.length === 0) {
-        setError({ type: 'unknown', severity: 'error', message: 'This key returned no usable models.' })
-        setModels([])
-        setSelectedModel('')
-        onChange(null)
-        return
-      }
-      // '' leaves the "Choose a model" placeholder selected and the key config unset, so
-      // Ask stays disabled until the user picks a model themselves.
-      const defaultModel = defaultModelFor(provider, fetched)
-      setModels(fetched)
-      setSelectedModel(defaultModel)
-      onChange(defaultModel ? { keySource: 'own', apiKey: trimmedKey, provider, model: defaultModel } : null)
+      const ladder = buildLadder(provider, fetched)
+      step({ type: 'loaded', ladder }, () => (ladder.rungs.length > 0 ? confirmRef.current : manualInputRef.current))
     } catch (err) {
       if (err instanceof WorkerRequestError) {
         const action = failureAction(err.code, err.source)
         setError({
           ...classify({ message: err.message, status: err.status, resetAt: err.resetAt }),
-          // A failed fetch leaves no model list to choose from, and /models is always
-          // own-key, so only these two actions make sense here.
+          // /models is always own-key, so only these two actions make sense here.
           action: action === 'check-key' || action === 'retry' ? action : null,
         })
       } else {
         setError(classify({ message: err instanceof Error ? err.message : 'Failed to fetch model list.' }))
       }
-      setModels([])
-      setSelectedModel('')
-      onChange(null)
     } finally {
       setFetching(false)
     }
   }
 
-  const handleModelChange = (modelId: string) => {
-    setSelectedModel(modelId)
-    onChange({ keySource: 'own', apiKey: apiKey.trim(), provider, model: modelId })
+  const handleManualSubmit = () => {
+    const id = manualId.trim()
+    if (!isValidModelId(provider, id)) {
+      setManualError(
+        provider === 'gemini'
+          ? 'A model ID is 1-128 letters, digits, and . _ - characters.'
+          : 'A model ID is 1-128 letters, digits, and . _ - : / ~ characters.',
+      )
+      manualInputRef.current?.focus()
+      return
+    }
+    setManualError(null)
+    step({ type: 'confirm-manual', id }, () => changeRef.current)
   }
 
-  // key_rejected: the fetched list belongs to a key the provider just refused — drop it
-  // and send the user to the key. "Fetch models" stays enabled for the same key, so a
-  // key that was only temporarily rejected can be re-fetched without retyping it.
+  // key_rejected: the found model belongs to a key the provider just refused — drop it and
+  // send the user to the key. "Find a model" stays enabled for the same key, so a key that
+  // was only temporarily rejected can be retried without retyping it. choose-model (the
+  // model was rejected): reopen the picker one rung LOWER, or the manual input if none.
   const handleFailureAction = (action: FailureAction) => {
     switch (action) {
       case 'check-key':
-        setModels([])
-        setSelectedModel('')
-        onChange(null)
+        // Drops the model but keeps the banner: the user still needs to read why.
+        dispatch({ type: 'reset' })
         keyInputRef.current?.focus()
         break
-      case 'choose-model':
-        modelSelectRef.current?.focus()
+      case 'choose-model': {
+        if (!useOwnKey || picker.confirmed === null) break
+        const next = pickerReducer(picker, { type: 'model-rejected' })
+        step({ type: 'model-rejected' }, () => (next.manualOpen ? manualInputRef.current : confirmRef.current))
         break
+      }
       case 'use-own-key':
         // flushSync so the provider select is mounted before we focus it.
         if (!useOwnKey) flushSync(() => handleToggle(true))
         providerSelectRef.current?.focus()
         break
       case 'retry':
-        void handleFetchModels()
+        void handleFindModel()
         break
     }
   }
@@ -225,28 +236,74 @@ export function ByokPanel({ onChange, ref }: ByokPanelProps) {
                 {showKey ? <EyeSlash className="size-4" weight="bold" /> : <Eye className="size-4" weight="bold" />}
               </button>
             </div>
-            <Button onClick={() => void handleFetchModels()} disabled={!apiKey.trim() || fetching} loading={fetching}>
-              {fetching ? 'Fetching…' : 'Fetch models'}
+            <Button onClick={() => void handleFindModel()} disabled={!apiKey.trim() || fetching} loading={fetching}>
+              {fetching ? 'Finding…' : 'Find a model'}
             </Button>
           </div>
 
-          {models.length > 0 && (
-            <select
-              ref={modelSelectRef}
-              aria-label="Model"
-              value={selectedModel}
-              onChange={(e) => handleModelChange(e.target.value)}
-              className="min-h-11 w-full rounded border border-slate-300 px-2 py-1.5 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+          {picker.rejected !== null && picker.confirmed === null && (
+            <p className="text-slate-700 dark:text-slate-300">
+              The provider rejected the last request with <span className="font-mono break-all">{picker.rejected}</span>.
+            </p>
+          )}
+          {/* Always mounted while own-key is on, so the first proposal is announced too. Holds
+              only the sentence: each step is announced once, never the buttons. */}
+          <p aria-live="polite" aria-atomic="true" className="break-words font-medium text-slate-900 empty:hidden dark:text-slate-100">
+            {pickerSentence(picker)}
+          </p>
+
+          {picker.ladder && (
+            <ModelPicker
+              picker={picker}
+              confirmRef={confirmRef}
+              changeRef={changeRef}
+              onHigher={() => step({ type: 'higher' })}
+              onLower={() => step({ type: 'lower' })}
+              onConfirm={() => step({ type: 'confirm' }, () => changeRef.current)}
+              onChange={() => step({ type: 'change' })}
+            />
+          )}
+
+          {picker.ladder && (
+            <details
+              open={picker.manualOpen}
+              onToggle={(e) => {
+                const open = (e.currentTarget as HTMLDetailsElement).open
+                if (open !== picker.manualOpen) dispatch({ type: 'toggle-manual', open })
+              }}
             >
-              <option value="" disabled>
-                Choose a model
-              </option>
-              {models.map((model) => (
-                <option key={model.id} value={model.id}>
-                  {model.displayName}
-                </option>
-              ))}
-            </select>
+              <summary className="min-h-11 cursor-pointer py-2 text-slate-700 dark:text-slate-300">
+                Enter a model ID yourself
+              </summary>
+              <div className="flex gap-2">
+                <input
+                  ref={manualInputRef}
+                  aria-label="Model ID"
+                  aria-invalid={manualError ? true : undefined}
+                  aria-describedby={manualError ? 'byok-manual-error' : undefined}
+                  value={manualId}
+                  onChange={(e) => setManualId(e.target.value)}
+                  onKeyDown={(e) => {
+                    // preventDefault: focus moves to "Change" on submit, and the same Enter must not press it.
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      handleManualSubmit()
+                    }
+                  }}
+                  spellCheck={false}
+                  autoComplete="off"
+                  className="min-h-11 min-w-0 flex-1 rounded border border-slate-300 px-2 py-1.5 font-mono text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                />
+                <Button variant="secondary" onClick={handleManualSubmit} disabled={!manualId.trim()}>
+                  Use this ID
+                </Button>
+              </div>
+              {manualError && (
+                <p id="byok-manual-error" className="mt-1 text-xs text-red-700 dark:text-red-400">
+                  {manualError}
+                </p>
+              )}
+            </details>
           )}
 
           <div aria-live="polite" aria-atomic="true">
@@ -262,6 +319,84 @@ export function ByokPanel({ onChange, ref }: ByokPanelProps) {
             )}
           </div>
         </div>
+      )}
+    </div>
+  )
+}
+
+function modelName(r: Rung): string {
+  return r.displayName === r.id ? r.id : `${r.displayName} (${r.id})`
+}
+
+interface ModelPickerProps {
+  picker: ReturnType<typeof pickerReducer>
+  confirmRef: Ref<HTMLButtonElement>
+  changeRef: Ref<HTMLButtonElement>
+  onHigher: () => void
+  onLower: () => void
+  onConfirm: () => void
+  onChange: () => void
+}
+
+/** What the always-mounted live region says: one sentence per picker step. */
+function pickerSentence(picker: ReturnType<typeof pickerReducer>): string {
+  const ladder = picker.ladder
+  if (ladder === null) return ''
+  const rung = ladder.rungs[picker.index] as Rung | undefined
+  if (picker.confirmed !== null) {
+    const using = ladder.rungs.find((r) => r.id === picker.confirmed)
+    return `Using ${using ? modelName(using) : picker.confirmed}.`
+  }
+  if (!rung) return "Couldn't pick a model automatically. Enter a model ID below."
+  const tier = rung.tier ? ` (${rung.tier})` : ''
+  const recommended = picker.index === ladder.recommendedIndex ? ' · Recommended' : ''
+  return `We'll use ${modelName(rung)}${tier}${recommended}`
+}
+
+/** One proposal at a time; its sentence is in ByokPanel's live region, the buttons here. */
+function ModelPicker({ picker, confirmRef, changeRef, onHigher, onLower, onConfirm, onChange }: ModelPickerProps) {
+  const ladder = picker.ladder!
+  const rung = ladder.rungs[picker.index] as Rung | undefined
+  const top = picker.index === ladder.rungs.length - 1
+  const bottom = picker.index === 0
+
+  return (
+    <div className="space-y-2">
+      {picker.confirmed !== null ? (
+        <Button ref={changeRef} variant="secondary" onClick={onChange}>
+          Change
+        </Button>
+      ) : (
+        rung && (
+          <>
+            <div className="flex flex-wrap gap-2">
+              <Button ref={confirmRef} onClick={onConfirm}>
+                Use this model
+              </Button>
+              {!ladder.routerChooses && (
+                <>
+                  <Button variant="secondary" onClick={onHigher} disabled={top}>
+                    Use a higher model
+                  </Button>
+                  <Button variant="secondary" onClick={onLower} disabled={bottom}>
+                    Use a lower model
+                  </Button>
+                </>
+              )}
+            </div>
+            {ladder.routerChooses ? (
+              <p className="text-xs text-slate-600 dark:text-slate-400">
+                OpenRouter chooses the model for each question, so there's no higher or lower option.
+              </p>
+            ) : (
+              <p className="text-xs text-slate-600 dark:text-slate-400">
+                {top && 'This is the highest model we found for your key. '}
+                {bottom && 'This is the lowest model we found for your key. '}
+                Higher models usually cost more per question.
+              </p>
+            )}
+          </>
+        )
       )}
     </div>
   )
