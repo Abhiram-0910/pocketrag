@@ -4064,6 +4064,35 @@ errors.
 scratchpad (`anthropic-live.cjs`, key never printed, output redacted). Gemini / OpenAI /
 Grok / OpenRouter pickers are fixture-tested only.
 
+### Session 40 — 2026-11-08 (Claude Code)
+**Goal:** Phase 5b: privacy + terms page, friendly model-download failure with retry,
+favicon, README final pass; deploy; release check; tag `v1.0.0`.
+
+**Built:** `f057b97` in-app `#privacy` view + landing/app footers, facts drift-tested
+(`privacyFacts.test.ts`). `8c3d974` model-download failure: plain message, Try again that
+re-runs the embedding step; the client replaces the embedding worker after a failed load
+(transformers.js memoizes a failed metadata fetch as "doesn't exist" module-wide, so the
+first fix, clearing our cached promises, made no new request; the new step-b blocked-host
+scenario caught it). `3705e77` LockSimple favicon. `50770af` README/ARCHITECTURE/TODO.
+
+**Verification:** `tsc` + `oxlint` exit 0 both sides (real binaries). Frontend 354/354
+(was 346), Worker 534/534 (no Worker change). Build + size guard pass. JS
+`index-DqyeWL1J.js` → `index-DOyLNx0R.js`, CSS `index-BSLb5nKp.css` → `index-B-3TNV76.css`.
+`git diff 6158529 -- public/_headers` empty. step-b Chromium exit 0 (30 scenarios, 0
+failures). step-c Chromium + Firefox exit 0, 15/15, 25/25 matched, 0 unexpected.
+
+**Deployed, then rolled back:** Pages `148336c5` → `65077398` (source `50770af`). All
+listed gates passed (CSP byte-identical 446 B, XFO/Referrer/Permissions/COOP/nosniff, Worker
+preflight 200 / invalid 400 / fake key 502 `key_rejected`, smoke 0 Worker POSTs / 0 CSP /
+0 errors, privacy page at 360/1280 with no overflow and working in-app links). **Failed
+gate:** the repo is PRIVATE, so the page's contact link (GitHub Issues) and the footer's
+"Source on GitHub" 404 for the public. Rolled back to `148336c5` via the Pages API
+(production serves `index-DqyeWL1J.js` again). Worker unchanged (`24733ba0`).
+
+**Not done:** D (release check, the one shared answer, tag `v1.0.0`) — blocked on the
+repo-visibility decision. Re-promote `65077398` with the same rollback API call once the
+links resolve publicly (no rebuild needed).
+
 ---
 
 <!-- Copy the block above for each new session -->

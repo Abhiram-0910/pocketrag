@@ -151,6 +151,9 @@ Read this at the start of every session to know what to work on next.
 - [x] `index.html` title / meta description / canonical / Open Graph + Twitter tags and a
       1200×630 og-image (`5efe65a`).
 - [x] Privacy and terms page (Phase 5b): in-app `#privacy` view, drift-tested.
+  - [ ] **Blocker for re-promoting Pages `65077398` and tagging `v1.0.0`:** the GitHub repo
+        is private, so the page's contact link (Issues) and "Source on GitHub" 404 for the
+        public. Owner decision: make the repo public, or choose another public contact.
 - [ ] IndexedDB export (documents + conversations) — see "Chat history + Receipts" for
       the grounded-turns constraint.
 - [ ] Client-side error monitoring.
