@@ -26,9 +26,11 @@ type PanelError = TaxonomyResult & { action?: FailureAction | null }
 // and unit-tested against mocked responses, never shown to produce a real answer. Its
 // failures are classified by the Worker like any other provider's (worker/src/index.ts's
 // classifyStatus) and shown as that code's fixed copy; only a failure the Worker can't
-// classify gets the "isn't fully supported yet" copy. Must match worker/src/validate.ts's
-// EXPERIMENTAL_PROVIDERS (experimentalProviders.test.ts).
-const EXPERIMENTAL_PROVIDERS: Provider[] = ['anthropic', 'grok', 'openrouter']
+// classify gets the "isn't fully supported yet" copy. Must be a subset of
+// worker/src/validate.ts's EXPERIMENTAL_PROVIDERS (experimentalProviders.test.ts).
+// Anthropic was live-verified in Phase 6 (v1.0.1); the Worker's copy still lists it until
+// the next Worker deploy.
+const EXPERIMENTAL_PROVIDERS: Provider[] = ['grok', 'openrouter']
 
 /**
  * Own-key entry: provider picker, key input, "Find a model" (the Worker's /models, then
