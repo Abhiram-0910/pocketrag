@@ -2,7 +2,7 @@ import { useEffect, useImperativeHandle, useReducer, useRef, useState, type Ref 
 import { flushSync } from 'react-dom'
 import { Eye, EyeSlash } from '@phosphor-icons/react'
 import type { KeyConfig } from '../lib/answerRequest'
-import { fetchModelsFromWorker, type Provider } from '../lib/models'
+import { PROVIDER_LABELS, fetchModelsFromWorker, type Provider } from '../lib/models'
 import { buildLadder, INITIAL_PICKER, isValidModelId, pickerReducer, type Rung } from '../lib/modelLadder'
 import { WorkerRequestError, failureAction, type FailureAction } from '../lib/apiError'
 import { classify, type TaxonomyResult } from '../lib/errorTaxonomy'
@@ -20,14 +20,6 @@ interface ByokPanelProps {
 }
 
 type PanelError = TaxonomyResult & { action?: FailureAction | null }
-
-const PROVIDER_LABELS: Record<Provider, string> = {
-  gemini: 'Gemini',
-  openai: 'OpenAI',
-  anthropic: 'Claude',
-  grok: 'Grok',
-  openrouter: 'OpenRouter',
-}
 
 // Providers live-verified end-to-end against their real API (see AGENTS.md session
 // logs). Everything else here is shipped selectable but flagged Experimental — built

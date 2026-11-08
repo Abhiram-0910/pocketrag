@@ -11,6 +11,14 @@ export interface ModelInfo {
 export const PROVIDERS = ['gemini', 'openai', 'anthropic', 'grok', 'openrouter'] as const
 export type Provider = (typeof PROVIDERS)[number]
 
+export const PROVIDER_LABELS: Record<Provider, string> = {
+  gemini: 'Gemini',
+  openai: 'OpenAI',
+  anthropic: 'Claude',
+  grok: 'Grok',
+  openrouter: 'OpenRouter',
+}
+
 // Where our Worker forwards each provider's requests — the host of that provider file's
 // API_BASE in worker/src/providers/. Receipts show it as "Then to"; it's the Worker's
 // contract, not something the browser can observe.
