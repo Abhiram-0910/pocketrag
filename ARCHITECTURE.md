@@ -364,21 +364,38 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
   your own key" (own → none), `request_rejected` → "Choose another model",
   `provider_unavailable` → "Try again". `FAILURE_CODES` lives in
   `worker/src/failureCodes.ts` and is copied (never imported) into `apiError.ts`;
-  `src/lib/failureCodes.test.ts` fails if they drift. The key and model list stay in
+  `src/lib/failureCodes.test.ts` fails if they drift. The key and chosen model stay in
   `ByokPanel`'s local state, so `QueryPanel`'s actions reach it through a
   `ByokPanelHandle` ref (`useImperativeHandle`, wired in `App.tsx`): check-key clears
-  the model list and selection and focuses the key input (key kept, re-fetchable
-  without retyping); choose-model focuses the model select without clearing it;
+  the picker (banner kept) and focuses the key input (key kept, re-findable without
+  retyping); choose-model steps the picker down a rung (Phase 5a);
   use-own-key turns BYOK on and focuses the provider select; retry re-runs the answer
   and then focuses the question input. Failure banners render inside always-mounted
   `aria-live="polite" aria-atomic="true"` containers (`StatusBanner inLiveRegion`
   drops its own role so nothing is announced twice).
-- **Explicit model choice after a fetch (Step B).** `src/lib/models.ts`'s
-  `defaultModelFor` pre-selects only Gemini's pinned `PREFERRED_GEMINI_MODEL`, and only
-  if the fetched list contains it; every other case leaves a disabled "Choose a model"
-  placeholder and no key config, so Search stays disabled until the user picks. No
-  provider's list order is a safe default (OpenAI/OpenRouter/Grok are unordered or
-  include models that can't answer; Anthropic's newest-first would pick the priciest).
+- **Automatic BYOK model picker (Phase 5a; replaced Step B's model select).** After the
+  key's `/models` call, `src/lib/modelLadder.ts`'s pure `buildLadder(provider, models)`
+  returns `{rungs (low → high, one per tier), recommendedIndex, routerChooses}`; ByokPanel
+  shows one proposal at a time (Use this model / higher / lower, each step re-confirmed),
+  never a list, and reports no key config until a model is confirmed. Rules live only in
+  that file: family regexes + parsed versions, never a model id (so newer models in a
+  known family are picked with no code change); allow-listed suffixes, so image/TTS/
+  audio/live/embedding/codex/search variants and unknown families are ignored; stable
+  over preview, bare id over `-latest` over a dated snapshot, then newest snapshot, then
+  id (deterministic in any list order). Tiers: Gemini flash-lite/flash/pro, Anthropic
+  haiku/sonnet/opus, OpenAI gpt-* nano/mini/base, Grok mini/base; the default is the
+  Balanced tier (Grok: mini), else the nearest tier below. OpenAI's o-series is outside
+  the gpt-* rule (the Worker sends only `{model, messages}`, which o-series accept, so
+  this is a family choice, not a parameter clash). OpenRouter: the single rung
+  `openrouter/auto` (accepted by the Worker's model pattern — it's in
+  `fixtures/openrouterModelIds.ts`, which `validate.test.ts` runs through it), no
+  higher/lower. No rung → "Couldn't pick a model automatically" + the manual input. The
+  manual "Enter a model ID yourself" input uses `isValidModelId` (the Worker's pattern).
+  `pickerReducer` holds the state; a `request_rejected` answer (choose-model) reopens the
+  picker one rung lower (or the manual input when there's none below / the model was
+  manual / OpenRouter), unconfirmed. `/models` is unchanged: ids + display names were
+  enough to tier every provider. `defaultModelFor`/`PREFERRED_GEMINI_MODEL` are gone; the
+  shared tier's pinned model (`providers/gemini.ts`) is untouched.
 - **Enforced Content-Security-Policy (Step C, `2146f71` + `41931e3`, production
   `8c992a01`).** `public/_headers` sends one policy under `/*`. Every source below was
   measured, not assumed: a Playwright run of every flow under a deliberately strict
@@ -646,9 +663,14 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
   | our own 429 | `resetAt` (next UTC midnight) + `retryAfterSeconds` (same instant, 0–86400) |
   | shared rate-limited 502, Gemini hinted | `retryAfterSeconds` (1–3600) |
   | shared, no hint, breaker below its cap | `retryAfterSeconds` (breaker) + `resetAt` (next midnight Pacific — the "if" bound) |
-  | shared, no hint, breaker at its 15 min cap | `resetAt` only ("looks used up for today") |
+  | shared, no hint, breaker at its 15 min cap | `resetAt` + `cooldownSeconds` (the breaker's remaining cooldown, 1–3600; Phase 5a) — no `retryAfterSeconds` ("looks used up for today") |
   | own-key rate-limited 502 | `retryAfterSeconds` only when the provider sent one |
   | anything else, or unknown | no fields → no countdown, ever |
+
+  **At the cap (Phase 5a fix).** "Try again" waits for `cooldownSeconds`, never for
+  midnight Pacific: midnight is a hedged upper bound in the copy ("normally resets"), and
+  a retry during the cooldown is free (the breaker answers without calling Gemini). A
+  Worker without the field (pre-Phase 5a) → the button is enabled at once.
 
   **Hints** (`parseRetryHint`, `providers/errors.ts`, 429 only): `google.rpc.RetryInfo`
   `retryDelay` matching `^\d{1,6}(\.\d{1,9})?s$`, and `Retry-After` as delta-seconds or an

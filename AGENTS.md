@@ -76,6 +76,20 @@ provider error text; the UI shows it verbatim with a per-code action (Step B). 6
   copy in `src/lib/apiError.ts` (plus a `failureAction` case). The frontend never
   imports Worker code; `src/lib/failureCodes.test.ts` fails if the two drift.
 
+## Standing Rules — BYOK model picker (Phase 5a, `663d1d5`)
+
+- **Never hardcode a model id** in the BYOK picker, ladder, or defaults. Ranking rules
+  (family regexes, version parsing, tier order, stable/alias preference, exclusions) live
+  only in `src/lib/modelLadder.ts`; a new model in a known family must be picked with no
+  code change (`modelLadder.test.ts` has a simulated-new-version case per provider; keep it).
+- **No model list is rendered anywhere.** One proposal at a time; every higher/lower step
+  needs a fresh confirmation; the question box stays disabled until a model is confirmed.
+  "Recommended" = the Balanced tier, never "best"; no prices or capability claims.
+- The shared tier's pinned Gemini model (`worker/src/providers/gemini.ts`) is separate
+  and untouched by the picker.
+- At the breaker cap, "Try again" is gated on the Worker's `cooldownSeconds`, never on
+  midnight Pacific (`resetAt` is copy-only, a hedged bound).
+
 ## Standing Rules — CSP and the ONNX Runtime pin (Step C, `2146f71` / `41931e3`)
 
 - **Bumping `@huggingface/transformers` or `onnxruntime-web` means updating BOTH**

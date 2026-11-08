@@ -71,6 +71,18 @@ Read this at the start of every session to know what to work on next.
         failures should never refund (fake-key spam).
   - [ ] A real Gemini 429 carrying RetryInfo has never been observed; the documented shape
         is a test fixture only.
+- [x] **Phase 5a fix** — at the breaker cap, Try again waits for the Worker's additive
+      `cooldownSeconds`, not midnight Pacific (`02f402d`, Worker `24733ba0`).
+- [x] **Phase 5a automatic BYOK model picker** — `src/lib/modelLadder.ts` + ByokPanel
+      proposal/higher/lower/confirm, manual model-id escape hatch, model-rejected steps
+      down a rung (`663d1d5`). No model list rendered.
+  - [ ] Gemini / OpenAI / Grok / OpenRouter pickers are fixture-tested only (no live key
+        list checked). Anthropic was checked live in Phase 5a (see AGENTS.md Session 39).
+  - [ ] Anthropic's UI label still says "(Experimental)" (`EXPERIMENTAL_PROVIDERS` in
+        ByokPanel) although its success path is now live-verified; drop it on the next
+        Pages deploy.
+  - [ ] Families the ladder doesn't know (e.g. a new Anthropic family name) are ignored by
+        design; add a family rule in `modelLadder.ts` when one appears.
 ### Chat history + Receipts (per-answer egress ledger)
 - [x] **Phase 1** — persisted history DB (`pocketrag-history`, separate from the
       documents DB), conversation tree ops, `chatStore`, and the egress wrapper every

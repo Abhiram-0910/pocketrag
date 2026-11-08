@@ -92,6 +92,37 @@ so treat these as best-effort, not proven:
   Google Cloud quota limit (`429 RESOURCE_EXHAUSTED`) across every attempt so far;
   believed to require a billing-linked project to unlock.
 
+## Bring your own key: the model picker
+
+Choose a provider, paste your key, press **Find a model**. PocketRAG asks the provider
+which models your key can use, ranks them, and proposes one: "We'll use … (Balanced) ·
+Recommended". **Use a higher model** / **Use a lower model** step one rung at a time and
+each step needs confirming again; the question box stays disabled until you confirm.
+No model list is shown. The key and the chosen model stay in memory only.
+
+- **How it ranks.** By model family and version, never by a hardcoded list
+  (`src/lib/modelLadder.ts`): Gemini flash-lite < flash < pro, Claude haiku < sonnet <
+  opus, OpenAI gpt-* nano < mini < full, Grok mini < full. Within a family it takes the
+  newest version, stable over preview, the plain alias over a dated snapshot. A newer
+  model in a known family is picked up with no code change; ids it doesn't recognise
+  (other families, image/audio/embedding models, OpenAI's o-series) are left out.
+- **"Recommended"** is the middle (Balanced) rung: a sensible default for answering
+  questions over short passages. It isn't a claim that it's the best model.
+- **What it can't know.** Prices, how capable a model is, and whether your account can
+  actually use a listed model. Higher models usually cost more per question; check your
+  provider's pricing.
+- **When it can't help.** If nothing on the list qualifies, or the provider rejects a
+  model when you ask a question, you can step down a rung (the picker reopens one rung
+  lower, waiting for your confirmation) or type a model ID under **Enter a model ID
+  yourself**. OpenRouter always uses `openrouter/auto`, which lets OpenRouter pick the
+  model per question, so it has no higher/lower steps.
+
+| 360 px | 1280 px |
+| --- | --- |
+| ![The model picker proposing gpt-5-mini (Balanced, Recommended) with Use this model, higher and lower buttons, at 360px](docs/screenshots/byok-model-proposal-360.png) | ![The same proposal at 1280px](docs/screenshots/byok-model-proposal-1280.png) |
+
+The screenshots use a mocked model list.
+
 ## Receipts
 
 Every answer has a **Receipt**: one row per request that carried your data for it,
