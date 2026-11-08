@@ -62,8 +62,8 @@ export function PrivacyPage() {
         <h2 id="privacy-stored" className={H2}>Stored in your browser</h2>
         <ul className={UL}>
           <li>
-            <strong>Documents.</strong> The text extracted from your files, cut into passages, and each passage's
-            search vector (IndexedDB database <Code>pocketrag</Code>). The original file is never stored; it's kept in
+            <strong>Documents.</strong> Each file's name, the text extracted from it, cut into passages, and each
+            passage's search vector (IndexedDB database <Code>pocketrag</Code>). The original file is never stored; it's kept in
             memory for the open tab only.
           </li>
           <li>
@@ -82,9 +82,8 @@ export function PrivacyPage() {
             </ul>
           </li>
           <li>
-            <strong>AI models and runtime.</strong> The search and ranking models, cached in your browser's Cache
-            Storage (<Code>transformers-cache</Code>) so they download once, plus the AI runtime in the browser's
-            normal download cache.
+            <strong>AI models and runtime.</strong> The search and ranking models and the AI runtime, cached in your
+            browser's Cache Storage (<Code>transformers-cache</Code>) so they download once.
           </li>
           <li>
             <strong>Not stored:</strong> your API key. It's kept in memory and is gone when you reload. There are
@@ -103,13 +102,14 @@ export function PrivacyPage() {
           <li>
             <strong>Answering a question, free shared tier.</strong> Your question, up to 3 matching passages, your last
             3 questions and answers, and random document IDs (never file names) go to PocketRAG's server, which sends
-            them to Google Gemini. If you turn on diagram images (off by default, shared tier only), one page image is
-            added when a question is about a chart or diagram.
+            them to Google Gemini. If you turn on diagram images (off by default, shared tier only), the page of the
+            best-matching passage is added as an image when that page contains a picture or the passage mentions a
+            figure, diagram, chart, graph or table.
           </li>
           <li>
             <strong>Answering with your own key.</strong> The same content plus your API key goes to PocketRAG's server,
             which forwards it to the provider you chose. The server uses the key for that one request and doesn't save
-            it. Finding a model for your key sends only the key, the same way.
+            it. Finding a model for your key sends only the key and the provider's name, the same way.
           </li>
           <li>
             <strong>Handwritten or scanned notes (OCR).</strong> After you confirm for each file, the whole file goes
@@ -160,25 +160,37 @@ export function PrivacyPage() {
           <li>
             <strong>Rate-limit counters.</strong> One counter per IP address per day for each tier (shared, own key,
             OCR), stored in Cloudflare KV under a key of the form <Code>ratelimit:shared:203.0.113.7:2026-11-08</Code>.
-            The IP address is stored as is, not hashed. The value is only a count, and it expires after 24 hours.
+            The IP address is stored as is, not hashed. The value is only a count, and it expires 24 hours after it
+            was last updated. If KV is unavailable, the server keeps the same counters in its memory instead, until
+            that server instance shuts down.
           </li>
           <li>
             <strong>Shared-tier pause.</strong> When Google rate-limits the free tier, the server stores a short pause
-            under <Code>cooldown:shared:gemini</Code>. It holds a time, nothing about you.
+            under <Code>cooldown:shared:gemini</Code> for at most 2 hours. It holds a time, nothing about you.
+          </li>
+          <li>
+            <strong>Alert throttling.</strong> Keys of the form <Code>discord-notify:gemini:answer:shared</Code>
+            (provider, endpoint, tier), so the maintainer gets at most one alert per window. They expire after 10
+            minutes, or 6 hours for the free tier's rate limits, and hold nothing about you.
           </li>
           <li>
             <strong>Failure logs.</strong> When a provider call fails, the server logs the provider, model, HTTP status,
-            error codes, whether it was the shared tier or your own key, and the provider's error message with any API
-            key removed (withheld entirely if it repeats what was sent). No IP address, no request content.
+            error codes, whether it was the shared tier or your own key, any retry delay the provider suggested, and
+            the provider's error message with any API key removed (withheld entirely if it repeats what was sent). A
+            failed OCR call logs only its status. No IP address, no request content.
           </li>
           <li>
-            <strong>Maintainer alerts.</strong> When alerts are enabled, some of those failures also send the same
-            fields to a private Discord channel for the maintainer.
+            <strong>Maintainer alerts.</strong> When alerts are enabled, some of those failures also send the
+            provider, model, status, error codes, tier and the same cleaned message to a private Discord channel for
+            the maintainer (a failed OCR call sends a fixed "OCR request failed." instead). No IP address, no request
+            content.
           </li>
           <li>
-            <strong>Cloudflare.</strong> Cloudflare hosts the site and the server and keeps its own request logs and
-            analytics (for example the time, path, status and approximate location of each request) under its own
-            privacy policy.
+            <strong>Cloudflare request logs.</strong> Cloudflare Workers Logs is turned on for every request to the
+            server: Cloudflare records each request's method, URL, response status and the details it attaches (which
+            can include your IP address and approximate location), along with the failure logs above, and deletes them
+            after at most 7 days. Cloudflare also keeps its own logs and analytics for the site and the server under
+            its own privacy policy.
           </li>
         </ul>
       </section>
@@ -195,7 +207,8 @@ export function PrivacyPage() {
           </li>
         </ul>
         <p className={P}>
-          Nothing is kept on PocketRAG's server to delete, apart from the counters above, which expire within a day.
+          There are no accounts, so PocketRAG's server holds nothing it could look up and delete for you. The counters
+          above expire 24 hours after their last update, and Workers Logs records after at most 7 days.
         </p>
       </section>
 
