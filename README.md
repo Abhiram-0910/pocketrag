@@ -1,28 +1,30 @@
 # PocketRAG
 
-Local-first, browser-only "chat with your documents." Content you upload to the
-**Documents tab** is parsed, embedded, and searched entirely in your browser — the
-source file itself never leaves it. To answer, it sends your question, up to 3
-retrieved passages, up to 3 earlier questions and answers, random document IDs (never
-file names), and, only if you turn on diagram images (off by default, free tier only), a
-page image when a question is about a chart or diagram, through PocketRAG's Cloudflare Worker to the AI provider: Google Gemini on the
-free shared tier, or your own provider with your own key. Each answer's Receipts list
-exactly what was sent.
+**Chat with your PDFs without uploading them.** PocketRAG reads, indexes and searches
+your documents entirely in your browser, then sends your question and a few
+matching passages to an AI model to compose a cited answer. Every answer comes with a
+**Receipt**: each request that carried your data, where it went, what it carried and how
+big it was, so you can check exactly what left your device instead of trusting a promise.
+Use the free shared tier (Google Gemini) or bring your own key for Gemini, OpenAI,
+Claude, Grok or OpenRouter.
 
-Free shared tier: Google uses what's sent and the answers to provide, improve and
+**Live:** https://pocketrag.pages.dev · API: https://pocketrag-answer.abhiram-dev.workers.dev ·
+[Privacy and terms](https://pocketrag.pages.dev/#privacy)
+
+On the free shared tier, Google uses what's sent and the answers to provide, improve and
 develop its products and machine-learning technologies, and human reviewers may read
 them ([Gemini API Additional Terms](https://ai.google.dev/gemini-api/terms), "Unpaid
 Services"). Use your own paid key to avoid that. The free shared tier isn't available in
 the EEA, Switzerland or the UK (Google's terms); bring your own key there.
 
-The one deliberate exception: the separate **Notes tab**, for handwritten or scanned
-content, sends the whole file to Google's Gemini API for OCR — gated behind an
-explicit per-file consent prompt every time, no "remember my choice" shortcut. See
-[ARCHITECTURE.md](./ARCHITECTURE.md) for the full two-tab privacy model.
-
-**Live:**
-- App: https://pocketrag.pages.dev
-- API: https://pocketrag-answer.abhiram-dev.workers.dev
+What an answer sends: your question, up to 3 retrieved passages, up to 3 earlier
+questions and answers, random document IDs (never file names), and, only if you turn on
+diagram images (off by default, free tier only), a page image when a question is about a
+chart or diagram. It goes through PocketRAG's Cloudflare Worker to Google Gemini, or to
+your own provider with your own key. The one exception to "files stay in the browser" is
+the **Notes tab**: handwritten or scanned files are sent whole to Gemini for OCR, after a
+consent prompt for every file. See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full
+privacy model.
 
 ## What it does
 
@@ -75,8 +77,16 @@ Milestone 16 retest):
 - Chat history: conversations saved in this browser and reopened on reload; delete one,
   all history, or everything (documents + history). Web-grounded answers are never
   stored
-- Plain-language error handling (rate limits, invalid keys, network failures) and
-  Discord alerting on provider failures
+- Automatic model picker for your own key: PocketRAG reads the models your key can use
+  and proposes one, with higher/lower steps (see [below](#bring-your-own-key-the-model-picker))
+- Plain-language error handling (rate limits, invalid keys, network failures, a blocked
+  model download with a retry) and Discord alerting on provider failures
+- Rate-limit countdowns: when the free tier is busy, the answer shows when you can try
+  again and the button waits for it, from the server's own numbers, never a guess
+- Region notice: the free shared tier refuses the EEA, Switzerland and the UK (Google's
+  terms) with a plain message pointing to your own key
+- [Privacy and terms](https://pocketrag.pages.dev/#privacy) page, drift-tested against
+  the code (storage keys, destinations, region list, providers)
 - Light/dark mode (OS preference), responsive down to mobile
 
 **Experimental** — shipped, but the success path isn't independently verifiable yet,
@@ -195,9 +205,45 @@ jsDelivr downloads are real.
   listed either. See [SECURITY_REVIEW.md](./SECURITY_REVIEW.md) §8 for everything the
   ledger can't see and what limits it.
 
+## Privacy and terms
+
+[pocketrag.pages.dev/#privacy](https://pocketrag.pages.dev/#privacy), linked from the app
+and landing footers: what's stored in your browser, what leaves it, what the server keeps
+(per-IP daily counters, not hashed, expiring in 24 hours; failure logs without request
+bodies), how to delete it, and short plain terms. Its lists are tested against the code,
+so they fail the build's tests if they drift.
+
+| 360 px | 1280 px |
+| --- | --- |
+| ![The privacy and terms page at 360px](docs/screenshots/privacy-360.png) | ![The privacy and terms page at 1280px](docs/screenshots/privacy-1280.png) |
+
+## Known limitations
+
+- **Safari/WebKit is unverified.** Tested on Chromium and Firefox only.
+- **The Receipt can't see past PocketRAG's server.** "Then to" (the server's onward hop
+  to Gemini or your provider) and the model name are the server's own report.
+- **The free shared tier is rate-limited** (per IP per day, plus Google's own quota). When
+  it's busy you get a countdown, or the raw matched passages, instead of an answer.
+- **No free shared tier in the EEA, Switzerland or the UK.** Bring your own key there.
+- Anthropic, Grok and OpenRouter answers are experimental: their failure paths are
+  live-verified, a real successful answer isn't yet.
+- Chat history is stored unencrypted in your browser.
+
+## Roadmap
+
+Deferred, not started:
+- Streaming answers
+- Toolchain bump (vitest, vite, wrangler)
+- Pin the Hugging Face model revisions to commit SHAs instead of `main`
+- Durable Objects for the rate-limit counters and the breaker (exact instead of
+  best-effort)
+- Safari verification
+
 ## Docs
 
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — codebase map, data flow, and the reasoning
   behind every non-obvious decision
 - [SECURITY_REVIEW.md](./SECURITY_REVIEW.md) — the Milestone 15 security audit
 - [TODO.md](./TODO.md) — project history and what's left
+- [Privacy and terms](https://pocketrag.pages.dev/#privacy) — what's stored, what's
+  sent, what the server keeps; source: `src/components/PrivacyPage.tsx`

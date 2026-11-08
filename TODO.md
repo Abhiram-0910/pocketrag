@@ -44,9 +44,8 @@ Read this at the start of every session to know what to work on next.
       DOMPurify currently strips Google's leading `<style>`, so the widget renders
       unstyled). Persistence is settled: the history DB never stores it (Phase 1); it
       still sits in `QueryPanel`'s in-memory turns for the session's display.
-- [ ] Friendly error when the embedding model/runtime download fails — Firefox showed
-      the raw `can't access property "tokenizer_class", s is undefined` as the document
-      status when a model host was blocked.
+- [x] Friendly error when the embedding model/runtime download fails, with a Try again
+      that re-downloads (Phase 5b; the cached load promises are now dropped on failure).
 - [ ] Safari verification (Playwright WebKit needs system libraries here; Safari loads
       a different ORT pair, `ort-wasm-simd-threaded.{mjs,wasm}`).
 - [ ] Optional: make the API-key input uncontrolled, so React stops mirroring the key
@@ -117,8 +116,7 @@ Read this at the start of every session to know what to work on next.
       `/models` unaffected. Landing + README say so; `ByokPanel` shows the free-tier
       data-use line while the shared tier is on. Worker `6beeb4b6`, Pages `f3f4aa6a`. Gaps
       (VPNs, wrong geo-IP, fail-open on unknown country) in SECURITY_REVIEW.md §9.
-- [ ] Favicon is still Vite's default logo (`public/favicon.svg`); replace with a
-      PocketRAG mark (the og-image uses the `LockSimple` icon).
+- [x] Favicon: the LockSimple mark from the og-image (Phase 5b).
 - [ ] Re-check the free-tier data-use copy whenever the Gemini API terms change (the
       landing, README and og description quote it).
 - [ ] Not verified yet: CORS preflights on Firefox against the live Worker (Chromium: one
@@ -152,7 +150,7 @@ Read this at the start of every session to know what to work on next.
 - [ ] Anthropic / Grok / OpenRouter success paths still unverified (no working key).
 - [x] `index.html` title / meta description / canonical / Open Graph + Twitter tags and a
       1200×630 og-image (`5efe65a`).
-- [ ] Privacy and terms pages.
+- [x] Privacy and terms page (Phase 5b): in-app `#privacy` view, drift-tested.
 - [ ] IndexedDB export (documents + conversations) — see "Chat history + Receipts" for
       the grounded-turns constraint.
 - [ ] Client-side error monitoring.
@@ -819,6 +817,13 @@ plan at `~/.claude/plans/snoopy-stirring-tide.md` (Sessions A-D).
 ---
 
 ## 🟢 Backlog — carried over, unscheduled
+
+**Roadmap after v1.0.0** (same list as the README's Roadmap):
+- [ ] Streaming answers
+- [ ] Toolchain bump (see Current Sprint)
+- [ ] Hugging Face model revision pins (see Current Sprint)
+- [ ] Durable Objects for the rate-limit counters and the breaker
+- [ ] Safari verification
 - [ ] Force a smaller onnxruntime-web WASM variant (13MB/14MB vs current 22.5MB) —
       investigated in Session 5, deliberately deferred: the smaller variants may lack
       the async interop our dual WebGPU/WASM pipeline needs, and onnxruntime-web's

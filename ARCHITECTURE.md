@@ -396,6 +396,27 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
   manual / OpenRouter), unconfirmed. `/models` is unchanged: ids + display names were
   enough to tier every provider. `defaultModelFor`/`PREFERRED_GEMINI_MODEL` are gone; the
   shared tier's pinned model (`providers/gemini.ts`) is untouched.
+- **Privacy and terms page (Phase 5b).** An in-app view, `src/components/PrivacyPage.tsx`,
+  shown when the hash starts with `#privacy` (so its `#privacy-…` section anchors keep it
+  open); linked from the landing and app footers and the README. Not a static HTML file:
+  the enforced CSP forbids inline style, and a static file can't reference Vite's hashed
+  CSS. The app stays mounted under it (`hidden`), so an in-memory key and the open chat
+  survive a visit. Its lists come from the code (`ALLOWED_DESTINATIONS`, `PROVIDERS` /
+  `PROVIDER_HOSTS`) or from `src/lib/privacyFacts.ts`, and `privacyFacts.test.ts` renders
+  the page and fails on drift: localStorage keys found in `src/` vs the listed ones, no
+  `document.cookie`/`sessionStorage`, region codes parsed from `worker/src/region.ts`,
+  providers vs `SUPPORTED_PROVIDERS`, no email address.
+- **Model download failure (Phase 5b).** `embedding.worker.ts` tags every model/runtime
+  load failure `modelDownload` (`tagLoad`), and `embeddingClient.ts` then terminates the
+  embedding worker so the next request starts a fresh one. A retry inside the same worker
+  can't work: transformers.js resolves a failed metadata fetch as `{exists: false}` and
+  memoizes it module-wide (`memoize_promise.js`), and our own load promises stay cached
+  too; found by the step-b blocked-host scenario, where the first fix made no new request. `classifyEmbeddingError`
+  (`errorTaxonomy.ts`) turns it into "Couldn't download the search model. Check your
+  connection or network blocking, then try again." The document row gets a Try again
+  (`DocEntry.retry`) that re-runs the embedding step only — notes are never re-sent for
+  OCR — and is disabled while any document is processing (the worker has one message
+  handler). A query-time failure shows the same message; Search again re-attempts.
 - **Enforced Content-Security-Policy (Step C, `2146f71` + `41931e3`, production
   `8c992a01`).** `public/_headers` sends one policy under `/*`. Every source below was
   measured, not assumed: a Playwright run of every flow under a deliberately strict
