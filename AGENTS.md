@@ -4106,6 +4106,88 @@ shared call only). Receipt rendering of the echoed model is covered by step-c an
 **Tagged:** `v1.0.0` → `50770af` (the deployed source), pushed. Anthropic key file absent.
 No HSTS header (never in `_headers`; not in the required list).
 
+### Session 41 — 2026-11-08 (Claude Code)
+**Goal:** Phase 6 (v1.0.1): public-repo history scan, privacy page fact table, 5a leftovers,
+live Anthropic check, then (only if it passed) a Pages deploy + tag.
+
+**A. History scan:** 104 commits, all refs (`master`, `v1.0.0`, no stash), `git grep` over
+`rev-list --all` + `git log --all -S`. No webhook URL or key anywhere: webhook matches are
+fixtures (`/1/token`, `{id}/{token}`), `sk-`/`xai-`/`AIza` matches are fakes/regexes (0 of
+42 distinct key-shaped tokens high-entropy without a fake marker), `gsk_` 0, `Bearer <token>`
+0; 159 env/wrangler/dev.vars/md blobs: high-entropy strings are API paths and placeholders.
+Public but internal: the Cloudflare account id (AGENTS ×6, TODO ×1), KV namespace id,
+`/home/abhi/` paths, TODO's unrotated-webhook note, SECURITY_REVIEW §§7-10 gaps.
+
+**B. Privacy page fact table** (claim → code → verified):
+| Claim | Source | Y/N |
+|---|---|---|
+| No accounts, no cookies | no `document.cookie`/`sessionStorage` in src (test); live Pages + Worker: 0 `Set-Cookie` | Y |
+| Docs DB `pocketrag`: name, text, passages, vectors; file never stored | `src/lib/db.ts:3-35`, `sessionFiles.ts` | Y (file name added) |
+| History DB `pocketrag-history`, plain text; web-grounded answers not stored | `historyDb.ts:83,133-135` | Y |
+| localStorage keys (3) | `privacyFacts.ts:5-9`, test scans src | Y |
+| Models + runtime in Cache Storage `transformers-cache` | transformers `env.js` `cacheKey`/`useWasmCache`; `embedding.worker.ts` no override | **N → fixed** (runtime was "HTTP cache") |
+| API key in memory only | `ByokPanel.tsx:46` (`useState`), `answerRequest.ts:63-65` | Y |
+| Up to 3 passages, last 3 Q&A, random doc IDs | `QueryPanel.tsx:30`, `conversation.ts:27`, `DropZone.tsx:106` | Y |
+| Diagram image: off by default, shared only, trigger | `diagramImageSetting.ts:10`, `QueryPanel.tsx:405-407`, `diagramHeuristic.ts:22` | **N → fixed** (trigger is the top passage's page, not the question) |
+| Own key: content + key; model lookup sends key | `models.ts:48` (`{provider, apiKey}`) | Y (provider name added) |
+| OCR: whole file, per-file consent, shared Gemini | `NotesDropZone.tsx:42-46`, `ocrRequest.ts:31-38`, Worker `index.ts:546` | Y |
+| Provider hosts / CSP destinations / region list | imported + tested | Y |
+| Region by Cloudflare geo | `worker/src/index.ts:589` | Y |
+| No request-body logging | all `console.*` in `worker/src` (index.ts:207,276,305,612) | Y |
+| KV `ratelimit:{bucket}:{ip}:{day}`, raw IP, TTL 86400 | `rateLimit.ts:78,93`, `index.ts:587`, no hashing in worker/src | Y (TTL wording: "24 h after last update"; in-memory fallback added) |
+| `cooldown:shared:gemini`, ≤ 2 h | `breaker.ts:9,17,88` | Y (TTL added) |
+| `discord-notify:{provider}:{endpoint}:{slot}`, 10 min / 6 h | `discord.ts:25-27,101,109` | added |
+| Failure log fields; OCR status only | `index.ts:206-222,275-277` | Y (retry hint, OCR narrowing added) |
+| Discord alert contents | `discord.ts:29-51`, `index.ts:249-262,281-296` | Y (exact fields listed) |
+| What Cloudflare logs | `wrangler.jsonc` observability on, sampling 1 → Workers Logs invocation log per request, 3/7-day retention (CF docs) | **N → fixed** ("nothing kept but counters" was wrong); IP in invocation logs: unverified, worded "can include" |
+New tests (7) in `privacyFacts.test.ts`, all shown failing on the old page.
+
+**C.** `docs/screenshots/byok-model-proposal-{360,1280}.png` (18 / 17 KB), README:132.
+Privacy screenshots regenerated (25 / 43 KB, PNG8). Tests: manual entry —
+`modelLadder.test.ts` "junk only → no rungs (manual entry)", "model rejected at the lowest
+rung, or a manual model → manual entry", "no rungs → manual entry open from the start";
+step-b "picker: manual model ID", "no rungs". Step-down — `modelLadder.test.ts` "model
+rejected → proposes the next LOWER rung, unconfirmed, naming the rejected model"; step-b
+request_rejected step down + confirm. Search disabled until confirmed — step-b
+`searchDisabledBeforeConfirm`, `searchDisabledUntilConfirm`, `searchDisabledOnInvalid`.
+
+**D. Live Anthropic (production, 65077398):** key file 1 line, typed into the password
+field, never printed. `/models` 200: claude-haiku-5-5, claude-sonnet-5-5, claude-opus-5-5,
+claude-fable-5-1, claude-opus-5, claude-sonnet-5, claude-fable-5, claude-opus-4-8,
+claude-opus-4-7, claude-sonnet-4-6, claude-opus-4-6, claude-opus-4-5-20251101,
+claude-haiku-4-5-20251001, claude-sonnet-4-5-20250929. Rungs: haiku-5-5 (Light) /
+sonnet-5-5 (Balanced, Recommended) / opus-5-5 (Large); fable ignored (unknown family).
+Higher → Opus 5.5, Lower → Sonnet 5.5, Lower → Haiku 5.5 (lowest note). ONE answer on
+claude-haiku-5-5: 200, echo anthropic/claude-haiku-5-5, "The mitochondrion produces ATP
+through cellular respiration (Doc 1, page 1)." Turn Receipt row (egress id f78dddf4…):
+Then to api.anthropic.com, claude-haiku-5-5, Size 595 B = request body; same row,
+identical text, after reload. Fake key → 502 `key_rejected`. Key file deleted, confirmed.
+
+**E. Gates:** tsc exit 0 both; oxlint 0 diagnostics (135 files incl. worker); frontend
+362/362 (was 354), Worker 534/534; build + size guard pass; JS `index-DOyLNx0R.js` →
+`index-B2Z5xX1f.js`, CSS `index-B-3TNV76.css` unchanged; `git diff 6158529 --
+public/_headers` empty; step-b Chromium exit 0 (30 scenarios, 0 failures); step-c Chromium
++ Firefox exit 0, 15/15, 25/25 matched, 0 unexpected.
+
+**Deployed (Pages only):** `65077398` → **`57582fe2-209e-4db2-9d70-99d7015da444`**
+(source `d9fa8c0`). Worker unchanged `24733ba0`. CSP byte-identical (446 B), five headers
+present, no HSTS, no Set-Cookie; preflight 200, invalid 400, fake key 502 `key_rejected`.
+Smoke (Chromium, /answer + /ocr aborted): 0 Worker POSTs, PDF → 1 chunk, "Claude" without
+"(Experimental)", Grok still Experimental, new privacy copy, no overflow, 0 CSP
+console/reports, 0 page errors. Tagged `v1.0.1` → `d9fa8c0`. Rollback:
+```bash
+npx wrangler whoami >/dev/null
+TOKEN=$(grep -oP '^oauth_token = "\K[^"]+' ~/.config/.wrangler/config/default.toml)
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+  https://api.cloudflare.com/client/v4/accounts/da55acd99cee5a43df7d397dd80af4e3/pages/projects/pocketrag/deployments/65077398-bf6c-4dde-b398-84f0661b01c8/rollback
+```
+
+**Deviations:** Worker `EXPERIMENTAL_PROVIDERS` still lists anthropic (Worker not to be
+redeployed); parity test relaxed to frontend ⊆ Worker. The D script's "Then to" regex was
+case-sensitive against CSS-uppercased text and printed false; the captured row text shows
+the host. README diagram line and privacy summary corrected too. `master` not pushed (tag
+only).
+
 ---
 
 <!-- Copy the block above for each new session -->

@@ -626,6 +626,38 @@ simulated only; navigations and WebRTC outside CSP; history plaintext at rest.
 
 ---
 
+## 11. Public-repo history scan, privacy page facts, Anthropic verified (Phase 6, v1.0.1, 2026-11-08)
+
+- **History scan (repo now public).** All 104 commits on every ref (`master`, `v1.0.0`; no
+  stash) searched with `git grep` over `git rev-list --all` plus `git log --all -S` for
+  Discord webhook URLs, `AIza`, `sk-`, `sk-ant-`, `xai-`, `gsk_`, `Bearer `, and
+  high-entropy strings in every `.env*`, `wrangler.*`, `.dev.vars*` and `*.md` blob (159
+  blobs). **No secret found.** Every match is a test fixture (`/api/webhooks/1/...`,
+  `{id}/{token}`, `sk-...fake...`), a placeholder (`.dev.vars.example` values are
+  lowercase words), a key-shaped regex, or a Cloudflare API path. Values were classified by
+  shape and hash only, never printed.
+- **Public but internal:** the Cloudflare account id (AGENTS.md ×6, TODO.md ×1, in rollback
+  commands; an identifier, not a credential) and the KV namespace id in
+  `worker/wrangler.jsonc`; local paths under `/home/abhi/`; TODO's note that the old Discord
+  webhook is compromised and not yet rotated; the listed gaps in §§7-10 (fail-open limiter,
+  VPN bypass of the region block, ORT bytes not integrity-checked).
+- **Privacy page.** Every claim was checked against code (`AGENTS.md` Session 41 has the
+  table). Three were wrong and are fixed with tests in `privacyFacts.test.ts`: the ONNX
+  runtime sits in Cache Storage `transformers-cache` (transformers.js `useWasmCache`), not
+  the HTTP cache; the diagram image is triggered by the best-matching passage's page, not
+  the question; and the server *does* keep request records: `observability.enabled` with
+  `head_sampling_rate: 1` puts an invocation log for every request in Workers Logs (3 days
+  Free / 7 days Paid). Also added: the KV TTLs, the `discord-notify:*` keys, the in-memory
+  fallback counters and the exact Discord alert fields.
+- **Anthropic BYOK verified live** on production (`claude-haiku-5-5`, 200, Receipt shows
+  `api.anthropic.com` + the model, survives reload); the "(Experimental)" label is gone
+  from the UI. The Worker's `EXPERIMENTAL_PROVIDERS` still lists it (Worker not redeployed),
+  which only affects the copy for unclassified failures and Discord alerts on own-key
+  `request_rejected`.
+- **HSTS (low priority, unverified):** Pages sends no `Strict-Transport-Security`. The
+  whole `.dev` TLD is on browsers' HSTS preload list, so `pocketrag.pages.dev` should
+  already be HTTPS-only in preloading browsers. Not verified here.
+
 ## Summary
 
 | # | Area | Verdict | Action |
@@ -641,6 +673,7 @@ simulated only; navigations and WebRTC outside CSP; history plaintext at rest.
 | 10 | KV fail-open, shared-tier breaker, retry timing (Phase 3c, Worker `06d7917b`) | **PASS, with listed gaps** | KV errors allow; per-isolate fallback limiter is weak (a floor, not a quota); breaker can't be extended by spam; hints are numbers only; Durable Objects are the exact fix |
 | 9 | Shared tier region restriction (EEA/CH/UK, Gemini terms) | **PASS, with listed gaps** | Worker `6beeb4b6`: 403 `region_restricted` before KV/provider, no logging of country/IP; can't see through VPNs/proxies, trusts geo-IP, fails open on missing/`XX`/`T1` |
 | 8 | Egress ledger visibility, chat history at rest (Phase 1, 2a, 2b, 2c) | **PASS, with listed gaps** | Worker echo live (`483afdc9`); history + Receipts UI in production (`785e99d2`, rollback `8c992a01`); every observed request reconciled to a ledger row on Chromium and Firefox; one real CORS preflight observed (CDP, Chromium) and paired with its POST, not recorded in the ledger by design; navigations/WebRTC outside CSP; history plaintext at rest; Safari unverified |
+| 11 | Public-repo history scan, privacy page facts, Anthropic (Phase 6, v1.0.1) | **PASS** | no secret in any commit; 3 privacy-page claims corrected + drift-tested; Anthropic BYOK verified live; HSTS low priority (`.dev` preload, unverified) |
 
 **Status: audit complete, both gaps found this session are fixed, verified, and
 committed (`9ace2ff`).** Nothing outstanding from the approved plan. Re-confirmed

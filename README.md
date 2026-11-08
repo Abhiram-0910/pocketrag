@@ -59,8 +59,8 @@ default off — see Features below for both.
 **Fully proven** (live-verified end-to-end against production, repeatedly, across the
 Milestone 16 retest):
 - Shared-tier Gemini answers, with citation-level groundedness checking
-- Bring-your-own-key for **Gemini** and **OpenAI** — live model-list fetch, real
-  grounded answers
+- Bring-your-own-key for **Gemini**, **OpenAI** and **Anthropic** — live model-list
+  fetch, real grounded answers (Anthropic verified on production in v1.0.1)
 - Hybrid retrieval (BM25 + embeddings via Reciprocal Rank Fusion) with cross-encoder
   reranking
 - Multi-document library: bulk upload, per-document and cross-document retrieval,
@@ -68,7 +68,8 @@ Milestone 16 retest):
 - Multi-turn conversations with frozen `Doc N` citation labels and retrieval-query
   blending for follow-up questions
 - Handwritten/scanned notes (photos and PDFs) via OCR, with per-file upload consent
-- Diagram-aware Q&A — opt-in page-image sending for questions about figures/charts
+- Diagram-aware Q&A — opt-in: sends the best-matching passage's page as an image when
+  that page has a picture or the passage mentions a figure, chart or table
 - Export a conversation as a PDF
 - Receipts: every answer lists each request that carried your data — where it went,
   what it carried (question, passage and turn counts, never the text itself), its size
@@ -91,7 +92,7 @@ Milestone 16 retest):
 
 **Experimental** — shipped, but the success path isn't independently verifiable yet,
 so treat these as best-effort, not proven:
-- Bring-your-own-key for **Anthropic, Grok, and OpenRouter** — fully implemented
+- Bring-your-own-key for **Grok and OpenRouter** — fully implemented
   (same trust model as Gemini/OpenAI: key never persisted, request-scoped only), and
   their *failure* paths are live-verified (a bad key correctly produces a sanitized
   error, no key leak). Their *success* path — a real working answer — has no test key
@@ -209,8 +210,9 @@ jsDelivr downloads are real.
 
 [pocketrag.pages.dev/#privacy](https://pocketrag.pages.dev/#privacy), linked from the app
 and landing footers: what's stored in your browser, what leaves it, what the server keeps
-(per-IP daily counters, not hashed, expiring in 24 hours; failure logs without request
-bodies), how to delete it, and short plain terms. Its lists are tested against the code,
+(per-IP daily counters, not hashed, expiring 24 hours after their last update; failure
+logs without request bodies; Cloudflare Workers Logs' per-request records, kept up to 7
+days), how to delete it, and short plain terms. Its lists are tested against the code,
 so they fail the build's tests if they drift.
 
 | 360 px | 1280 px |
@@ -225,7 +227,7 @@ so they fail the build's tests if they drift.
 - **The free shared tier is rate-limited** (per IP per day, plus Google's own quota). When
   it's busy you get a countdown, or the raw matched passages, instead of an answer.
 - **No free shared tier in the EEA, Switzerland or the UK.** Bring your own key there.
-- Anthropic, Grok and OpenRouter answers are experimental: their failure paths are
+- Grok and OpenRouter answers are experimental: their failure paths are
   live-verified, a real successful answer isn't yet.
 - Chat history is stored unencrypted in your browser.
 

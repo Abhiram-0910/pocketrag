@@ -77,9 +77,14 @@ Read this at the start of every session to know what to work on next.
       down a rung (`663d1d5`). No model list rendered.
   - [ ] Gemini / OpenAI / Grok / OpenRouter pickers are fixture-tested only (no live key
         list checked).
-  - [ ] **Phase 5a D: live Anthropic check through production** — blocked: the key file
-        `/tmp/pocketrag-scratch/anthropic.key` was missing on 2026-11-08. Once it passes,
-        drop Anthropic from `EXPERIMENTAL_PROVIDERS` (ByokPanel) on the next Pages deploy.
+  - [x] **Live Anthropic check through production** (Phase 6, v1.0.1): `/models` returned
+        14 ids, ladder haiku-5-5 / sonnet-5-5 (Recommended) / opus-5-5; one answer on
+        `claude-haiku-5-5` → 200, turn Receipt `api.anthropic.com` + model, restored on
+        reload; fake key → 502 `key_rejected`. "(Experimental)" label removed (Pages).
+  - [ ] Drop `'anthropic'` from the Worker's `EXPERIMENTAL_PROVIDERS` on the next Worker
+        deploy (then restore exact equality in `experimentalProviders.test.ts`).
+  - [ ] `claude-fable-*` ids are returned by Anthropic but ignored by the ladder (unknown
+        family, by design); add a family rule if it should be offered.
   - [ ] Families the ladder doesn't know (e.g. a new Anthropic family name) are ignored by
         design; add a family rule in `modelLadder.ts` when one appears.
 ### Chat history + Receipts (per-answer egress ledger)
@@ -147,15 +152,21 @@ Read this at the start of every session to know what to work on next.
       check that a real alert arrives.
 - [ ] Grok bad-key detection relies only on the message regex `/\bapi key\b/i` (its
       code is a generic `invalid-argument`) — breaks silently if xAI rewords it.
-- [ ] Anthropic / Grok / OpenRouter success paths still unverified (no working key).
+- [ ] Grok / OpenRouter success paths still unverified (no working key). Anthropic verified
+      in Phase 6.
 - [x] `index.html` title / meta description / canonical / Open Graph + Twitter tags and a
       1200×630 og-image (`5efe65a`).
 - [x] Privacy and terms page (Phase 5b): in-app `#privacy` view, drift-tested.
   - [x] Repo made public; Pages `65077398` re-promoted; tagged `v1.0.0` (`50770af`).
-- [ ] Live-capture the answer Receipt's model + size on production (the v1.0.0 release
-      check's selector read the This-session list instead; one shared call next time,
-      select the Receipt inside the turn, not `details[data-receipt]`.last()).
-- [ ] Consider an HSTS header in `public/_headers` (Pages serves none today).
+- [x] Live-capture the answer Receipt's model + size on production — done in Phase 6 on
+      the Anthropic turn (`li[data-egress-id]` outside "This session": 595 B = request
+      body, model shown, identical after reload).
+- [ ] Low priority: HSTS header in `public/_headers` (Pages serves none). The `.dev` TLD is
+      HSTS-preloaded, so `pocketrag.pages.dev` should already be HTTPS-only in preloading
+      browsers — unverified.
+- [ ] Optional: `observability.logs.invocation_logs: false` on the Worker (keeps our failure
+      lines, drops the per-request record the privacy page now discloses); needs a Worker
+      deploy and a page update.
 - [ ] IndexedDB export (documents + conversations) — see "Chat history + Receipts" for
       the grounded-turns constraint.
 - [ ] Client-side error monitoring.
