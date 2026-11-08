@@ -4089,9 +4089,22 @@ gate:** the repo is PRIVATE, so the page's contact link (GitHub Issues) and the 
 "Source on GitHub" 404 for the public. Rolled back to `148336c5` via the Pages API
 (production serves `index-DqyeWL1J.js` again). Worker unchanged (`24733ba0`).
 
-**Not done:** D (release check, the one shared answer, tag `v1.0.0`) — blocked on the
-repo-visibility decision. Re-promote `65077398` with the same rollback API call once the
-links resolve publicly (no rebuild needed).
+**Re-promoted:** the owner made the repo public (Issues + repo URLs 200 anonymously; a
+history scan found no key-shaped strings; tracked `.env.*` hold only the public API URL).
+`65077398-bf6c-4dde-b398-84f0661b01c8` re-promoted via the Pages API; gates re-run: CSP
+byte-identical, the five headers present, favicon = new mark, og-image 200, privacy check
+0 failures at 360/1280, smoke 0 Worker POSTs / 0 CSP / 0 errors.
+
+**Release check (D):** landing copy + data-use line served. ONE shared `/answer`: 200,
+`gemini` / `gemini-3.5-flash-lite`, cited answer ("…produces ATP through cellular
+respiration (Doc 1, Page 1)."); reload restored the answer text; Delete everything → 0
+documents; 1 shared call total, 0 CSP events/reports, 0 page errors. **Gap:** the script's
+Receipt selector (`details[data-receipt]`.last()) matched the This-session list, not the
+answer's Receipt, so the Receipt's model + size were not captured live; not retried (one
+shared call only). Receipt rendering of the echoed model is covered by step-c and unit tests.
+
+**Tagged:** `v1.0.0` → `50770af` (the deployed source), pushed. Anthropic key file absent.
+No HSTS header (never in `_headers`; not in the required list).
 
 ---
 
