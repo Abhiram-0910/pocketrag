@@ -55,17 +55,28 @@ function createExtractor(device: 'webgpu' | 'wasm'): Promise<FeatureExtractionPi
   })
 }
 
+// A model or runtime that fails to load (blocked host, offline) is reported as
+// `modelDownload` so the UI shows a plain message and a retry. The client then replaces
+// this whole worker (embeddingClient.ts): transformers.js memoizes a failed file lookup as
+// "doesn't exist" for the module's lifetime, so nothing inside this worker can re-download.
+class ModelLoadError extends Error {}
+function tagLoad<T>(promise: Promise<T>): Promise<T> {
+  return promise.catch((err: unknown) => {
+    throw new ModelLoadError(err instanceof Error ? err.message : String(err))
+  })
+}
+
 let extractorPromise: ReturnType<typeof resolveBackend<FeatureExtractionPipeline>> | null = null
 let tokenizerPromise: ReturnType<typeof AutoTokenizer.from_pretrained> | null = null
 
 async function getTokenizer(): Promise<Tokenizer> {
-  tokenizerPromise ??= AutoTokenizer.from_pretrained(MODEL_ID)
+  tokenizerPromise ??= tagLoad(AutoTokenizer.from_pretrained(MODEL_ID))
   const hfTokenizer = await tokenizerPromise
   return { countTokens: (text) => hfTokenizer(text, { add_special_tokens: false }).input_ids.data.length }
 }
 
 async function getExtractor(): Promise<FeatureExtractionPipeline> {
-  extractorPromise ??= resolveBackend(ctx.navigator?.gpu, createExtractor)
+  extractorPromise ??= tagLoad(resolveBackend(ctx.navigator?.gpu, createExtractor))
   const { extractor, backend, detail } = await extractorPromise
   post({ type: 'backend', backend, detail })
   post({ type: 'model-ready' })
@@ -101,7 +112,7 @@ async function createReranker(device: 'webgpu' | 'wasm'): Promise<Reranker> {
 let rerankerPromise: ReturnType<typeof resolveBackend<Reranker>> | null = null
 
 async function getReranker(): Promise<Reranker> {
-  rerankerPromise ??= resolveBackend(ctx.navigator?.gpu, createReranker)
+  rerankerPromise ??= tagLoad(resolveBackend(ctx.navigator?.gpu, createReranker))
   // resolveBackend's return field is named `extractor` generically (shared with
   // getExtractor() above) — aliased here since this holds a {tokenizer, model} pair,
   // not an extractor.
@@ -169,6 +180,6 @@ ctx.onmessage = async (event) => {
       return
     }
   } catch (err) {
-    post({ type: 'error', message: err instanceof Error ? err.message : String(err) })
+    post({ type: 'error', message: err instanceof Error ? err.message : String(err), modelDownload: err instanceof ModelLoadError })
   }
 }

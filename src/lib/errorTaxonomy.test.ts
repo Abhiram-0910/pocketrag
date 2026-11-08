@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { classify, classifyPdfError, classifyWebgpuFallback } from './errorTaxonomy'
+import { MODEL_DOWNLOAD_MESSAGE, classify, classifyEmbeddingError, classifyPdfError, classifyWebgpuFallback } from './errorTaxonomy'
 
 describe('classify', () => {
   it('classifies a 429 as rate-limit and formats resetAt in the local timezone', () => {
@@ -69,5 +69,17 @@ describe('classifyWebgpuFallback', () => {
     expect(result.severity).toBe('info')
     expect(result.message).toContain('WebGPU failed at runtime')
     expect(result.message).toContain('GPU adapter request denied')
+  })
+})
+
+describe('classifyEmbeddingError', () => {
+  it('a model/runtime download failure gets the plain message, never the raw TypeError', () => {
+    const r = classifyEmbeddingError({ message: `can't access property "tokenizer_class", s is undefined`, modelDownload: true })
+    expect(r).toEqual({ type: 'model-download', severity: 'error', message: MODEL_DOWNLOAD_MESSAGE })
+    expect(r.message).toBe("Couldn't download the search model. Check your connection or network blocking, then try again.")
+  })
+
+  it('any other worker error keeps its own text', () => {
+    expect(classifyEmbeddingError({ message: 'Chunking failed.' })).toEqual({ type: 'unknown', severity: 'error', message: 'Chunking failed.' })
   })
 })

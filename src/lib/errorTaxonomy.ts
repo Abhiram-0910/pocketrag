@@ -1,4 +1,4 @@
-export type ErrorTaxonomyType = 'rate-limit' | 'provider-unavailable' | 'region-restricted' | 'network' | 'corrupt-pdf' | 'webgpu-unsupported' | 'unknown'
+export type ErrorTaxonomyType = 'rate-limit' | 'provider-unavailable' | 'region-restricted' | 'network' | 'corrupt-pdf' | 'webgpu-unsupported' | 'model-download' | 'unknown'
 export type ErrorSeverity = 'error' | 'warning' | 'info'
 
 export interface TaxonomyResult {
@@ -51,6 +51,20 @@ export function classify(input: ClassifiableError): TaxonomyResult {
 
 export function classifyPdfError(message: string): TaxonomyResult {
   return { type: 'corrupt-pdf', severity: 'error', message }
+}
+
+export const MODEL_DOWNLOAD_MESSAGE =
+  "Couldn't download the search model. Check your connection or network blocking, then try again."
+
+/**
+ * The embedding worker's error for a document or query. A model/runtime that failed to
+ * load (blocked host, offline: the raw text is e.g. transformers.js's `tokenizer_class`
+ * TypeError) gets the plain message; anything else keeps the worker's own text.
+ */
+export function classifyEmbeddingError(error: { message: string; modelDownload?: boolean }): TaxonomyResult {
+  return error.modelDownload
+    ? { type: 'model-download', severity: 'error', message: MODEL_DOWNLOAD_MESSAGE }
+    : { type: 'unknown', severity: 'error', message: error.message }
 }
 
 export function classifyWebgpuFallback(backend: 'wasm-unavailable' | 'wasm-failed', detail: string): TaxonomyResult {

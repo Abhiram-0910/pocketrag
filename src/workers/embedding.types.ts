@@ -41,6 +41,6 @@ export type WorkerResponse =
   | { type: 'result'; chunks: EmbeddedChunk[]; dims: number }
   | { type: 'query-embedding'; embedding: number[] }
   | { type: 'rerank-result'; scores: RerankScore[] }
-  | { type: 'error'; message: string }
+  | { type: 'error'; message: string; modelDownload?: boolean }
   // A model/runtime download, for the main thread's egress log (embeddingClient.ts).
   | { type: 'egress'; record: EgressRecord }

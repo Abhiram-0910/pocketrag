@@ -14,7 +14,7 @@ import { renderPageToImage } from '../lib/pageRender'
 import { sanitizeGroundingHtml } from '../lib/sanitizeHtml'
 import { buildConversationPdf, type ExportSource } from '../lib/pdfExport'
 import { canRunQuery } from '../lib/queryScope'
-import { classify, type TaxonomyResult } from '../lib/errorTaxonomy'
+import { classify, classifyEmbeddingError, type TaxonomyResult } from '../lib/errorTaxonomy'
 import { failureAction, type FailureAction } from '../lib/apiError'
 import { formatClock, formatRemaining, retryCopy, retryTimingFor, type RetryTiming } from '../lib/retryTiming'
 import { useRetryCountdown } from './useRetryCountdown'
@@ -104,7 +104,7 @@ function rerankChunksAsync(
       onModelProgress: (msg) => onProgress(msg.percent),
       onModelReady: () => {},
       onRerankResult: (msg) => resolve(msg.scores),
-      onError: (msg) => reject(new Error(msg.message)),
+      onError: (msg) => reject(new Error(classifyEmbeddingError(msg).message)),
     })
   })
 }
@@ -454,7 +454,7 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
             .finally(() => setBusy(false))
         },
         onError: (msg) => {
-          setError(msg.message)
+          setError(classifyEmbeddingError(msg).message)
           setBusy(false)
         },
       })

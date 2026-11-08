@@ -617,6 +617,7 @@ async function main() {
   }
 
   await stepD(browser, pageErrors)
+  await modelDownloadBlocked(browser, pageErrors)
 
   check(pageErrors.length === 0, `page errors: ${pageErrors.join('; ')}`)
   console.log(JSON.stringify({ results, answerCalls, pageErrors, failures }, null, 2))
@@ -628,6 +629,52 @@ async function main() {
 // Own context: a fixed zone (IST, UTC+5:30 all year) so local times are exact, and the
 // clock installed before load. Time flows normally until fastForward jumps it. All
 // mocked; the Worker's resetAt values are what breaker.ts computes for these instants.
+// Phase 5b: the search-model host is blocked (aborted requests, as an offline network or a
+// blocker would) → the document row shows the plain message, never the raw TypeError, and
+// a Try again button. Unblock, press it: the download is re-attempted and the doc is ready.
+async function modelDownloadBlocked(browser, pageErrors) {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+  await context.addInitScript(() => localStorage.setItem('pocketrag:has-visited-app', 'true'))
+  let blocked = true
+  let blockedHits = 0
+  const hf = async (r) => {
+    if (blocked) {
+      blockedHits++
+      return r.abort('internetdisconnected')
+    }
+    return r.continue()
+  }
+  await context.route(/^https:\/\/([a-z0-9-]+\.)*(huggingface\.co|hf\.co)\//, hf)
+  const page = await context.newPage()
+  page.on('pageerror', (e) => pageErrors.push(`modelBlocked: ${String(e)}`))
+  await page.goto(APP)
+  await page.setInputFiles('input[type="file"][accept="application/pdf"]', writeTestPdf())
+  const MESSAGE = "Couldn't download the search model. Check your connection or network blocking, then try again."
+  const row = { scenario: 'Phase 5b: model host blocked → plain message + Try again' }
+  const status = page.locator('li p', { hasText: MESSAGE })
+  await status.waitFor({ timeout: 60_000 }).catch(() => {})
+  row.message = await status.count()
+  row.rawTypeErrorShown = await page.locator('li', { hasText: /tokenizer_class|TypeError|Failed to fetch/ }).count()
+  row.blockedHits = blockedHits
+  const retry = page.getByRole('button', { name: 'Try again: cells.pdf' })
+  row.retryButton = await retry.count()
+  check(row.message === 1, 'modelBlocked: plain message not shown')
+  check(row.rawTypeErrorShown === 0, 'modelBlocked: raw error text shown')
+  check(row.retryButton === 1, 'modelBlocked: no Try again button')
+  check(blockedHits > 0, 'modelBlocked: the model host was never requested')
+  if (row.retryButton === 1) {
+    blocked = false
+    await retry.click()
+    await page.locator('li p', { hasText: /^\d+ chunks?$/ }).first().waitFor({ timeout: 300_000 }).catch(() => {})
+    row.readyAfterRetry = await page.locator('li p', { hasText: /^\d+ chunks?$/ }).count()
+    row.messageAfterRetry = await status.count()
+    check(row.readyAfterRetry === 1, 'modelBlocked: retry did not re-download and index the document')
+    check(row.messageAfterRetry === 0, 'modelBlocked: message still shown after a successful retry')
+  }
+  results.push(row)
+  await context.close()
+}
+
 async function stepD(browser, pageErrors) {
   const T0 = new Date('2026-10-31T23:00:00.000Z') // the night before US DST ends
   const MIDNIGHT_PDT = '2026-11-01T07:00:00.000Z' // = 12:30 PM IST

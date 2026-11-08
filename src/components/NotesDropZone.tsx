@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type ChangeEvent, type DragEvent } from 'react'
+import { classifyEmbeddingError } from '../lib/errorTaxonomy'
 import { UploadSimple } from '@phosphor-icons/react'
 import { embedDocument } from '../lib/embeddingClient'
 import { saveDocument, type ChunkRecord } from '../lib/db'
@@ -99,7 +100,7 @@ export function NotesDropZone() {
             // hasImage is false: Milestone 10's diagram-likely hint is about charts/
             // diagrams in typed PDFs, not handwriting, so reusing it here would be a
             // category error.
-            embedDocument([{ page: 1, text: result.text, hasImage: false }], {
+            const embed = () => embedDocument([{ page: 1, text: result.text, hasImage: false }], {
               onModelProgress: (msg) => setModelProgress(msg.percent),
               onBackend: (msg) => setBackend(msg.backend, msg.detail),
               onModelReady: () => {},
@@ -134,10 +135,19 @@ export function NotesDropZone() {
                   .finally(() => resolve())
               },
               onError: (msg) => {
-                updateDocument(id, { status: 'error', error: msg.message })
+                const { type, message } = classifyEmbeddingError(msg)
+                const retry =
+                  type === 'model-download'
+                    ? () => {
+                        updateDocument(id, { status: 'loading-model', error: null, retry: null })
+                        embed()
+                      }
+                    : null
+                updateDocument(id, { status: 'error', error: message, retry })
                 resolve()
               },
             })
+            embed()
           })
           .catch((err) => {
             updateDocument(id, { status: 'error', error: err instanceof Error ? err.message : 'Failed to read file.' })

@@ -10,6 +10,13 @@ function getWorker(): Worker {
     // own listener — a download can land while any of them is installed.
     worker.addEventListener('message', (event: MessageEvent<WorkerResponse>) => {
       if (event.data.type === 'egress') recordEgress(event.data.record)
+      // A failed model download poisons this worker (transformers.js memoizes the failed
+      // lookup), so drop it: the next request, e.g. Try again, starts a fresh one that
+      // really re-downloads. The failed request has already ended; nothing else is queued.
+      if (event.data.type === 'error' && event.data.modelDownload) {
+        worker?.terminate()
+        worker = null
+      }
     })
   }
   return worker

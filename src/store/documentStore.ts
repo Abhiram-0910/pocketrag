@@ -27,6 +27,9 @@ export interface DocEntry {
   // Milestone 9: which tab/pipeline this document came from — see db.ts's
   // DocumentRecord.source for the persisted counterpart.
   source: 'document' | 'note'
+  // Set when the search model failed to download: re-runs the embedding step for this
+  // document (the text is already extracted, so OCR is never re-sent).
+  retry?: (() => void) | null
 }
 
 interface DocumentState {

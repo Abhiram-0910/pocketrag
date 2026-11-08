@@ -49,6 +49,9 @@ export function DocumentList({ source }: DocumentListProps) {
   const backend = useDocumentStore((s) => s.backend)
   const backendDetail = useDocumentStore((s) => s.backendDetail)
   const modelProgress = useDocumentStore((s) => s.modelProgress)
+  // The embedding worker runs one document at a time (a single message handler), so a
+  // retry waits until nothing else is being processed.
+  const processing = allDocuments.some((d) => d.status !== 'ready' && d.status !== 'error')
 
   // Only one row confirms at a time; a failed delete leaves the row in place with a
   // brief inline error rather than crashing (deletion is destructive, so no silent retry).
@@ -142,6 +145,11 @@ export function DocumentList({ source }: DocumentListProps) {
                 </button>
                 {/* A failed file was never persisted, so removing it just clears the in-memory
                     notice — retry is re-dropping the file (see ARCHITECTURE.md / TODO.md). */}
+                {doc.status === 'error' && doc.retry && (
+                  <Button variant="secondary" disabled={processing} onClick={() => doc.retry?.()} aria-label={`Try again: ${doc.fileName}`}>
+                    Try again
+                  </Button>
+                )}
                 {doc.status === 'error' && (
                   <button
                     type="button"
