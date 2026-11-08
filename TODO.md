@@ -77,10 +77,10 @@ Read this at the start of every session to know what to work on next.
       proposal/higher/lower/confirm, manual model-id escape hatch, model-rejected steps
       down a rung (`663d1d5`). No model list rendered.
   - [ ] Gemini / OpenAI / Grok / OpenRouter pickers are fixture-tested only (no live key
-        list checked). Anthropic was checked live in Phase 5a (see AGENTS.md Session 39).
-  - [ ] Anthropic's UI label still says "(Experimental)" (`EXPERIMENTAL_PROVIDERS` in
-        ByokPanel) although its success path is now live-verified; drop it on the next
-        Pages deploy.
+        list checked).
+  - [ ] **Phase 5a D: live Anthropic check through production** — blocked: the key file
+        `/tmp/pocketrag-scratch/anthropic.key` was missing on 2026-11-08. Once it passes,
+        drop Anthropic from `EXPERIMENTAL_PROVIDERS` (ByokPanel) on the next Pages deploy.
   - [ ] Families the ladder doesn't know (e.g. a new Anthropic family name) are ignored by
         design; add a family rule in `modelLadder.ts` when one appears.
 ### Chat history + Receipts (per-answer egress ledger)

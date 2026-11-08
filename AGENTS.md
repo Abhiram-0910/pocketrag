@@ -4023,6 +4023,47 @@ and through the real hook in step-b. `retryHintSource` is a fixed enum string be
 number, not a numeric code. Unverified live: the breaker against a real Gemini 429, a real
 RetryInfo, a real KV outage, and the EEA 403.
 
+### Session 39 — 2026-11-05 / 2026-11-08 (Claude Code)
+**Goal:** Phase 5a: (A) breaker-cap Try again waits for the real cooldown; (B) automatic
+BYOK model picker replacing the model list; (C) verify + deploy; (D) live Anthropic check.
+
+**Built (2026-11-05, unlogged at the time; the session ended after the Worker deploy):**
+`02f402d` Worker `cooldownFields` adds additive `cooldownSeconds` at the cap (it sent only
+`resetAt` = midnight Pacific before); the client gates Try again on it, enables at once if
+absent; copy unchanged; step-b escalation scenarios updated. `663d1d5` `modelLadder.ts` +
+ByokPanel picker (see the Phase 5a standing rules above). `992822e` docs.
+
+**Verification (2026-11-08):** `tsc` + `oxlint` exit 0 both sides as real binaries.
+Frontend 346/346 (was 303), Worker 534/534 (cap assertions extended inside existing cases).
+Build + size guard pass. JS `index-BbDHe76s.js` → `index-DqyeWL1J.js`, CSS
+`index-D95y7U_R.css` → `index-BSLb5nKp.css` (picker utilities). `git diff 6158529 --
+public/_headers` empty. step-b Chromium exit 0 (29 scenarios, `failures: []`, 0 page
+errors; cap: "Try again at 4:47 AM" = 15 min, enabled at zero; no-`cooldownSeconds` →
+"You can try again now"). step-c Chromium + Firefox exit 0, 15/15 flows, 25/25 matched,
+0 unexpected. Local `wrangler pages dev` needs `--compatibility-date=2026-07-29` (binary
+max); local-only.
+
+**Deployed:** Worker `06d7917b` → **`24733ba0-4193-432b-b5da-5571e1f180ca`** (2026-11-05;
+source unchanged since `02f402d`). Pages `75687228` → **`148336c5`** (source `992822e`).
+Rollback:
+```bash
+cd worker && npx wrangler rollback 06d7917b-bbcb-448b-bedb-919743bcf6b1
+npx wrangler whoami >/dev/null
+TOKEN=$(grep -oP '^oauth_token = "\K[^"]+' ~/.config/.wrangler/config/default.toml)
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+  https://api.cloudflare.com/client/v4/accounts/da55acd99cee5a43df7d397dd80af4e3/pages/projects/pocketrag/deployments/75687228-8647-4083-9e92-03a2d1969ecf/rollback
+```
+**Gates:** preflight 200 with the Pages origin, invalid body 400, Anthropic `/models` fake
+key → 502 `key_rejected`; CSP byte-identical (446 B); smoke (Chromium, `/answer` + `/ocr`
+aborted, 0 Worker POSTs): new bundle served, PDF indexed, BYOK shows Find a model, 0
+model selects, question disabled until a model is confirmed, 0 CSP events/reports, 0 page
+errors.
+
+**Not done:** D (live Anthropic) — `/tmp/pocketrag-scratch/anthropic.key` did not exist on
+2026-11-08. Anthropic's success path stays unverified; script ready in the session
+scratchpad (`anthropic-live.cjs`, key never printed, output redacted). Gemini / OpenAI /
+Grok / OpenRouter pickers are fixture-tested only.
+
 ---
 
 <!-- Copy the block above for each new session -->
