@@ -1,9 +1,9 @@
 import {
+  AutoModel,
   AutoModelForSequenceClassification,
   AutoTokenizer,
   env,
-  pipeline,
-  type FeatureExtractionPipeline,
+  mean_pooling,
   type PreTrainedModel,
   type PreTrainedTokenizer,
   type ProgressInfo,
@@ -44,13 +44,27 @@ function onModelProgress(info: ProgressInfo) {
   }
 }
 
-function createExtractor(device: 'webgpu' | 'wasm'): Promise<FeatureExtractionPipeline> {
-  return pipeline('feature-extraction', EMBEDDING_MODEL.id, {
-    revision: EMBEDDING_MODEL.revision,
-    dtype: 'q8',
-    device,
-    progress_callback: onModelProgress,
-  })
+// Not pipeline('feature-extraction'): with a progress callback, transformers.js 4.2.0's
+// pipeline() looks up file sizes without the revision, so every load made a ranged request
+// to resolve/main/… that the cache never answers (step-c caught it after a reload).
+// from_pretrained passes the revision through. embedText below does what the pipeline did:
+// tokenize (padding, truncation), run, mean-pool over the attention mask, L2-normalize.
+interface Embedder {
+  tokenizer: PreTrainedTokenizer
+  model: PreTrainedModel
+}
+
+async function createExtractor(device: 'webgpu' | 'wasm'): Promise<Embedder> {
+  const [tokenizer, model] = await Promise.all([
+    loadTokenizer(),
+    AutoModel.from_pretrained(EMBEDDING_MODEL.id, {
+      revision: EMBEDDING_MODEL.revision,
+      dtype: 'q8',
+      device,
+      progress_callback: onModelProgress,
+    }),
+  ])
+  return { tokenizer, model }
 }
 
 // A model or runtime that fails to load (blocked host, offline) is reported as
@@ -64,16 +78,20 @@ function tagLoad<T>(promise: Promise<T>): Promise<T> {
   })
 }
 
-let extractorPromise: ReturnType<typeof resolveBackend<FeatureExtractionPipeline>> | null = null
+let extractorPromise: ReturnType<typeof resolveBackend<Embedder>> | null = null
 let tokenizerPromise: ReturnType<typeof AutoTokenizer.from_pretrained> | null = null
 
-async function getTokenizer(): Promise<Tokenizer> {
+function loadTokenizer() {
   tokenizerPromise ??= tagLoad(AutoTokenizer.from_pretrained(EMBEDDING_MODEL.id, { revision: EMBEDDING_MODEL.revision }))
-  const hfTokenizer = await tokenizerPromise
+  return tokenizerPromise
+}
+
+async function getTokenizer(): Promise<Tokenizer> {
+  const hfTokenizer = await loadTokenizer()
   return { countTokens: (text) => hfTokenizer(text, { add_special_tokens: false }).input_ids.data.length }
 }
 
-async function getExtractor(): Promise<FeatureExtractionPipeline> {
+async function getExtractor(): Promise<Embedder> {
   extractorPromise ??= tagLoad(resolveBackend(ctx.navigator?.gpu, createExtractor))
   const { extractor, backend, detail } = await extractorPromise
   post({ type: 'backend', backend, detail })
@@ -81,15 +99,13 @@ async function getExtractor(): Promise<FeatureExtractionPipeline> {
   return extractor
 }
 
-async function embedText(extractor: FeatureExtractionPipeline, text: string): Promise<number[]> {
-  const output = await extractor([text], { pooling: 'mean', normalize: true })
-  return output.tolist()[0] as number[]
+async function embedText({ tokenizer, model }: Embedder, text: string): Promise<number[]> {
+  const inputs = tokenizer([text], { padding: true, truncation: true })
+  const { last_hidden_state } = (await model(inputs)) as { last_hidden_state: Parameters<typeof mean_pooling>[0] }
+  return mean_pooling(last_hidden_state, inputs.attention_mask).normalize(2, -1).tolist()[0] as number[]
 }
 
-interface Reranker {
-  tokenizer: PreTrainedTokenizer
-  model: PreTrainedModel
-}
+type Reranker = Embedder
 
 // Cross-encoders use a sequence-classification head (query+passage pair in, a single
 // relevance logit out), not the feature-extraction pipeline the embedding model
