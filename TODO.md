@@ -147,9 +147,11 @@ Read this at the start of every session to know what to work on next.
 - [x] Shared-Gemini free-tier data-use disclosure on the landing page and README, and the
       egress claims reworded (Phase 3a, `8e51588`). Not yet in the app's main screen
       itself (only the landing page, shown once per browser).
-- [ ] Discord: create an Admin server and rotate the webhook (the old webhook is
-      compromised), `wrangler secret put DISCORD_WEBHOOK_URL`, then do a positive
-      check that a real alert arrives.
+- [x] Discord: webhook rotated 2026-11-08. Old and leaked webhooks deleted; one new
+      webhook (`pocketrag_worker`, #worker-alerts); `DISCORD_WEBHOOK_URL` re-uploaded with
+      `wrangler secret put` after a 204 test post. URL never committed.
+- [ ] Discord positive check: a real alert from the Worker's own failure path has not
+      been observed since the rotation (the 204 was a manual test post).
 - [ ] Grok bad-key detection relies only on the message regex `/\bapi key\b/i` (its
       code is a generic `invalid-argument`) — breaks silently if xAI rewords it.
 - [ ] Grok / OpenRouter success paths still unverified (no working key). Anthropic verified

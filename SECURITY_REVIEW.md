@@ -641,6 +641,9 @@ simulated only; navigations and WebRTC outside CSP; history plaintext at rest.
   `worker/wrangler.jsonc`; local paths under `/home/abhi/`; TODO's note that the old Discord
   webhook is compromised and not yet rotated; the listed gaps in §§7-10 (fail-open limiter,
   VPN bypass of the region block, ORT bytes not integrity-checked).
+- **Update 2026-11-08:** the Discord webhook has been rotated (old and leaked webhooks
+  deleted, new webhook created, `DISCORD_WEBHOOK_URL` re-uploaded). The "not yet rotated"
+  note above is the state at scan time, not current.
 - **Privacy page.** Every claim was checked against code (`AGENTS.md` Session 41 has the
   table). Three were wrong and are fixed with tests in `privacyFacts.test.ts`: the ONNX
   runtime sits in Cache Storage `transformers-cache` (transformers.js `useWasmCache`), not

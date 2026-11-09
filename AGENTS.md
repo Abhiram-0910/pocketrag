@@ -4117,6 +4117,8 @@ fixtures (`/1/token`, `{id}/{token}`), `sk-`/`xai-`/`AIza` matches are fakes/reg
 0; 159 env/wrangler/dev.vars/md blobs: high-entropy strings are API paths and placeholders.
 Public but internal: the Cloudflare account id (AGENTS ×6, TODO ×1), KV namespace id,
 `/home/abhi/` paths, TODO's unrotated-webhook note, SECURITY_REVIEW §§7-10 gaps.
+*Update 2026-11-08: the Discord webhook was rotated after this scan (see Session 42), so
+the unrotated-webhook note is no longer current.*
 
 **B. Privacy page fact table** (claim → code → verified):
 | Claim | Source | Y/N |
@@ -4187,6 +4189,18 @@ redeployed); parity test relaxed to frontend ⊆ Worker. The D script's "Then to
 case-sensitive against CSS-uppercased text and printed false; the captured row text shows
 the host. README diagram line and privacy summary corrected too. `master` not pushed (tag
 only).
+
+---
+
+### Session 42 — 2026-11-09 (Claude Code)
+**Goal:** record the Discord webhook rotation (docs only; no code, no deploy).
+
+The user rotated the webhook on 2026-11-08: old and leaked webhooks deleted, one new
+webhook (`pocketrag_worker`, #worker-alerts), Worker secret `DISCORD_WEBHOOK_URL`
+re-uploaded after a 204 test post. The URL was never committed. TODO's rotation item
+marked done; the positive check stays open (no real alert from the Worker's own path seen
+since). Dated update lines added after the history-scan records in SECURITY_REVIEW.md and
+Session 41 above; the scan text itself is unchanged.
 
 ---
 
