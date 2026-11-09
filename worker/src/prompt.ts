@@ -47,6 +47,7 @@ export function buildPrompt(
   history: HistoryTurn[] = [],
   hasImage: boolean = false,
   enableWebSearch: boolean = false,
+  followMethod: boolean = false,
 ): string {
   const passages = chunks
     .map((chunk) => `[Doc ${labelOf.get(chunk.documentId)}, Page ${chunk.page}]\n${chunk.text}`)
@@ -73,13 +74,23 @@ ${history.map((turn) => `Q: ${turn.question}\nA: ${turn.answer}`).join('\n\n')}
     ? ' If a claim comes from the attached image, cite the page it was rendered from the same way.'
     : ''
 
+  // v1.1: the client matched the question to a worked example (sent as the first passage)
+  // that it follows with different values. Method and notation come from the passage; only
+  // the values change. The refusal and citation rules above still apply.
+  const methodRules = followMethod
+    ? `- The question asks for the same calculation as the worked example in the first passage, with different values. Solve it with the SAME method, steps and notation as that worked example: substitute the question's values, show every step, and name the steps of the example you followed (for example "following Step 2 of the worked example (Doc 1, page 2)"). Never switch to a different method.
+- If the passages contain no worked example of this method, say so instead of solving it another way.
+`
+    : ''
+
   return `You are answering a question using ONLY the passages below, extracted from one or more PDF documents.${imageNote}
 
 Rules:
 - Answer using only information found in ${sourceRule}. Do not use outside knowledge, even if you know the answer.
 - Each passage is labelled with its document ("Doc N") and page. Cite both inline for every claim, in the form "(Doc N, page M)".${imageCitationRule}
 - If ${sourceRule} do not contain enough information to answer, say so explicitly instead of guessing.
-
+- Write the answer in the language of the question. When you quote a passage, quote it word for word in its original language.
+${methodRules}
 ${historySection}Passages:
 ${passages}
 

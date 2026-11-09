@@ -159,4 +159,30 @@ describe('buildPrompt', () => {
       expect(prompt).toContain('You are answering a question using ONLY the passages below, extracted from one or more PDF documents.')
     })
   })
+
+  describe('v1.1: answer language and worked-example method', () => {
+    const chunks = [{ text: 'Step 1: A = P(1 + r/100)^n', page: 1, score: 0.9, documentId: 'a' }]
+    const labelOf = new Map([['a', 1]])
+    it("always tells the model to answer in the question's language and quote passages verbatim", () => {
+      const prompt = buildPrompt('¿Cómo se forman las nubes?', chunks, labelOf)
+      expect(prompt).toContain('Write the answer in the language of the question.')
+      expect(prompt).toContain('quote it word for word in its original language')
+    })
+
+    it('adds the method rules only with followMethod, next to the unchanged refusal and citation rules', () => {
+      const plain = buildPrompt('q', chunks, labelOf)
+      const method = buildPrompt('q', chunks, labelOf, [], false, false, true)
+      expect(plain).not.toContain('worked example')
+      expect(method).toContain('the worked example in the first passage')
+      expect(method).toContain('SAME method, steps and notation')
+      expect(method).toContain('show every step')
+      expect(method).toContain('name the steps of the example you followed')
+      expect(method).toContain('Never switch to a different method.')
+      expect(method).toContain('If the passages contain no worked example of this method, say so')
+      for (const rule of ['Do not use outside knowledge', 'Cite both inline for every claim', 'say so explicitly instead of guessing']) {
+        expect(method).toContain(rule)
+      }
+    })
+  })
 })
+

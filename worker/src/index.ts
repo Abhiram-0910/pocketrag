@@ -386,6 +386,7 @@ async function handleAnswer(
     validation.history,
     image !== undefined,
     enableWebSearch,
+    validation.followMethod,
   )
 
   // BYOK: the key lives only in this local, request-scoped variable — passed straight

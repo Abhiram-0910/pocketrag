@@ -1748,3 +1748,33 @@ describe('Step D — retry fields, the shared Gemini breaker, our own 429', () =
     }
   })
 })
+
+describe('worker fetch handler — /answer, followMethod (v1.1)', () => {
+  const promptSent = () => {
+    const [, init] = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit]
+    return JSON.parse(init.body as string).contents[0].parts[0].text as string
+  }
+
+  it("asks for the worked example's method when followMethod is true, keeping the grounding rules and the citation check", async () => {
+    mockGeminiSuccess('Following Step 1 of the worked example (Doc 1, page 1), A = 25000 × 1.06⁴.')
+    const res = await worker.fetch(answerRequest({ ...validBody, followMethod: true }), makeEnv(), makeCtx())
+    expect(res.status).toBe(200)
+    const prompt = promptSent()
+    expect(prompt).toContain('SAME method, steps and notation as that worked example')
+    expect(prompt).toContain('say so explicitly instead of guessing')
+    expect(prompt).toContain('Cite both inline for every claim')
+    expect(((await res.json()) as { groundingWarning: boolean }).groundingWarning).toBe(false)
+  })
+
+  it('sends the ordinary prompt without it, and rejects a non-boolean value before any provider call', async () => {
+    mockGeminiSuccess('The mitochondrion powers the cell (Doc 1, page 1).')
+    await worker.fetch(answerRequest(validBody), makeEnv(), makeCtx())
+    expect(promptSent()).not.toContain('SAME method')
+
+    const bad = await worker.fetch(answerRequest({ ...validBody, followMethod: 'yes' }), makeEnv(), makeCtx())
+    expect(bad.status).toBe(400)
+    expect(((await bad.json()) as { error: string }).error).toBe('followMethod must be a boolean.')
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+})
+

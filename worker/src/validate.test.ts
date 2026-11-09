@@ -738,3 +738,25 @@ describe('EXPERIMENTAL_PROVIDERS', () => {
     expect(EXPERIMENTAL_PROVIDERS).not.toContain('openai')
   })
 })
+
+describe('validateAnswerRequest — followMethod (v1.1)', () => {
+  const base = { question: 'q', chunks: [validChunk] }
+  const own = { ...base, keySource: 'own', apiKey: 'user-supplied-key', provider: 'openai', model: 'gpt-5' }
+
+  it('defaults to false on both tiers (older clients never send it)', () => {
+    expect(validateAnswerRequest(base)).toMatchObject({ ok: true, followMethod: false })
+    expect(validateAnswerRequest(own)).toMatchObject({ ok: true, followMethod: false })
+  })
+
+  it('accepts true on both tiers and any provider', () => {
+    expect(validateAnswerRequest({ ...base, followMethod: true })).toMatchObject({ ok: true, followMethod: true })
+    expect(validateAnswerRequest({ ...own, followMethod: true })).toMatchObject({ ok: true, followMethod: true })
+  })
+
+  it('rejects anything but a boolean', () => {
+    for (const followMethod of ['true', 1, null, {}]) {
+      expect(validateAnswerRequest({ ...base, followMethod })).toEqual({ ok: false, error: 'followMethod must be a boolean.' })
+    }
+  })
+})
+

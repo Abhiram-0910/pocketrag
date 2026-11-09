@@ -77,6 +77,10 @@ export interface AnswerRequestBody {
   // C and the three Experimental BYOK providers. Revisit if a billing-enabled key
   // becomes available.
   enableWebSearch?: boolean
+  // v1.1 worked-example fidelity: the client found that the question follows a worked
+  // example in the passages (the first passage) with different numbers, so the prompt asks
+  // for that example's exact method. Optional and additive: an older client never sends it.
+  followMethod?: boolean
 }
 
 export type ValidationResult =
@@ -92,6 +96,7 @@ export type ValidationResult =
       // never read an image off validation even by mistake; the type itself enforces
       // the "shared-Gemini only" restriction, not just a runtime check.
       image: ImageAttachment | undefined
+      followMethod: boolean
       // Milestone 12: deliberately NOT present on the shared branch at all — grounding
       // is BYOK-gemini-only in this project's final scope (see AnswerRequestBody's
       // enableWebSearch doc comment for why), so there is nothing for a shared-tier
@@ -112,6 +117,7 @@ export type ValidationResult =
       // Milestone 12: only ever true here when `provider` is 'gemini' — enforced in
       // validateAnswerRequest below, not just documented.
       enableWebSearch: boolean
+      followMethod: boolean
     }
   | { ok: false; error: string }
 
@@ -235,7 +241,7 @@ export function validateAnswerRequest(body: unknown): ValidationResult {
   if (typeof body !== 'object' || body === null) {
     return { ok: false, error: 'Request body must be a JSON object.' }
   }
-  const { question, chunks, keySource, apiKey, provider, model, docLabels, history, image, enableWebSearch } =
+  const { question, chunks, keySource, apiKey, provider, model, docLabels, history, image, enableWebSearch, followMethod } =
     body as Record<string, unknown>
 
   if (typeof question !== 'string' || question.trim().length === 0) {
@@ -314,6 +320,11 @@ export function validateAnswerRequest(body: unknown): ValidationResult {
   }
   const resolvedEnableWebSearch = enableWebSearch ?? false
 
+  if (followMethod !== undefined && typeof followMethod !== 'boolean') {
+    return { ok: false, error: 'followMethod must be a boolean.' }
+  }
+  const resolvedFollowMethod = followMethod ?? false
+
   const trimmedQuestion = question.trim()
   const resolvedKeySource = keySource ?? 'shared'
   if (resolvedKeySource !== 'shared' && resolvedKeySource !== 'own') {
@@ -344,6 +355,7 @@ export function validateAnswerRequest(body: unknown): ValidationResult {
       docLabels: validatedDocLabels,
       history: validatedHistory,
       image: validatedImage,
+      followMethod: resolvedFollowMethod,
     }
   }
 
@@ -378,6 +390,7 @@ export function validateAnswerRequest(body: unknown): ValidationResult {
     docLabels: validatedDocLabels,
     history: validatedHistory,
     enableWebSearch: resolvedEnableWebSearch,
+    followMethod: resolvedFollowMethod,
   }
 }
 
