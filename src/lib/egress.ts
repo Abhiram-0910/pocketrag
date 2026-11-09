@@ -55,11 +55,13 @@ const KEY_CATEGORIES: Record<string, readonly PayloadCategory[]> = {
   image: ['page-image'],
   base64: ['ocr-file'],
   apiKey: ['api-key'],
-  // Settings, not user data: tier, provider, model, the web-search flag, the OCR file type.
+  // Settings, not user data: tier, provider, model, the web-search and follow-method flags,
+  // the OCR file type.
   keySource: [],
   provider: [],
   model: [],
   enableWebSearch: [],
+  followMethod: [],
   mimeType: [],
 }
 

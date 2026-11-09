@@ -4,6 +4,7 @@ import { UploadSimple } from '@phosphor-icons/react'
 import { extractPdfText } from '../lib/pdf'
 import { embedDocument } from '../lib/embeddingClient'
 import { saveDocument, type ChunkRecord } from '../lib/db'
+import { EMBEDDING_MODEL_KEY } from '../lib/searchModels'
 import { rememberSessionFile } from '../lib/sessionFiles'
 import { useDocumentStore } from '../store/documentStore'
 import { StatusBanner } from './ui/StatusBanner'
@@ -51,7 +52,7 @@ export function DropZone() {
                   hasImage: chunk.hasImage,
                 }))
                 saveDocument(
-                  { id, fileName: file.name, uploadedAt: Date.now(), chunkCount: msg.chunks.length, source: 'document' },
+                  { id, fileName: file.name, uploadedAt: Date.now(), chunkCount: msg.chunks.length, source: 'document', embeddingModel: EMBEDDING_MODEL_KEY },
                   chunkRecords,
                 )
                   .then(() => {

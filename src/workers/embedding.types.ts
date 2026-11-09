@@ -31,6 +31,9 @@ export type WorkerRequest =
   | { type: 'embed-document'; pages: PageInput[] }
   | { type: 'embed-query'; text: string }
   | { type: 'rerank'; query: string; candidates: RerankCandidate[] }
+  // Re-embeds stored passage text (no chunking) when a document's vectors came from an
+  // older model — see src/lib/reindex.ts.
+  | { type: 'embed-texts'; texts: string[] }
 
 export type WorkerResponse =
   | { type: 'backend'; backend: BackendState; detail: string }
@@ -41,6 +44,7 @@ export type WorkerResponse =
   | { type: 'result'; chunks: EmbeddedChunk[]; dims: number }
   | { type: 'query-embedding'; embedding: number[] }
   | { type: 'rerank-result'; scores: RerankScore[] }
+  | { type: 'texts-result'; embeddings: number[][] }
   | { type: 'error'; message: string; modelDownload?: boolean }
   // A model/runtime download, for the main thread's egress log (embeddingClient.ts).
   | { type: 'egress'; record: EgressRecord }

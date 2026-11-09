@@ -120,4 +120,25 @@ describe('hybridRankChunks', () => {
     const hybrid = hybridRankChunks(queryEmbedding, 'zeta', chunks, 3)
     expect(hybrid.map((r) => r.chunk.id)).toContain('chunkX')
   })
+
+  it('gives chunks that match no query term no BM25 credit, so pool order cannot reorder them', () => {
+    // No chunk contains "zzz": before v1.1 every chunk still got a BM25 rank, in pool
+    // order, which outweighed this small cosine gap and put 'first' on top.
+    const chunks: TestHybridChunk[] = [
+      { id: 'first', text: 'alpha beta', embedding: [0.9, 0.436, 0] },
+      { id: 'second', text: 'gamma delta', embedding: [0.91, 0.415, 0] },
+    ]
+    expect(hybridRankChunks([1, 0, 0], 'zzz', chunks, 2).map((r) => r.chunk.id)).toEqual(['second', 'first'])
+  })
+
+  it('matches keywords in any script (Hindi), not just ASCII', () => {
+    const chunks: TestHybridChunk[] = [
+      { id: 'other', text: 'आमाशय में प्रोटीन पचता', embedding: [1, 0, 0] },
+      { id: 'monsoon', text: 'केरल में मानसून जून में पहुँचता है', embedding: [0, 1, 0] },
+    ]
+    // Cosine favours 'other' (and it comes first in the pool); only the keyword "मानसून"
+    // can lift 'monsoon' above it.
+    const ranked = hybridRankChunks([1, 0, 0], 'मानसून कब आता है', chunks, 2)
+    expect(ranked[0].chunk.id).toBe('monsoon')
+  })
 })

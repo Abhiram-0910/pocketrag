@@ -618,6 +618,8 @@ async function main() {
 
   await stepD(browser, pageErrors)
   await modelDownloadBlocked(browser, pageErrors)
+  await workedExamples(browser, pageErrors)
+  await reindexOutdated(browser, pageErrors)
 
   check(pageErrors.length === 0, `page errors: ${pageErrors.join('; ')}`)
   console.log(JSON.stringify({ results, answerCalls, pageErrors, failures }, null, 2))
@@ -671,6 +673,132 @@ async function modelDownloadBlocked(browser, pageErrors) {
     check(row.readyAfterRetry === 1, 'modelBlocked: retry did not re-download and index the document')
     check(row.messageAfterRetry === 0, 'modelBlocked: message still shown after a successful retry')
   }
+  results.push(row)
+  await context.close()
+}
+
+// v1.1 worked-example fidelity, on the committed eval fixture (eval/fixtures/maths-notes.pdf):
+// a paraphrase → no source block, no followMethod; new numbers → followMethod with the
+// example first, and the example + arithmetic note beside the answer; the document's own
+// question → "From your notes (page 1)" with the solution verbatim, kept after a reload.
+async function workedExamples(browser, pageErrors) {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+  await context.addInitScript(() => localStorage.setItem('pocketrag:has-visited-app', 'true'))
+  const page = await context.newPage()
+  page.on('pageerror', (e) => pageErrors.push(`worked: ${String(e)}`))
+  const bodies = []
+  await context.route(`${API}/answer`, (route) => {
+    const req = route.request()
+    if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS })
+    const body = JSON.parse(req.postData() || '{}')
+    bodies.push(body)
+    const ids = [...new Set(body.chunks.map((c) => c.documentId))]
+    return route.fulfill({
+      status: 200,
+      headers: { ...CORS, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ answer: `Worked answer ${bodies.length} (Doc 1, page 1).`, groundingWarning: false, docLabels: ids.map((d, i) => ({ label: i + 1, documentId: d })) }),
+    })
+  })
+  await page.goto(APP)
+  await page.setInputFiles('input[type="file"][accept="application/pdf"]', path.join(__dirname, '../eval/fixtures/maths-notes.pdf'))
+  await page.waitForFunction(() => document.querySelector('form input[type="text"]')?.disabled === false, null, { timeout: 300_000 })
+  const askW = async (question) => {
+    const n = bodies.length
+    await page.locator('form input[type="text"]').fill(question)
+    await page.getByRole('button', { name: 'Search' }).click()
+    await page.getByText(`Worked answer ${n + 1}`).first().waitFor({ timeout: 120_000 })
+    await page.waitForTimeout(300) // the source block reads IndexedDB after the answer renders
+    return bodies[n]
+  }
+  const blockText = async (kind) => {
+    const block = page.locator(`section[data-source-match="${kind}"]`)
+    return (await block.count()) ? (await block.innerText()).replace(/\s+/g, ' ').trim() : null
+  }
+  const row = { scenario: 'v1.1 worked examples (maths fixture)' }
+
+  const para = await askW('How do I calculate interest that is added to the principal every year?')
+  row.paraphrase = { followMethod: para.followMethod ?? null, verbatim: await blockText('verbatim'), method: await blockText('method') }
+  check(para.followMethod === undefined && !row.paraphrase.verbatim && !row.paraphrase.method, `worked paraphrase: ${JSON.stringify(row.paraphrase)}`)
+
+  const nums = await askW('Find the amount and the compound interest when ₹25,000 is invested at 6% per annum, compounded annually, for 4 years.')
+  const method = await blockText('method')
+  row.numbers = { followMethod: nums.followMethod, firstPassage: nums.chunks[0].text.slice(0, 60), firstPassageChars: nums.chunks[0].text.length, passages: nums.chunks.length, method: method && method.slice(0, 80), verbatim: await blockText('verbatim') }
+  check(nums.followMethod === true, 'worked numbers: followMethod not sent')
+  check(/Compound interest/.test(nums.chunks[0].text) && /Step 5/.test(nums.chunks[0].text) && nums.chunks[0].text.length <= 2000, `worked numbers: first passage ${row.numbers.firstPassage}`)
+  check(!!method && method.startsWith('Method from your notes (page 1)') && method.includes('Check the arithmetic: the model can make calculation mistakes.'), `worked numbers: method block ${method}`)
+  check(!row.numbers.verbatim, 'worked numbers: verbatim block shown for new numbers')
+
+  const exact = await askW('Find the amount and the compound interest when ₹12,000 is invested at 8% per annum, compounded annually, for 3 years.')
+  const verbatim = await blockText('verbatim')
+  row.exact = { followMethod: exact.followMethod ?? null, verbatim: verbatim && verbatim.slice(0, 80) }
+  check(exact.followMethod === undefined, 'worked exact: followMethod sent')
+  check(!!verbatim && verbatim.startsWith('From your notes (page 1)') && verbatim.includes('Step 5: Compound interest = A − P = 15116.54 − 12000 = ₹3,116.54.'), `worked exact: verbatim block ${verbatim}`)
+  check(!verbatim?.includes('Check the arithmetic'), 'worked exact: arithmetic note on a verbatim block')
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+  check(overflow <= 0, `worked: page scrolls horizontally by ${overflow}px`)
+
+  await page.reload()
+  await page.locator('section[data-source-match="verbatim"]').waitFor({ timeout: 30_000 }).catch(() => {})
+  row.verbatimAfterReload = !!(await blockText('verbatim'))
+  check(row.verbatimAfterReload, 'worked exact: verbatim block not restored after reload')
+  row.answerCalls = bodies.length
+  results.push(row)
+  await context.close()
+}
+
+// v1.1: a document saved before v1.1 (no embeddingModel) is re-embedded once from its stored
+// text — "Updating search index" on its row, then ready, stamped with the new model.
+async function reindexOutdated(browser, pageErrors) {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+  await context.addInitScript(() => localStorage.setItem('pocketrag:has-visited-app', 'true'))
+  const page = await context.newPage()
+  page.on('pageerror', (e) => pageErrors.push(`reindex: ${String(e)}`))
+  await page.goto(APP)
+  await page.evaluate(
+    () =>
+      new Promise((resolve, reject) => {
+        const open = indexedDB.open('pocketrag', 1)
+        open.onupgradeneeded = () => {
+          open.result.createObjectStore('documents', { keyPath: 'id' })
+          open.result.createObjectStore('chunks', { keyPath: 'id' }).createIndex('documentId', 'documentId')
+        }
+        open.onsuccess = () => {
+          const tx = open.result.transaction(['documents', 'chunks'], 'readwrite')
+          tx.objectStore('documents').put({ id: 'old-doc', fileName: 'old-notes.pdf', uploadedAt: 1, chunkCount: 2, source: 'document' })
+          const zero = Array(384).fill(0)
+          tx.objectStore('chunks').put({ id: 'old-doc:0', documentId: 'old-doc', index: 0, text: 'Mitochondria produce ATP.', tokenCount: 5, page: 1, embedding: zero, hasImage: false })
+          tx.objectStore('chunks').put({ id: 'old-doc:1', documentId: 'old-doc', index: 1, text: 'Ribosomes make proteins.', tokenCount: 4, page: 1, embedding: zero, hasImage: false })
+          tx.oncomplete = () => {
+            open.result.close()
+            resolve()
+          }
+          tx.onerror = () => reject(tx.error)
+        }
+        open.onerror = () => reject(open.error)
+      }),
+  )
+  await page.reload()
+  const row = { scenario: 'v1.1 re-index of a pre-v1.1 document' }
+  const updating = page.locator('li p', { hasText: 'Updating search index' })
+  await updating.first().waitFor({ timeout: 30_000 }).catch(() => {})
+  row.updatingShown = await updating.count()
+  await page.locator('li p', { hasText: /^2 chunks$/ }).waitFor({ timeout: 300_000 }).catch(() => {})
+  row.readyAfter = await page.locator('li p', { hasText: /^2 chunks$/ }).count()
+  row.stored = await page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const open = indexedDB.open('pocketrag', 1)
+        open.onsuccess = () => {
+          const tx = open.result.transaction(['documents', 'chunks'])
+          const doc = tx.objectStore('documents').get('old-doc')
+          const chunk = tx.objectStore('chunks').get('old-doc:0')
+          tx.oncomplete = () => resolve({ embeddingModel: doc.result?.embeddingModel, nonZero: chunk.result?.embedding.some((x) => x !== 0) })
+        }
+      }),
+  )
+  check(row.updatingShown === 1, 'reindex: "Updating search index" never shown')
+  check(row.readyAfter === 1, 'reindex: document not ready after re-indexing')
+  check(/^Xenova\/multilingual-e5-small@[0-9a-f]{40}$/.test(row.stored.embeddingModel ?? '') && row.stored.nonZero, `reindex: stored ${JSON.stringify(row.stored)}`)
   results.push(row)
   await context.close()
 }

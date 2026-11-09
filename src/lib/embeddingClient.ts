@@ -6,13 +6,12 @@ let worker: Worker | null = null
 function getWorker(): Worker {
   if (!worker) {
     worker = new Worker(new URL('../workers/embedding.worker.ts', import.meta.url), { type: 'module' })
-    // The onmessage handlers below are swapped on every call, so egress records get their
-    // own listener — a download can land while any of them is installed.
+    // Egress records get their own listener — a download can land during any request.
     worker.addEventListener('message', (event: MessageEvent<WorkerResponse>) => {
       if (event.data.type === 'egress') recordEgress(event.data.record)
       // A failed model download poisons this worker (transformers.js memoizes the failed
       // lookup), so drop it: the next request, e.g. Try again, starts a fresh one that
-      // really re-downloads. The failed request has already ended; nothing else is queued.
+      // really re-downloads. The failed request has already ended.
       if (event.data.type === 'error' && event.data.modelDownload) {
         worker?.terminate()
         worker = null
@@ -22,129 +21,104 @@ function getWorker(): Worker {
   return worker
 }
 
-export interface EmbedDocumentHandlers {
-  onBackend: (payload: Extract<WorkerResponse, { type: 'backend' }>) => void
-  onModelProgress: (payload: Extract<WorkerResponse, { type: 'model-progress' }>) => void
+// The worker has one message handler, so requests run one at a time, in order: before
+// v1.1 a question asked while a document was embedding swapped the handler and the
+// document's progress and result were lost. A request ends at its result or an error.
+let queue: Promise<void> = Promise.resolve()
+const TERMINAL: ReadonlySet<WorkerResponse['type']> = new Set(['result', 'query-embedding', 'rerank-result', 'texts-result', 'error'])
+
+function send(request: WorkerRequest, onMessage: (msg: WorkerResponse) => void): void {
+  queue = queue.then(
+    () =>
+      new Promise<void>((done) => {
+        const w = getWorker()
+        w.onmessage = (event: MessageEvent<WorkerResponse>) => {
+          onMessage(event.data)
+          if (TERMINAL.has(event.data.type)) done()
+        }
+        // The worker script itself failed (not a model error, which arrives as a message):
+        // end this request instead of stalling every one queued behind it.
+        w.onerror = (event) => {
+          event.preventDefault()
+          worker?.terminate()
+          worker = null
+          onMessage({ type: 'error', message: event.message || 'The search worker stopped unexpectedly.' })
+          done()
+        }
+        w.postMessage(request)
+      }),
+  )
+}
+
+type Handler<T extends WorkerResponse['type']> = (payload: Extract<WorkerResponse, { type: T }>) => void
+
+interface ModelHandlers {
+  onBackend: Handler<'backend'>
+  onModelProgress: Handler<'model-progress'>
   onModelReady: () => void
-  onChunked: (payload: Extract<WorkerResponse, { type: 'chunked' }>) => void
-  onEmbedProgress: (payload: Extract<WorkerResponse, { type: 'embed-progress' }>) => void
-  onResult: (payload: Extract<WorkerResponse, { type: 'result' }>) => void
-  onError: (payload: Extract<WorkerResponse, { type: 'error' }>) => void
+  onError: Handler<'error'>
+}
+
+// Routes the messages every request can get (model loading, errors); returns false for the rest.
+function common(msg: WorkerResponse, handlers: ModelHandlers): boolean {
+  if (msg.type === 'backend') handlers.onBackend(msg)
+  else if (msg.type === 'model-progress') handlers.onModelProgress(msg)
+  else if (msg.type === 'model-ready') handlers.onModelReady()
+  else if (msg.type === 'error') handlers.onError(msg)
+  else return false
+  return true
+}
+
+export interface EmbedDocumentHandlers extends ModelHandlers {
+  onChunked: Handler<'chunked'>
+  onEmbedProgress: Handler<'embed-progress'>
+  onResult: Handler<'result'>
 }
 
 /** Reuses a single worker across documents so the model only loads once per session. */
 export function embedDocument(pages: PageInput[], handlers: EmbedDocumentHandlers): void {
-  const w = getWorker()
-  w.onmessage = (event: MessageEvent<WorkerResponse>) => {
-    const msg = event.data
-    switch (msg.type) {
-      case 'backend':
-        handlers.onBackend(msg)
-        break
-      case 'model-progress':
-        handlers.onModelProgress(msg)
-        break
-      case 'model-ready':
-        handlers.onModelReady()
-        break
-      case 'chunked':
-        handlers.onChunked(msg)
-        break
-      case 'embed-progress':
-        handlers.onEmbedProgress(msg)
-        break
-      case 'result':
-        handlers.onResult(msg)
-        break
-      case 'error':
-        handlers.onError(msg)
-        break
-      case 'query-embedding':
-      case 'egress':
-        break
-    }
-  }
-  const request: WorkerRequest = { type: 'embed-document', pages }
-  w.postMessage(request)
+  send({ type: 'embed-document', pages }, (msg) => {
+    if (common(msg, handlers)) return
+    if (msg.type === 'chunked') handlers.onChunked(msg)
+    else if (msg.type === 'embed-progress') handlers.onEmbedProgress(msg)
+    else if (msg.type === 'result') handlers.onResult(msg)
+  })
 }
 
-export interface EmbedQueryHandlers {
-  onBackend: (payload: Extract<WorkerResponse, { type: 'backend' }>) => void
-  onModelProgress: (payload: Extract<WorkerResponse, { type: 'model-progress' }>) => void
-  onModelReady: () => void
-  onQueryEmbedding: (payload: Extract<WorkerResponse, { type: 'query-embedding' }>) => void
-  onError: (payload: Extract<WorkerResponse, { type: 'error' }>) => void
+export interface EmbedTextsHandlers extends ModelHandlers {
+  onEmbedProgress: Handler<'embed-progress'>
+  onResult: Handler<'texts-result'>
+}
+
+/** Embeds already-chunked passage text, in order — for re-indexing a stored document. */
+export function embedTexts(texts: string[], handlers: EmbedTextsHandlers): void {
+  send({ type: 'embed-texts', texts }, (msg) => {
+    if (common(msg, handlers)) return
+    if (msg.type === 'embed-progress') handlers.onEmbedProgress(msg)
+    else if (msg.type === 'texts-result') handlers.onResult(msg)
+  })
+}
+
+export interface EmbedQueryHandlers extends ModelHandlers {
+  onQueryEmbedding: Handler<'query-embedding'>
 }
 
 /** Embeds a single query string through the same worker/model — no chunking. */
 export function embedQuery(text: string, handlers: EmbedQueryHandlers): void {
-  const w = getWorker()
-  w.onmessage = (event: MessageEvent<WorkerResponse>) => {
-    const msg = event.data
-    switch (msg.type) {
-      case 'backend':
-        handlers.onBackend(msg)
-        break
-      case 'model-progress':
-        handlers.onModelProgress(msg)
-        break
-      case 'model-ready':
-        handlers.onModelReady()
-        break
-      case 'query-embedding':
-        handlers.onQueryEmbedding(msg)
-        break
-      case 'error':
-        handlers.onError(msg)
-        break
-      case 'chunked':
-      case 'embed-progress':
-      case 'result':
-      case 'egress':
-        break
-    }
-  }
-  const request: WorkerRequest = { type: 'embed-query', text }
-  w.postMessage(request)
+  send({ type: 'embed-query', text }, (msg) => {
+    if (common(msg, handlers)) return
+    if (msg.type === 'query-embedding') handlers.onQueryEmbedding(msg)
+  })
 }
 
-export interface RerankHandlers {
-  onBackend: (payload: Extract<WorkerResponse, { type: 'backend' }>) => void
-  onModelProgress: (payload: Extract<WorkerResponse, { type: 'model-progress' }>) => void
-  onModelReady: () => void
-  onRerankResult: (payload: Extract<WorkerResponse, { type: 'rerank-result' }>) => void
-  onError: (payload: Extract<WorkerResponse, { type: 'error' }>) => void
+export interface RerankHandlers extends ModelHandlers {
+  onRerankResult: Handler<'rerank-result'>
 }
 
 /** Reranks a candidate pool through the same worker's cross-encoder model. */
 export function rerankChunks(query: string, candidates: RerankCandidate[], handlers: RerankHandlers): void {
-  const w = getWorker()
-  w.onmessage = (event: MessageEvent<WorkerResponse>) => {
-    const msg = event.data
-    switch (msg.type) {
-      case 'backend':
-        handlers.onBackend(msg)
-        break
-      case 'model-progress':
-        handlers.onModelProgress(msg)
-        break
-      case 'model-ready':
-        handlers.onModelReady()
-        break
-      case 'rerank-result':
-        handlers.onRerankResult(msg)
-        break
-      case 'error':
-        handlers.onError(msg)
-        break
-      case 'chunked':
-      case 'embed-progress':
-      case 'result':
-      case 'query-embedding':
-      case 'egress':
-        break
-    }
-  }
-  const request: WorkerRequest = { type: 'rerank', query, candidates }
-  w.postMessage(request)
+  send({ type: 'rerank', query, candidates }, (msg) => {
+    if (common(msg, handlers)) return
+    if (msg.type === 'rerank-result') handlers.onRerankResult(msg)
+  })
 }

@@ -29,6 +29,10 @@ function statusText(doc: DocEntry): string {
       return 'Loading model…'
     case 'embedding':
       return doc.embedProgress ? `Embedding ${doc.embedProgress.done}/${doc.embedProgress.total}` : 'Embedding…'
+    case 'reindexing':
+      return doc.embedProgress
+        ? `Updating search index ${doc.embedProgress.done}/${doc.embedProgress.total}`
+        : 'Updating search index (one time, for multilingual search)…'
     case 'ready':
       return `${doc.chunkCount} chunk${doc.chunkCount === 1 ? '' : 's'}`
     case 'error':
@@ -95,7 +99,9 @@ export function DocumentList({ source }: DocumentListProps) {
       : `Delete permanently? ${count} chat turns cite this document and keep their answers.`
   }
 
-  const loadingModel = documents.some((d) => d.status === 'loading-model')
+  const loadingModel = documents.some(
+    (d) => d.status === 'loading-model' || (d.status === 'reindexing' && d.embedProgress === null),
+  )
   const webgpuFallback = backend === 'wasm-unavailable' || backend === 'wasm-failed'
 
   return (

@@ -48,10 +48,17 @@ export function hybridRankChunks<T extends HybridChunk>(
   const cosineRank = new Map(byCosine.map(({ chunk }, i) => [chunk.id, i]))
   const bm25Rank = new Map(byBm25.map(({ id }, i) => [id, i]))
 
+  // A chunk that matches no query term isn't in BM25's result list at all, so it gets no
+  // BM25 term. Ranking those zero scores too would hand out ranks in pool order, which is
+  // positional noise as large as the cosine differences (it was all of a Hindi pool before
+  // bm25.ts's tokenizer understood Devanagari).
+  const matched = new Set(byBm25.filter(({ score }) => score > 0).map(({ id }) => id))
+
   return chunks
     .map((chunk) => ({
       chunk,
-      score: 1 / (RRF_K + cosineRank.get(chunk.id)!) + 1 / (RRF_K + bm25Rank.get(chunk.id)!),
+      score:
+        1 / (RRF_K + cosineRank.get(chunk.id)!) + (matched.has(chunk.id) ? 1 / (RRF_K + bm25Rank.get(chunk.id)!) : 0),
     }))
     .sort((a, b) => b.score - a.score)
     .slice(0, topK)

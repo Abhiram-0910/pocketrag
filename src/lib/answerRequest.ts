@@ -87,6 +87,9 @@ export type FetchAnswerFn = (
   // Where this request's egress records go — the turn's chatStore.appendEgress. Without
   // it an answer request isn't recorded (egress.ts keeps answers out of the session log).
   onEgress?: (record: EgressRecord) => void,
+  // v1.1: the first chunk is a worked example the question follows with new values
+  // (src/lib/sourceMatch.ts); the Worker asks for that example's method.
+  followMethod?: boolean,
 ) => Promise<AnswerResponse>
 
 export type AnswerAttemptResult =
@@ -128,6 +131,7 @@ export async function attemptAnswer(
   image?: ImageAttachment,
   enableWebSearch?: boolean,
   onEgress?: (record: EgressRecord) => void,
+  followMethod?: boolean,
 ): Promise<AnswerAttemptResult> {
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
@@ -140,7 +144,7 @@ export async function attemptAnswer(
       searchEntryPointHtml,
       provider,
       model,
-    } = await fetchAnswer(question, chunks, keyConfig, controller.signal, docLabels, history, image, enableWebSearch, onEgress)
+    } = await fetchAnswer(question, chunks, keyConfig, controller.signal, docLabels, history, image, enableWebSearch, onEgress, followMethod)
     return {
       outcome: 'success',
       answer,
@@ -196,6 +200,7 @@ export const fetchAnswerFromWorker: FetchAnswerFn = async (
   image,
   enableWebSearch,
   onEgress,
+  followMethod,
 ) => {
   if (!API_BASE_URL) {
     throw new Error('Answer generation is not configured yet (VITE_API_BASE_URL is unset).')
@@ -205,8 +210,9 @@ export const fetchAnswerFromWorker: FetchAnswerFn = async (
     {
       // `image`/`enableWebSearch` are undefined whenever their respective gate didn't
       // fire — JSON.stringify drops an undefined-valued key entirely, so the Worker sees
-      // no field at all on an ordinary request, not an explicit `null`/`false`.
-      json: { question, chunks, ...keyConfig, docLabels, history, image, enableWebSearch },
+      // no field at all on an ordinary request, not an explicit `null`/`false`. Same for
+      // followMethod: sent only when true, so other requests are unchanged byte for byte.
+      json: { question, chunks, ...keyConfig, docLabels, history, image, enableWebSearch, followMethod: followMethod || undefined },
       signal,
     },
     { purpose: 'answer', upstream: keyConfig.keySource === 'own' ? keyConfig.provider : 'gemini' },

@@ -58,6 +58,7 @@ describe('attemptAnswer', () => {
       undefined,
       undefined,
       undefined,
+      undefined,
     )
   })
 
@@ -77,6 +78,7 @@ describe('attemptAnswer', () => {
       undefined,
       undefined,
       undefined,
+      undefined,
     )
 
     await attemptAnswer(fetchAnswer, 'q', CHUNKS, SHARED_CONFIG, 60_000)
@@ -87,6 +89,7 @@ describe('attemptAnswer', () => {
       expect.any(AbortSignal),
       [],
       [],
+      undefined,
       undefined,
       undefined,
       undefined,
@@ -110,6 +113,7 @@ describe('attemptAnswer', () => {
       undefined,
       undefined,
       undefined,
+      undefined,
     )
 
     await attemptAnswer(fetchAnswer, 'q', CHUNKS, SHARED_CONFIG, 60_000)
@@ -120,6 +124,7 @@ describe('attemptAnswer', () => {
       expect.any(AbortSignal),
       [],
       [],
+      undefined,
       undefined,
       undefined,
       undefined,
@@ -143,6 +148,7 @@ describe('attemptAnswer', () => {
       image,
       undefined,
       undefined,
+      undefined,
     )
 
     await attemptAnswer(fetchAnswer, 'q', CHUNKS, SHARED_CONFIG, 60_000)
@@ -156,7 +162,18 @@ describe('attemptAnswer', () => {
       undefined,
       undefined,
       undefined,
+      undefined,
     )
+  })
+
+  it('passes followMethod through to fetchAnswer (v1.1 worked examples), undefined by default', async () => {
+    const fetchAnswer: FetchAnswerFn = vi
+      .fn()
+      .mockResolvedValue({ answer: 'answer', groundingWarning: false, docLabels: DOC_LABELS })
+    await attemptAnswer(fetchAnswer, 'q', CHUNKS, SHARED_CONFIG, 60_000, [], [], undefined, undefined, undefined, true)
+    expect(vi.mocked(fetchAnswer).mock.calls[0][9]).toBe(true)
+    await attemptAnswer(fetchAnswer, 'q', CHUNKS, SHARED_CONFIG, 60_000)
+    expect(vi.mocked(fetchAnswer).mock.calls[1][9]).toBeUndefined()
   })
 
   describe('enableWebSearch (Milestone 12, Gemini-native grounding)', () => {
@@ -176,6 +193,7 @@ describe('attemptAnswer', () => {
         undefined,
         true,
         undefined,
+        undefined,
       )
 
       await attemptAnswer(fetchAnswer, 'q', CHUNKS, SHARED_CONFIG, 60_000)
@@ -186,6 +204,7 @@ describe('attemptAnswer', () => {
         expect.any(AbortSignal),
         [],
         [],
+        undefined,
         undefined,
         undefined,
         undefined,

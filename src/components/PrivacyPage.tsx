@@ -102,7 +102,9 @@ export function PrivacyPage() {
           <li>
             <strong>Answering a question, free shared tier.</strong> Your question, up to 3 matching passages, your last
             3 questions and answers, and random document IDs (never file names) go to PocketRAG's server, which sends
-            them to Google Gemini. If you turn on diagram images (off by default, shared tier only), the page of the
+            them to Google Gemini. When your question follows a worked example in your documents with different
+            numbers, that example's passage is extended to the rest of the example on its page (at most 2,000
+            characters). If you turn on diagram images (off by default, shared tier only), the page of the
             best-matching passage is added as an image when that page contains a picture or the passage mentions a
             figure, diagram, chart, graph or table.
           </li>

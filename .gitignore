@@ -24,3 +24,6 @@ dist-ssr
 *.sln
 *.sw?
 .wrangler/
+
+# Eval model downloads (npm run eval)
+eval/.cache/

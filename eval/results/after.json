@@ -1,0 +1,7670 @@
+{
+  "label": "after",
+  "models": [
+    {
+      "embedder": "minilm",
+      "id": "Xenova/all-MiniLM-L6-v2",
+      "revision": "751bff37182d3f1213fa05d7196b954e230abad9",
+      "downloadMB": 23.7,
+      "cachedLoadMs": 104,
+      "rssDeltaMB": 41
+    },
+    {
+      "embedder": "e5",
+      "id": "Xenova/multilingual-e5-small",
+      "revision": "761b726dd34fb83930e26aab4e9ac3899aa1fa78",
+      "downloadMB": 135.4,
+      "cachedLoadMs": 1326,
+      "rssDeltaMB": 251
+    },
+    {
+      "embedder": "pmini",
+      "id": "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
+      "revision": "2c4055b12046f11709e9df2c122e59ffbdc2f900",
+      "downloadMB": 135.4,
+      "cachedLoadMs": 2083,
+      "rssDeltaMB": 523
+    }
+  ],
+  "extractionChars": {
+    "space:maths-notes": [
+      1136,
+      724,
+      819
+    ],
+    "space:finance-report": [
+      937,
+      577
+    ],
+    "space:biology-notes": [
+      927,
+      920
+    ],
+    "space:hindi-notes": [
+      2122,
+      2011
+    ],
+    "space:spanish-notes": [
+      1296,
+      1312
+    ],
+    "space:scanned-lab": [
+      0
+    ],
+    "native:maths-notes": [
+      1087,
+      687,
+      799
+    ],
+    "native:finance-report": [
+      870,
+      569
+    ],
+    "native:biology-notes": [
+      917,
+      909
+    ],
+    "native:hindi-notes": [
+      1250,
+      1204
+    ],
+    "native:spanish-notes": [
+      1289,
+      1291
+    ],
+    "native:scanned-lab": [
+      0
+    ],
+    "clean:maths-notes": [
+      1095,
+      687,
+      799
+    ],
+    "clean:finance-report": [
+      870,
+      569
+    ],
+    "clean:biology-notes": [
+      917,
+      909
+    ],
+    "clean:hindi-notes": [
+      1328,
+      1289
+    ],
+    "clean:spanish-notes": [
+      1289,
+      1297
+    ],
+    "clean:scanned-lab": [
+      0
+    ]
+  },
+  "results": [
+    {
+      "embedder": "minilm",
+      "extraction": "space",
+      "rerank": "on",
+      "scope": "doc",
+      "chunkCount": 29,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 91.2,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.956
+        },
+        "hi": {
+          "n": 17,
+          "r1": 41.2,
+          "r3": 82.4,
+          "r5": 94.1,
+          "mrr": 0.612
+        },
+        "es": {
+          "n": 18,
+          "r1": 94.4,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.972
+        },
+        "cross": {
+          "n": 5,
+          "r1": 40,
+          "r3": 80,
+          "r5": 100,
+          "mrr": 0.65
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "f6:2",
+        "f7:2",
+        "h1:3",
+        "h2:6",
+        "h3:5",
+        "h4:3",
+        "h10:2",
+        "h12:2",
+        "h13:5",
+        "p4:2",
+        "p6:2",
+        "p11:3",
+        "p12:3",
+        "p14:2",
+        "x2:2",
+        "x3:2",
+        "x5:4",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "minilm",
+      "extraction": "space",
+      "rerank": "on",
+      "scope": "all",
+      "chunkCount": 29,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "hi": {
+          "n": 17,
+          "r1": 41.2,
+          "r3": 70.6,
+          "r5": 100,
+          "mrr": 0.6
+        },
+        "es": {
+          "n": 18,
+          "r1": 94.4,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.972
+        },
+        "cross": {
+          "n": 5,
+          "r1": 40,
+          "r3": 40,
+          "r5": 40,
+          "mrr": 0.433
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "h1:4",
+        "h2:5",
+        "h3:4",
+        "h4:4",
+        "h10:3",
+        "h12:3",
+        "h13:4",
+        "p6:2",
+        "p11:3",
+        "p12:2",
+        "p13:2",
+        "x1:-",
+        "x2:-",
+        "x5:6",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "minilm",
+      "extraction": "space",
+      "rerank": "off",
+      "scope": "doc",
+      "chunkCount": 29,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 79.4,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.897
+        },
+        "hi": {
+          "n": 17,
+          "r1": 58.8,
+          "r3": 64.7,
+          "r5": 82.4,
+          "mrr": 0.686
+        },
+        "es": {
+          "n": 18,
+          "r1": 77.8,
+          "r3": 94.4,
+          "r5": 100,
+          "mrr": 0.872
+        },
+        "cross": {
+          "n": 5,
+          "r1": 60,
+          "r3": 60,
+          "r5": 100,
+          "mrr": 0.69
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "m8:2",
+        "m14:2",
+        "n2:2",
+        "f6:2",
+        "f7:2",
+        "b4:2",
+        "h1:4",
+        "h2:6",
+        "h3:6",
+        "h10:5",
+        "h11:2",
+        "s1:2",
+        "s11:2",
+        "p4:2",
+        "p6:5",
+        "p8:2",
+        "p12:8",
+        "p13:4",
+        "x1:4",
+        "x2:5",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "minilm",
+      "extraction": "space",
+      "rerank": "off",
+      "scope": "all",
+      "chunkCount": 29,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 88.2,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.941
+        },
+        "hi": {
+          "n": 17,
+          "r1": 41.2,
+          "r3": 64.7,
+          "r5": 82.4,
+          "mrr": 0.598
+        },
+        "es": {
+          "n": 18,
+          "r1": 77.8,
+          "r3": 94.4,
+          "r5": 100,
+          "mrr": 0.872
+        },
+        "cross": {
+          "n": 5,
+          "r1": 0,
+          "r3": 0,
+          "r5": 20,
+          "mrr": 0.081
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "m8:2",
+        "m14:2",
+        "n2:2",
+        "f6:2",
+        "h1:4",
+        "h2:6",
+        "h3:6",
+        "h5:2",
+        "h6:2",
+        "h8:2",
+        "h10:5",
+        "h11:2",
+        "s1:2",
+        "s11:2",
+        "p6:5",
+        "p8:2",
+        "p12:8",
+        "p13:4",
+        "x1:-",
+        "x2:-",
+        "x3:14",
+        "x4:12",
+        "x5:4",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "minilm",
+      "extraction": "space",
+      "rerank": "policy",
+      "scope": "doc",
+      "chunkCount": 29,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 91.2,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.956
+        },
+        "hi": {
+          "n": 17,
+          "r1": 58.8,
+          "r3": 64.7,
+          "r5": 82.4,
+          "mrr": 0.686
+        },
+        "es": {
+          "n": 18,
+          "r1": 77.8,
+          "r3": 94.4,
+          "r5": 100,
+          "mrr": 0.872
+        },
+        "cross": {
+          "n": 5,
+          "r1": 40,
+          "r3": 80,
+          "r5": 100,
+          "mrr": 0.65
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "f6:2",
+        "f7:2",
+        "h1:4",
+        "h2:6",
+        "h3:6",
+        "h10:5",
+        "h11:2",
+        "s1:2",
+        "s11:2",
+        "p4:2",
+        "p6:5",
+        "p8:2",
+        "p12:8",
+        "p13:4",
+        "x2:2",
+        "x3:2",
+        "x5:4",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "minilm",
+      "extraction": "space",
+      "rerank": "policy",
+      "scope": "all",
+      "chunkCount": 29,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "hi": {
+          "n": 17,
+          "r1": 41.2,
+          "r3": 64.7,
+          "r5": 82.4,
+          "mrr": 0.598
+        },
+        "es": {
+          "n": 18,
+          "r1": 77.8,
+          "r3": 94.4,
+          "r5": 100,
+          "mrr": 0.872
+        },
+        "cross": {
+          "n": 5,
+          "r1": 40,
+          "r3": 40,
+          "r5": 40,
+          "mrr": 0.433
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "h1:4",
+        "h2:6",
+        "h3:6",
+        "h5:2",
+        "h6:2",
+        "h8:2",
+        "h10:5",
+        "h11:2",
+        "s1:2",
+        "s11:2",
+        "p6:5",
+        "p8:2",
+        "p12:8",
+        "p13:4",
+        "x1:-",
+        "x2:-",
+        "x5:6",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "minilm",
+      "extraction": "native",
+      "rerank": "on",
+      "scope": "doc",
+      "chunkCount": 27,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 91.2,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.956
+        },
+        "hi": {
+          "n": 17,
+          "r1": 23.5,
+          "r3": 70.6,
+          "r5": 94.1,
+          "mrr": 0.481
+        },
+        "es": {
+          "n": 18,
+          "r1": 94.4,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.972
+        },
+        "cross": {
+          "n": 5,
+          "r1": 20,
+          "r3": 60,
+          "r5": 100,
+          "mrr": 0.467
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "f6:2",
+        "b4:2",
+        "h1:5",
+        "h2:6",
+        "h3:5",
+        "h4:3",
+        "h5:2",
+        "h10:2",
+        "h11:3",
+        "h12:4",
+        "h13:5",
+        "p4:2",
+        "p6:2",
+        "p11:3",
+        "p12:3",
+        "p13:2",
+        "p14:3",
+        "x1:3",
+        "x2:4",
+        "x3:2",
+        "x5:4",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "minilm",
+      "extraction": "native",
+      "rerank": "on",
+      "scope": "all",
+      "chunkCount": 27,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 97.1,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.985
+        },
+        "hi": {
+          "n": 17,
+          "r1": 17.6,
+          "r3": 70.6,
+          "r5": 94.1,
+          "mrr": 0.465
+        },
+        "es": {
+          "n": 18,
+          "r1": 94.4,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.972
+        },
+        "cross": {
+          "n": 5,
+          "r1": 40,
+          "r3": 60,
+          "r5": 60,
+          "mrr": 0.5
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "f6:2",
+        "h1:5",
+        "h2:6",
+        "h3:4",
+        "h4:3",
+        "h5:2",
+        "h6:2",
+        "h7:2",
+        "h11:3",
+        "h12:4",
+        "h13:5",
+        "p6:2",
+        "p11:2",
+        "p12:3",
+        "p13:3",
+        "p14:2",
+        "x1:15",
+        "x2:10",
+        "x5:3",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "minilm",
+      "extraction": "native",
+      "rerank": "off",
+      "scope": "doc",
+      "chunkCount": 27,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 82.4,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.912
+        },
+        "hi": {
+          "n": 17,
+          "r1": 52.9,
+          "r3": 94.1,
+          "r5": 100,
+          "mrr": 0.73
+        },
+        "es": {
+          "n": 18,
+          "r1": 77.8,
+          "r3": 94.4,
+          "r5": 100,
+          "mrr": 0.872
+        },
+        "cross": {
+          "n": 5,
+          "r1": 60,
+          "r3": 60,
+          "r5": 80,
+          "mrr": 0.683
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "m8:2",
+        "m14:2",
+        "n2:2",
+        "f6:2",
+        "b4:2",
+        "h2:3",
+        "h4:2",
+        "h6:2",
+        "h10:2",
+        "h11:2",
+        "s1:2",
+        "s11:2",
+        "p4:2",
+        "p6:5",
+        "p8:2",
+        "p12:3",
+        "p13:2",
+        "p14:4",
+        "x1:4",
+        "x2:6",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "minilm",
+      "extraction": "native",
+      "rerank": "off",
+      "scope": "all",
+      "chunkCount": 27,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 88.2,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.941
+        },
+        "hi": {
+          "n": 17,
+          "r1": 52.9,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.735
+        },
+        "es": {
+          "n": 18,
+          "r1": 77.8,
+          "r3": 94.4,
+          "r5": 100,
+          "mrr": 0.872
+        },
+        "cross": {
+          "n": 5,
+          "r1": 0,
+          "r3": 0,
+          "r5": 20,
+          "mrr": 0.113
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "m8:2",
+        "m14:2",
+        "n2:2",
+        "f6:2",
+        "h2:3",
+        "h4:2",
+        "h6:2",
+        "h10:2",
+        "h11:2",
+        "s1:2",
+        "s11:2",
+        "p6:5",
+        "p8:2",
+        "p12:3",
+        "p13:2",
+        "p14:3",
+        "x1:14",
+        "x2:15",
+        "x3:13",
+        "x4:10",
+        "x5:4",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "minilm",
+      "extraction": "native",
+      "rerank": "policy",
+      "scope": "doc",
+      "chunkCount": 27,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 91.2,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.956
+        },
+        "hi": {
+          "n": 17,
+          "r1": 52.9,
+          "r3": 94.1,
+          "r5": 100,
+          "mrr": 0.73
+        },
+        "es": {
+          "n": 18,
+          "r1": 77.8,
+          "r3": 94.4,
+          "r5": 100,
+          "mrr": 0.872
+        },
+        "cross": {
+          "n": 5,
+          "r1": 20,
+          "r3": 60,
+          "r5": 100,
+          "mrr": 0.467
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "f6:2",
+        "b4:2",
+        "h2:3",
+        "h4:2",
+        "h6:2",
+        "h10:2",
+        "h11:2",
+        "s1:2",
+        "s11:2",
+        "p4:2",
+        "p6:5",
+        "p8:2",
+        "p12:3",
+        "p13:2",
+        "p14:4",
+        "x1:3",
+        "x2:4",
+        "x3:2",
+        "x5:4",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "minilm",
+      "extraction": "native",
+      "rerank": "policy",
+      "scope": "all",
+      "chunkCount": 27,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 97.1,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.985
+        },
+        "hi": {
+          "n": 17,
+          "r1": 52.9,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.735
+        },
+        "es": {
+          "n": 18,
+          "r1": 77.8,
+          "r3": 94.4,
+          "r5": 100,
+          "mrr": 0.872
+        },
+        "cross": {
+          "n": 5,
+          "r1": 40,
+          "r3": 60,
+          "r5": 60,
+          "mrr": 0.5
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "f6:2",
+        "h2:3",
+        "h4:2",
+        "h6:2",
+        "h10:2",
+        "h11:2",
+        "s1:2",
+        "s11:2",
+        "p6:5",
+        "p8:2",
+        "p12:3",
+        "p13:2",
+        "p14:3",
+        "x1:15",
+        "x2:10",
+        "x5:3",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "minilm",
+      "extraction": "clean",
+      "rerank": "on",
+      "scope": "doc",
+      "chunkCount": 27,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 91.2,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.956
+        },
+        "hi": {
+          "n": 17,
+          "r1": 35.3,
+          "r3": 64.7,
+          "r5": 94.1,
+          "mrr": 0.568
+        },
+        "es": {
+          "n": 18,
+          "r1": 94.4,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.972
+        },
+        "cross": {
+          "n": 5,
+          "r1": 40,
+          "r3": 40,
+          "r5": 80,
+          "mrr": 0.533
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "f6:2",
+        "b4:2",
+        "h1:5",
+        "h2:6",
+        "h3:4",
+        "h7:4",
+        "h10:2",
+        "h12:4",
+        "h13:5",
+        "p4:2",
+        "p6:2",
+        "p11:2",
+        "p12:3",
+        "p13:2",
+        "p14:2",
+        "x1:4",
+        "x2:6",
+        "x5:4",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "minilm",
+      "extraction": "clean",
+      "rerank": "on",
+      "scope": "all",
+      "chunkCount": 27,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 97.1,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.985
+        },
+        "hi": {
+          "n": 17,
+          "r1": 35.3,
+          "r3": 76.5,
+          "r5": 88.2,
+          "mrr": 0.573
+        },
+        "es": {
+          "n": 18,
+          "r1": 94.4,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.972
+        },
+        "cross": {
+          "n": 5,
+          "r1": 20,
+          "r3": 20,
+          "r5": 40,
+          "mrr": 0.286
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "f6:2",
+        "h1:6",
+        "h2:6",
+        "h3:3",
+        "h7:3",
+        "h10:2",
+        "h12:5",
+        "h13:5",
+        "p6:2",
+        "p11:2",
+        "p12:3",
+        "p13:2",
+        "p14:2",
+        "x1:15",
+        "x2:9",
+        "x3:-",
+        "x5:4",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "minilm",
+      "extraction": "clean",
+      "rerank": "off",
+      "scope": "doc",
+      "chunkCount": 27,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 82.4,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.912
+        },
+        "hi": {
+          "n": 17,
+          "r1": 52.9,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.725
+        },
+        "es": {
+          "n": 18,
+          "r1": 77.8,
+          "r3": 94.4,
+          "r5": 100,
+          "mrr": 0.872
+        },
+        "cross": {
+          "n": 5,
+          "r1": 60,
+          "r3": 80,
+          "r5": 100,
+          "mrr": 0.74
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "m8:2",
+        "m14:2",
+        "n2:2",
+        "f6:2",
+        "b4:2",
+        "h2:2",
+        "h3:3",
+        "h4:3",
+        "h5:2",
+        "h10:3",
+        "h11:2",
+        "s1:2",
+        "s11:2",
+        "p4:2",
+        "p6:5",
+        "p8:2",
+        "p11:2",
+        "p12:3",
+        "x2:5",
+        "x3:2",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "minilm",
+      "extraction": "clean",
+      "rerank": "off",
+      "scope": "all",
+      "chunkCount": 27,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 88.2,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.941
+        },
+        "hi": {
+          "n": 17,
+          "r1": 52.9,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.725
+        },
+        "es": {
+          "n": 18,
+          "r1": 77.8,
+          "r3": 94.4,
+          "r5": 100,
+          "mrr": 0.872
+        },
+        "cross": {
+          "n": 5,
+          "r1": 0,
+          "r3": 0,
+          "r5": 20,
+          "mrr": 0.102
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "m8:2",
+        "m14:2",
+        "n2:2",
+        "f6:2",
+        "h2:2",
+        "h3:3",
+        "h4:3",
+        "h5:2",
+        "h10:3",
+        "h11:2",
+        "s1:2",
+        "s11:2",
+        "p6:5",
+        "p8:2",
+        "p11:2",
+        "p12:3",
+        "x1:11",
+        "x2:14",
+        "x3:-",
+        "x4:10",
+        "x5:4",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "minilm",
+      "extraction": "clean",
+      "rerank": "policy",
+      "scope": "doc",
+      "chunkCount": 27,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 91.2,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.956
+        },
+        "hi": {
+          "n": 17,
+          "r1": 52.9,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.725
+        },
+        "es": {
+          "n": 18,
+          "r1": 77.8,
+          "r3": 94.4,
+          "r5": 100,
+          "mrr": 0.872
+        },
+        "cross": {
+          "n": 5,
+          "r1": 40,
+          "r3": 40,
+          "r5": 80,
+          "mrr": 0.533
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "f6:2",
+        "b4:2",
+        "h2:2",
+        "h3:3",
+        "h4:3",
+        "h5:2",
+        "h10:3",
+        "h11:2",
+        "s1:2",
+        "s11:2",
+        "p4:2",
+        "p6:5",
+        "p8:2",
+        "p11:2",
+        "p12:3",
+        "x1:4",
+        "x2:6",
+        "x5:4",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "minilm",
+      "extraction": "clean",
+      "rerank": "policy",
+      "scope": "all",
+      "chunkCount": 27,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 97.1,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.985
+        },
+        "hi": {
+          "n": 17,
+          "r1": 52.9,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.725
+        },
+        "es": {
+          "n": 18,
+          "r1": 77.8,
+          "r3": 94.4,
+          "r5": 100,
+          "mrr": 0.872
+        },
+        "cross": {
+          "n": 5,
+          "r1": 20,
+          "r3": 20,
+          "r5": 40,
+          "mrr": 0.286
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "f6:2",
+        "h2:2",
+        "h3:3",
+        "h4:3",
+        "h5:2",
+        "h10:3",
+        "h11:2",
+        "s1:2",
+        "s11:2",
+        "p6:5",
+        "p8:2",
+        "p11:2",
+        "p12:3",
+        "x1:15",
+        "x2:9",
+        "x3:-",
+        "x5:4",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "e5",
+      "extraction": "space",
+      "rerank": "on",
+      "scope": "doc",
+      "chunkCount": 30,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "hi": {
+          "n": 17,
+          "r1": 35.3,
+          "r3": 70.6,
+          "r5": 82.4,
+          "mrr": 0.563
+        },
+        "es": {
+          "n": 18,
+          "r1": 94.4,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.963
+        },
+        "cross": {
+          "n": 5,
+          "r1": 20,
+          "r3": 80,
+          "r5": 100,
+          "mrr": 0.507
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "h1:3",
+        "h2:6",
+        "h3:7",
+        "h4:2",
+        "h5:2",
+        "h6:2",
+        "h7:3",
+        "h12:5",
+        "h13:4",
+        "p6:3",
+        "p11:7",
+        "p12:2",
+        "x1:2",
+        "x2:5",
+        "x3:3",
+        "x5:2",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "e5",
+      "extraction": "space",
+      "rerank": "on",
+      "scope": "all",
+      "chunkCount": 30,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "hi": {
+          "n": 17,
+          "r1": 23.5,
+          "r3": 64.7,
+          "r5": 88.2,
+          "mrr": 0.491
+        },
+        "es": {
+          "n": 18,
+          "r1": 94.4,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.972
+        },
+        "cross": {
+          "n": 5,
+          "r1": 20,
+          "r3": 20,
+          "r5": 20,
+          "mrr": 0.243
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "h1:4",
+        "h2:5",
+        "h3:7",
+        "h4:2",
+        "h5:2",
+        "h6:2",
+        "h7:4",
+        "h10:2",
+        "h11:2",
+        "h12:5",
+        "h13:3",
+        "p6:2",
+        "p11:7",
+        "p12:3",
+        "x1:-",
+        "x2:11",
+        "x3:-",
+        "x5:8",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "e5",
+      "extraction": "space",
+      "rerank": "off",
+      "scope": "doc",
+      "chunkCount": 30,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 88.2,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.941
+        },
+        "hi": {
+          "n": 17,
+          "r1": 64.7,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.775
+        },
+        "es": {
+          "n": 18,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "cross": {
+          "n": 5,
+          "r1": 60,
+          "r3": 80,
+          "r5": 100,
+          "mrr": 0.707
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "n1:2",
+        "n2:2",
+        "b4:2",
+        "b5:2",
+        "h2:3",
+        "h7:2",
+        "h11:3",
+        "h12:3",
+        "p12:3",
+        "p14:3",
+        "x1:5",
+        "x3:3",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "e5",
+      "extraction": "space",
+      "rerank": "off",
+      "scope": "all",
+      "chunkCount": 30,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 94.1,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.971
+        },
+        "hi": {
+          "n": 17,
+          "r1": 47.1,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.676
+        },
+        "es": {
+          "n": 18,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "cross": {
+          "n": 5,
+          "r1": 0,
+          "r3": 0,
+          "r5": 20,
+          "mrr": 0.079
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "n1:2",
+        "n2:2",
+        "h1:2",
+        "h2:3",
+        "h7:2",
+        "h8:3",
+        "h9:2",
+        "h11:3",
+        "h12:3",
+        "p12:3",
+        "p14:3",
+        "x1:-",
+        "x2:14",
+        "x3:-",
+        "x4:14",
+        "x5:4",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "e5",
+      "extraction": "space",
+      "rerank": "policy",
+      "scope": "doc",
+      "chunkCount": 30,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "hi": {
+          "n": 17,
+          "r1": 64.7,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.775
+        },
+        "es": {
+          "n": 18,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "cross": {
+          "n": 5,
+          "r1": 20,
+          "r3": 80,
+          "r5": 100,
+          "mrr": 0.507
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "h2:3",
+        "h7:2",
+        "h11:3",
+        "h12:3",
+        "p12:3",
+        "p14:3",
+        "x1:2",
+        "x2:5",
+        "x3:3",
+        "x5:2",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "e5",
+      "extraction": "space",
+      "rerank": "policy",
+      "scope": "all",
+      "chunkCount": 30,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "hi": {
+          "n": 17,
+          "r1": 47.1,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.676
+        },
+        "es": {
+          "n": 18,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "cross": {
+          "n": 5,
+          "r1": 20,
+          "r3": 20,
+          "r5": 20,
+          "mrr": 0.243
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "h1:2",
+        "h2:3",
+        "h7:2",
+        "h8:3",
+        "h9:2",
+        "h11:3",
+        "h12:3",
+        "p12:3",
+        "p14:3",
+        "x1:-",
+        "x2:11",
+        "x3:-",
+        "x5:8",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "e5",
+      "extraction": "native",
+      "rerank": "on",
+      "scope": "doc",
+      "chunkCount": 26,
+      "unlabelledPassages": [
+        "hi-photo",
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "hi": {
+          "n": 17,
+          "r1": 23.5,
+          "r3": 64.7,
+          "r5": 82.4,
+          "mrr": 0.44
+        },
+        "es": {
+          "n": 18,
+          "r1": 94.4,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.963
+        },
+        "cross": {
+          "n": 5,
+          "r1": 60,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.8
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "h1:5",
+        "h2:5",
+        "h3:-",
+        "h4:-",
+        "h5:2",
+        "h6:3",
+        "h7:3",
+        "h10:3",
+        "h11:3",
+        "h12:2",
+        "h13:4",
+        "p6:3",
+        "p11:-",
+        "p12:2",
+        "x3:2",
+        "x5:2",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "e5",
+      "extraction": "native",
+      "rerank": "on",
+      "scope": "all",
+      "chunkCount": 26,
+      "unlabelledPassages": [
+        "hi-photo",
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 97.1,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.985
+        },
+        "hi": {
+          "n": 17,
+          "r1": 29.4,
+          "r3": 52.9,
+          "r5": 82.4,
+          "mrr": 0.46
+        },
+        "es": {
+          "n": 18,
+          "r1": 94.4,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.963
+        },
+        "cross": {
+          "n": 5,
+          "r1": 20,
+          "r3": 20,
+          "r5": 40,
+          "mrr": 0.31
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "f6:2",
+        "h1:5",
+        "h2:5",
+        "h3:-",
+        "h4:-",
+        "h5:2",
+        "h6:4",
+        "h10:3",
+        "h11:4",
+        "h12:2",
+        "h13:4",
+        "p6:3",
+        "p11:-",
+        "p14:3",
+        "x1:7",
+        "x2:12",
+        "x3:5",
+        "x5:8",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "e5",
+      "extraction": "native",
+      "rerank": "off",
+      "scope": "doc",
+      "chunkCount": 26,
+      "unlabelledPassages": [
+        "hi-photo",
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 88.2,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.941
+        },
+        "hi": {
+          "n": 17,
+          "r1": 70.6,
+          "r3": 82.4,
+          "r5": 82.4,
+          "mrr": 0.765
+        },
+        "es": {
+          "n": 18,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "cross": {
+          "n": 5,
+          "r1": 80,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.9
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "n1:2",
+        "n2:2",
+        "b4:2",
+        "b6:2",
+        "h3:-",
+        "h4:-",
+        "h11:2",
+        "p11:-",
+        "p13:2",
+        "x3:2",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "e5",
+      "extraction": "native",
+      "rerank": "off",
+      "scope": "all",
+      "chunkCount": 26,
+      "unlabelledPassages": [
+        "hi-photo",
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 91.2,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.956
+        },
+        "hi": {
+          "n": 17,
+          "r1": 70.6,
+          "r3": 82.4,
+          "r5": 82.4,
+          "mrr": 0.765
+        },
+        "es": {
+          "n": 18,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "cross": {
+          "n": 5,
+          "r1": 0,
+          "r3": 0,
+          "r5": 20,
+          "mrr": 0.097
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "n1:2",
+        "n2:2",
+        "b6:2",
+        "h3:-",
+        "h4:-",
+        "h11:2",
+        "p11:-",
+        "p13:2",
+        "x1:14",
+        "x2:14",
+        "x3:14",
+        "x4:14",
+        "x5:5",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "e5",
+      "extraction": "native",
+      "rerank": "policy",
+      "scope": "doc",
+      "chunkCount": 26,
+      "unlabelledPassages": [
+        "hi-photo",
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "hi": {
+          "n": 17,
+          "r1": 70.6,
+          "r3": 82.4,
+          "r5": 82.4,
+          "mrr": 0.765
+        },
+        "es": {
+          "n": 18,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "cross": {
+          "n": 5,
+          "r1": 60,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.8
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "h3:-",
+        "h4:-",
+        "h11:2",
+        "p11:-",
+        "p13:2",
+        "x3:2",
+        "x5:2",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "e5",
+      "extraction": "native",
+      "rerank": "policy",
+      "scope": "all",
+      "chunkCount": 26,
+      "unlabelledPassages": [
+        "hi-photo",
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 97.1,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.985
+        },
+        "hi": {
+          "n": 17,
+          "r1": 70.6,
+          "r3": 82.4,
+          "r5": 82.4,
+          "mrr": 0.765
+        },
+        "es": {
+          "n": 18,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "cross": {
+          "n": 5,
+          "r1": 20,
+          "r3": 20,
+          "r5": 40,
+          "mrr": 0.31
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "f6:2",
+        "h3:-",
+        "h4:-",
+        "h11:2",
+        "p11:-",
+        "p13:2",
+        "x1:7",
+        "x2:12",
+        "x3:5",
+        "x5:8",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "e5",
+      "extraction": "clean",
+      "rerank": "on",
+      "scope": "doc",
+      "chunkCount": 26,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "hi": {
+          "n": 17,
+          "r1": 23.5,
+          "r3": 88.2,
+          "r5": 100,
+          "mrr": 0.526
+        },
+        "es": {
+          "n": 18,
+          "r1": 94.4,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.963
+        },
+        "cross": {
+          "n": 5,
+          "r1": 40,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.7
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "h1:3",
+        "h2:3",
+        "h3:2",
+        "h4:3",
+        "h6:5",
+        "h7:3",
+        "h10:2",
+        "h11:2",
+        "h13:4",
+        "p6:3",
+        "p11:3",
+        "p12:3",
+        "p13:2",
+        "p14:2",
+        "x1:2",
+        "x3:2",
+        "x5:2",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "e5",
+      "extraction": "clean",
+      "rerank": "on",
+      "scope": "all",
+      "chunkCount": 26,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 97.1,
+          "r3": 97.1,
+          "r5": 100,
+          "mrr": 0.978
+        },
+        "hi": {
+          "n": 17,
+          "r1": 35.3,
+          "r3": 70.6,
+          "r5": 100,
+          "mrr": 0.548
+        },
+        "es": {
+          "n": 18,
+          "r1": 94.4,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.972
+        },
+        "cross": {
+          "n": 5,
+          "r1": 40,
+          "r3": 60,
+          "r5": 60,
+          "mrr": 0.554
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "f6:4",
+        "h1:3",
+        "h2:4",
+        "h3:3",
+        "h4:3",
+        "h6:5",
+        "h7:2",
+        "h10:5",
+        "h11:4",
+        "h13:4",
+        "p6:2",
+        "p11:3",
+        "p12:3",
+        "x1:7",
+        "x3:2",
+        "x5:8",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "e5",
+      "extraction": "clean",
+      "rerank": "off",
+      "scope": "doc",
+      "chunkCount": 26,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 88.2,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.941
+        },
+        "hi": {
+          "n": 17,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "es": {
+          "n": 18,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "cross": {
+          "n": 5,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "n1:2",
+        "n2:2",
+        "b4:2",
+        "b6:2",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "e5",
+      "extraction": "clean",
+      "rerank": "off",
+      "scope": "all",
+      "chunkCount": 26,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 91.2,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.956
+        },
+        "hi": {
+          "n": 17,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "es": {
+          "n": 18,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "cross": {
+          "n": 5,
+          "r1": 0,
+          "r3": 0,
+          "r5": 20,
+          "mrr": 0.11
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "n1:2",
+        "n2:2",
+        "b6:2",
+        "x1:14",
+        "x2:14",
+        "x3:12",
+        "x4:14",
+        "x5:4",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "e5",
+      "extraction": "clean",
+      "rerank": "policy",
+      "scope": "doc",
+      "chunkCount": 26,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "hi": {
+          "n": 17,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "es": {
+          "n": 18,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "cross": {
+          "n": 5,
+          "r1": 40,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.7
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "x1:2",
+        "x3:2",
+        "x5:2",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "e5",
+      "extraction": "clean",
+      "rerank": "policy",
+      "scope": "all",
+      "chunkCount": 26,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 97.1,
+          "r3": 97.1,
+          "r5": 100,
+          "mrr": 0.978
+        },
+        "hi": {
+          "n": 17,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "es": {
+          "n": 18,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "cross": {
+          "n": 5,
+          "r1": 40,
+          "r3": 60,
+          "r5": 60,
+          "mrr": 0.554
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "f6:4",
+        "x1:7",
+        "x3:2",
+        "x5:8",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "pmini",
+      "extraction": "space",
+      "rerank": "on",
+      "scope": "doc",
+      "chunkCount": 30,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 94.1,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.971
+        },
+        "hi": {
+          "n": 17,
+          "r1": 35.3,
+          "r3": 70.6,
+          "r5": 82.4,
+          "mrr": 0.563
+        },
+        "es": {
+          "n": 18,
+          "r1": 94.4,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.963
+        },
+        "cross": {
+          "n": 5,
+          "r1": 20,
+          "r3": 80,
+          "r5": 100,
+          "mrr": 0.507
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "f5:2",
+        "f7:2",
+        "h1:3",
+        "h2:6",
+        "h3:7",
+        "h4:2",
+        "h5:2",
+        "h6:2",
+        "h7:3",
+        "h12:5",
+        "h13:4",
+        "p6:3",
+        "p11:7",
+        "p12:2",
+        "x1:2",
+        "x2:5",
+        "x3:3",
+        "x5:2",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "pmini",
+      "extraction": "space",
+      "rerank": "on",
+      "scope": "all",
+      "chunkCount": 30,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "hi": {
+          "n": 17,
+          "r1": 29.4,
+          "r3": 70.6,
+          "r5": 82.4,
+          "mrr": 0.489
+        },
+        "es": {
+          "n": 18,
+          "r1": 94.4,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.963
+        },
+        "cross": {
+          "n": 5,
+          "r1": 20,
+          "r3": 20,
+          "r5": 20,
+          "mrr": 0.225
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "h1:-",
+        "h2:4",
+        "h3:-",
+        "h6:2",
+        "h7:3",
+        "h10:3",
+        "h12:4",
+        "h13:3",
+        "p6:3",
+        "p11:7",
+        "p12:3",
+        "p13:3",
+        "p14:2",
+        "x1:-",
+        "x2:-",
+        "x3:-",
+        "x5:8",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "pmini",
+      "extraction": "space",
+      "rerank": "off",
+      "scope": "doc",
+      "chunkCount": 30,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 79.4,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.892
+        },
+        "hi": {
+          "n": 17,
+          "r1": 41.2,
+          "r3": 70.6,
+          "r5": 82.4,
+          "mrr": 0.597
+        },
+        "es": {
+          "n": 18,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "cross": {
+          "n": 5,
+          "r1": 60,
+          "r3": 80,
+          "r5": 80,
+          "mrr": 0.7
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "m8:2",
+        "m14:2",
+        "n2:2",
+        "f5:2",
+        "f7:2",
+        "b5:3",
+        "b6:2",
+        "h1:10",
+        "h2:9",
+        "h3:9",
+        "h10:4",
+        "h11:2",
+        "h12:4",
+        "p11:2",
+        "p12:2",
+        "p13:2",
+        "p14:3",
+        "x1:3",
+        "x3:6",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "pmini",
+      "extraction": "space",
+      "rerank": "off",
+      "scope": "all",
+      "chunkCount": 30,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 85.3,
+          "r3": 97.1,
+          "r5": 100,
+          "mrr": 0.919
+        },
+        "hi": {
+          "n": 17,
+          "r1": 35.3,
+          "r3": 76.5,
+          "r5": 82.4,
+          "mrr": 0.56
+        },
+        "es": {
+          "n": 18,
+          "r1": 88.9,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.944
+        },
+        "cross": {
+          "n": 5,
+          "r1": 0,
+          "r3": 20,
+          "r5": 20,
+          "mrr": 0.081
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "m8:2",
+        "m14:2",
+        "n2:2",
+        "f5:2",
+        "b5:4",
+        "h1:-",
+        "h2:10",
+        "h3:-",
+        "h8:2",
+        "h9:2",
+        "h10:3",
+        "h11:3",
+        "h12:4",
+        "s7:2",
+        "s8:2",
+        "p11:2",
+        "p12:2",
+        "p14:2",
+        "x1:-",
+        "x2:-",
+        "x3:-",
+        "x4:14",
+        "x5:3",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "pmini",
+      "extraction": "space",
+      "rerank": "policy",
+      "scope": "doc",
+      "chunkCount": 30,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 94.1,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.971
+        },
+        "hi": {
+          "n": 17,
+          "r1": 41.2,
+          "r3": 70.6,
+          "r5": 82.4,
+          "mrr": 0.597
+        },
+        "es": {
+          "n": 18,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "cross": {
+          "n": 5,
+          "r1": 20,
+          "r3": 80,
+          "r5": 100,
+          "mrr": 0.507
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "f5:2",
+        "f7:2",
+        "h1:10",
+        "h2:9",
+        "h3:9",
+        "h10:4",
+        "h11:2",
+        "h12:4",
+        "p11:2",
+        "p12:2",
+        "p13:2",
+        "p14:3",
+        "x1:2",
+        "x2:5",
+        "x3:3",
+        "x5:2",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "pmini",
+      "extraction": "space",
+      "rerank": "policy",
+      "scope": "all",
+      "chunkCount": 30,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "hi": {
+          "n": 17,
+          "r1": 35.3,
+          "r3": 76.5,
+          "r5": 82.4,
+          "mrr": 0.56
+        },
+        "es": {
+          "n": 18,
+          "r1": 88.9,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.944
+        },
+        "cross": {
+          "n": 5,
+          "r1": 20,
+          "r3": 20,
+          "r5": 20,
+          "mrr": 0.225
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "h1:-",
+        "h2:10",
+        "h3:-",
+        "h8:2",
+        "h9:2",
+        "h10:3",
+        "h11:3",
+        "h12:4",
+        "s7:2",
+        "s8:2",
+        "p11:2",
+        "p12:2",
+        "p14:2",
+        "x1:-",
+        "x2:-",
+        "x3:-",
+        "x5:8",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "pmini",
+      "extraction": "native",
+      "rerank": "on",
+      "scope": "doc",
+      "chunkCount": 26,
+      "unlabelledPassages": [
+        "hi-photo",
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 94.1,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.971
+        },
+        "hi": {
+          "n": 17,
+          "r1": 23.5,
+          "r3": 64.7,
+          "r5": 82.4,
+          "mrr": 0.44
+        },
+        "es": {
+          "n": 18,
+          "r1": 94.4,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.963
+        },
+        "cross": {
+          "n": 5,
+          "r1": 60,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.8
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "f5:2",
+        "f7:2",
+        "h1:5",
+        "h2:5",
+        "h3:-",
+        "h4:-",
+        "h5:2",
+        "h6:3",
+        "h7:3",
+        "h10:3",
+        "h11:3",
+        "h12:2",
+        "h13:4",
+        "p6:3",
+        "p11:-",
+        "p12:2",
+        "x3:2",
+        "x5:2",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "pmini",
+      "extraction": "native",
+      "rerank": "on",
+      "scope": "all",
+      "chunkCount": 26,
+      "unlabelledPassages": [
+        "hi-photo",
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 97.1,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.985
+        },
+        "hi": {
+          "n": 17,
+          "r1": 23.5,
+          "r3": 58.8,
+          "r5": 82.4,
+          "mrr": 0.435
+        },
+        "es": {
+          "n": 18,
+          "r1": 94.4,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.972
+        },
+        "cross": {
+          "n": 5,
+          "r1": 20,
+          "r3": 20,
+          "r5": 40,
+          "mrr": 0.31
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "f6:2",
+        "h1:5",
+        "h2:5",
+        "h3:-",
+        "h4:-",
+        "h5:2",
+        "h6:3",
+        "h10:3",
+        "h11:4",
+        "h12:2",
+        "h13:4",
+        "p6:2",
+        "p11:-",
+        "p12:2",
+        "p14:3",
+        "x1:7",
+        "x2:12",
+        "x3:5",
+        "x5:8",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "pmini",
+      "extraction": "native",
+      "rerank": "off",
+      "scope": "doc",
+      "chunkCount": 26,
+      "unlabelledPassages": [
+        "hi-photo",
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 82.4,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.912
+        },
+        "hi": {
+          "n": 17,
+          "r1": 76.5,
+          "r3": 82.4,
+          "r5": 82.4,
+          "mrr": 0.794
+        },
+        "es": {
+          "n": 18,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "cross": {
+          "n": 5,
+          "r1": 80,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.867
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "m8:2",
+        "m14:2",
+        "n2:2",
+        "f5:2",
+        "f7:2",
+        "b6:2",
+        "h3:-",
+        "h4:-",
+        "h12:2",
+        "p11:-",
+        "x3:3",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "pmini",
+      "extraction": "native",
+      "rerank": "off",
+      "scope": "all",
+      "chunkCount": 26,
+      "unlabelledPassages": [
+        "hi-photo",
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 82.4,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.912
+        },
+        "hi": {
+          "n": 17,
+          "r1": 64.7,
+          "r3": 82.4,
+          "r5": 82.4,
+          "mrr": 0.735
+        },
+        "es": {
+          "n": 18,
+          "r1": 94.4,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.972
+        },
+        "cross": {
+          "n": 5,
+          "r1": 0,
+          "r3": 20,
+          "r5": 20,
+          "mrr": 0.122
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "m8:2",
+        "m14:2",
+        "n2:2",
+        "f5:2",
+        "f7:2",
+        "b6:2",
+        "h3:-",
+        "h4:-",
+        "h9:2",
+        "h11:2",
+        "h12:2",
+        "s7:2",
+        "p11:-",
+        "x1:14",
+        "x2:15",
+        "x3:15",
+        "x4:14",
+        "x5:3",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "pmini",
+      "extraction": "native",
+      "rerank": "policy",
+      "scope": "doc",
+      "chunkCount": 26,
+      "unlabelledPassages": [
+        "hi-photo",
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 94.1,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.971
+        },
+        "hi": {
+          "n": 17,
+          "r1": 76.5,
+          "r3": 82.4,
+          "r5": 82.4,
+          "mrr": 0.794
+        },
+        "es": {
+          "n": 18,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "cross": {
+          "n": 5,
+          "r1": 60,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.8
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "f5:2",
+        "f7:2",
+        "h3:-",
+        "h4:-",
+        "h12:2",
+        "p11:-",
+        "x3:2",
+        "x5:2",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "pmini",
+      "extraction": "native",
+      "rerank": "policy",
+      "scope": "all",
+      "chunkCount": 26,
+      "unlabelledPassages": [
+        "hi-photo",
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 97.1,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.985
+        },
+        "hi": {
+          "n": 17,
+          "r1": 64.7,
+          "r3": 82.4,
+          "r5": 82.4,
+          "mrr": 0.735
+        },
+        "es": {
+          "n": 18,
+          "r1": 94.4,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.972
+        },
+        "cross": {
+          "n": 5,
+          "r1": 20,
+          "r3": 20,
+          "r5": 40,
+          "mrr": 0.31
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "f6:2",
+        "h3:-",
+        "h4:-",
+        "h9:2",
+        "h11:2",
+        "h12:2",
+        "s7:2",
+        "p11:-",
+        "x1:7",
+        "x2:12",
+        "x3:5",
+        "x5:8",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "pmini",
+      "extraction": "clean",
+      "rerank": "on",
+      "scope": "doc",
+      "chunkCount": 26,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 94.1,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.971
+        },
+        "hi": {
+          "n": 17,
+          "r1": 23.5,
+          "r3": 88.2,
+          "r5": 100,
+          "mrr": 0.526
+        },
+        "es": {
+          "n": 18,
+          "r1": 94.4,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.963
+        },
+        "cross": {
+          "n": 5,
+          "r1": 40,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.7
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "f5:2",
+        "f7:2",
+        "h1:3",
+        "h2:3",
+        "h3:2",
+        "h4:3",
+        "h6:5",
+        "h7:3",
+        "h10:2",
+        "h11:2",
+        "h13:4",
+        "p6:3",
+        "p11:3",
+        "p12:3",
+        "p13:2",
+        "p14:2",
+        "x1:2",
+        "x3:2",
+        "x5:2",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "pmini",
+      "extraction": "clean",
+      "rerank": "on",
+      "scope": "all",
+      "chunkCount": 26,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 97.1,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.98
+        },
+        "hi": {
+          "n": 17,
+          "r1": 35.3,
+          "r3": 76.5,
+          "r5": 100,
+          "mrr": 0.578
+        },
+        "es": {
+          "n": 18,
+          "r1": 94.4,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.963
+        },
+        "cross": {
+          "n": 5,
+          "r1": 40,
+          "r3": 60,
+          "r5": 60,
+          "mrr": 0.52
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "f6:3",
+        "h1:3",
+        "h2:4",
+        "h3:2",
+        "h4:3",
+        "h6:4",
+        "h7:2",
+        "h10:3",
+        "h11:4",
+        "h13:4",
+        "p6:3",
+        "p11:3",
+        "p12:2",
+        "x1:7",
+        "x3:3",
+        "x5:8",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "pmini",
+      "extraction": "clean",
+      "rerank": "off",
+      "scope": "doc",
+      "chunkCount": 26,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 82.4,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.912
+        },
+        "hi": {
+          "n": 17,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "es": {
+          "n": 18,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "cross": {
+          "n": 5,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "m8:2",
+        "m14:2",
+        "n2:2",
+        "f5:2",
+        "f7:2",
+        "b6:2",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "pmini",
+      "extraction": "clean",
+      "rerank": "off",
+      "scope": "all",
+      "chunkCount": 26,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 82.4,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.912
+        },
+        "hi": {
+          "n": 17,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "es": {
+          "n": 18,
+          "r1": 88.9,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.926
+        },
+        "cross": {
+          "n": 5,
+          "r1": 0,
+          "r3": 0,
+          "r5": 20,
+          "mrr": 0.11
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "m8:2",
+        "m14:2",
+        "n2:2",
+        "f3:2",
+        "f5:2",
+        "b6:2",
+        "s7:3",
+        "s8:3",
+        "x1:14",
+        "x2:14",
+        "x3:12",
+        "x4:14",
+        "x5:4",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "pmini",
+      "extraction": "clean",
+      "rerank": "policy",
+      "scope": "doc",
+      "chunkCount": 26,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 94.1,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.971
+        },
+        "hi": {
+          "n": 17,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "es": {
+          "n": 18,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "cross": {
+          "n": 5,
+          "r1": 40,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.7
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "f5:2",
+        "f7:2",
+        "x1:2",
+        "x3:2",
+        "x5:2",
+        "sc1:-",
+        "sc2:-"
+      ]
+    },
+    {
+      "embedder": "pmini",
+      "extraction": "clean",
+      "rerank": "policy",
+      "scope": "all",
+      "chunkCount": 26,
+      "unlabelledPassages": [
+        "scan-pendulum",
+        "scan-titration"
+      ],
+      "byGroup": {
+        "en": {
+          "n": 34,
+          "r1": 97.1,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.98
+        },
+        "hi": {
+          "n": 17,
+          "r1": 100,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 1
+        },
+        "es": {
+          "n": 18,
+          "r1": 88.9,
+          "r3": 100,
+          "r5": 100,
+          "mrr": 0.926
+        },
+        "cross": {
+          "n": 5,
+          "r1": 40,
+          "r3": 60,
+          "r5": 60,
+          "mrr": 0.52
+        },
+        "scanned": {
+          "n": 2,
+          "r1": 0,
+          "r3": 0,
+          "r5": 0,
+          "mrr": 0
+        }
+      },
+      "misses": [
+        "f6:3",
+        "s7:3",
+        "s8:3",
+        "x1:7",
+        "x3:3",
+        "x5:8",
+        "sc1:-",
+        "sc2:-"
+      ]
+    }
+  ],
+  "sourceMatch": [
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "m1",
+      "kind": "exact",
+      "match": "verbatim:right-passage",
+      "expected": "verbatim:right-passage",
+      "top3": [
+        "ci w1 n1 c0.92 verbatim",
+        "si+pct w0.59 n0.33 c0.87 -",
+        "ci+quad w0.34 n0.67 c0.87 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "m2",
+      "kind": "near",
+      "match": "none",
+      "expected": "verbatim:right-passage | none",
+      "top3": [
+        "ci w0.8 n1 c0.92 -",
+        "si+pct w0.51 n0.33 c0.87 -",
+        "ci+quad w0.3 n0.67 c0.88 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "m3",
+      "kind": "numbers",
+      "match": "method:right-passage",
+      "expected": "method:right-passage",
+      "top3": [
+        "ci w1 n0.33 c0.89 method",
+        "si+pct w0.59 n0.67 c0.87 -",
+        "ci+quad w0.34 n0.33 c0.86 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "m4",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "ci w0.18 n1 c0.89 -",
+        "ci+quad w0.11 n1 c0.85 -",
+        "si+pct w0.18 n1 c0.86 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "m5",
+      "kind": "exact",
+      "match": "verbatim:right-passage",
+      "expected": "verbatim:right-passage",
+      "top3": [
+        "quad w0.44 n1 c0.88 -",
+        "ci+quad w1 n1 c0.87 verbatim",
+        "ci w0 n0.5 c0.82 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "m6",
+      "kind": "numbers",
+      "match": "method:right-passage",
+      "expected": "method:right-passage",
+      "top3": [
+        "quad w0.44 n0.5 c0.82 -",
+        "ci+quad w1 n0.5 c0.82 method",
+        "ci w0 n0.5 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "m7",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "quad w0.38 n1 c0.88 -",
+        "ci+quad w0.29 n1 c0.83 -",
+        "trap w0.18 n1 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "m8",
+      "kind": "numbers",
+      "match": "method:right-passage",
+      "expected": "method:right-passage",
+      "top3": [
+        "si+pct w1 n0.33 c0.88 method",
+        "ci w0.73 n0.33 c0.87 -",
+        "ci+quad w0.21 n0.67 c0.85 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "m9",
+      "kind": "numbers",
+      "match": "method:right-passage",
+      "expected": "method:right-passage",
+      "top3": [
+        "si+pct w0.85 n0.5 c0.85 method",
+        "pct w0.31 n0 c0.86 -",
+        "ci w0.15 n0 c0.82 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "m10",
+      "kind": "exact",
+      "match": "verbatim:right-passage",
+      "expected": "verbatim:right-passage",
+      "top3": [
+        "speed+trap w1 n1 c0.89 verbatim",
+        "ci w0.26 n0 c0.77 -",
+        "quad w0.15 n0 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "m11",
+      "kind": "numbers",
+      "match": "none",
+      "expected": "method:right-passage",
+      "top3": [
+        "speed+trap w0.78 n0.33 c0.86 -",
+        "quad w0.14 n0 c0.79 -",
+        "trap w0.2 n0 c0.78 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "m12",
+      "kind": "numbers",
+      "match": "method:right-passage",
+      "expected": "method:right-passage",
+      "top3": [
+        "trap w1 n0 c0.9 method",
+        "speed+trap w1 n0.33 c0.84 method",
+        "quad w0.27 n0.33 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "m13",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "trap w0.48 n1 c0.87 -",
+        "speed+trap w0.49 n1 c0.81 -",
+        "quad w0.18 n1 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "m14",
+      "kind": "exact",
+      "match": "verbatim:right-passage",
+      "expected": "verbatim:right-passage",
+      "top3": [
+        "si+pct w1 n1 c0.88 verbatim",
+        "ci w0.73 n0.33 c0.85 -",
+        "ci+quad w0.21 n0.33 c0.84 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "n1",
+      "kind": "negative",
+      "match": "method:right-passage",
+      "expected": "method:right-passage | none",
+      "top3": [
+        "ci w0.86 n0.33 c0.86 method",
+        "si+pct w0.89 n1 c0.87 -",
+        "ci+quad w0.33 n0.33 c0.85 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "n2",
+      "kind": "negative",
+      "match": "method:right-passage",
+      "expected": "method:right-passage | none",
+      "top3": [
+        "si+pct w1 n0.33 c0.87 method",
+        "ci w0.73 n1 c0.88 -",
+        "ci+quad w0.21 n0.67 c0.86 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "f1",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "table+margin w0.77 n1 c0.81 -",
+        "risks+dividend+headcount w0.32 n1 c0.8 -",
+        "margin+outlook w0.09 n0 c0.78 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "f2",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "table+margin w0.51 n1 c0.8 -",
+        "margin+outlook w0.22 n1 c0.77 -",
+        "risks+dividend+headcount w0.22 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "f3",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "table+margin w0.43 n1 c0.82 -",
+        "margin+outlook w0.14 n1 c0.8 -",
+        "risks+dividend+headcount w0.29 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "f4",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "risks+dividend+headcount w0.38 n1 c0.81 -",
+        "table+margin w0.1 n1 c0.75 -",
+        "margin+outlook w0 n1 c0.75 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "f5",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "margin+outlook w0.3 n1 c0.86 -",
+        "table+margin w0.38 n1 c0.81 -",
+        "risks+dividend+headcount w0.14 n1 c0.83 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "f6",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "risks+dividend+headcount w0 n1 c0.78 -",
+        "margin+outlook w0 n1 c0.76 -",
+        "table+margin w0 n1 c0.75 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "f7",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "risks+dividend+headcount w0.41 n1 c0.8 -",
+        "table+margin w0.18 n1 c0.75 -",
+        "margin+outlook w0 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "b1",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "mito+osmo w0.41 n1 c0.88 -",
+        "dna+nerve w0 n1 c0.82 -",
+        "photo-en w0 n1 c0.83 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "b2",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "mito+osmo w0.38 n1 c0.83 -",
+        "enz w0.24 n1 c0.79 -",
+        "photo-en w0.24 n1 c0.81 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "b3",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "enz w0.53 n1 c0.88 -",
+        "mito+osmo w0.21 n1 c0.84 -",
+        "photo-en w0.21 n1 c0.82 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "b4",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "dna+nerve w0.27 n1 c0.85 -",
+        "mito+osmo w0.39 n1 c0.8 -",
+        "enz w0 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "b5",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "dna+nerve w0.26 n1 c0.82 -",
+        "mito+osmo w0.31 n1 c0.78 -",
+        "enz w0.31 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "b6",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "photo-en w0.1 n1 c0.85 -",
+        "dna+nerve w0.23 n1 c0.8 -",
+        "mito+osmo w0 n1 c0.81 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "h1",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-water w0 n1 c0.82 -",
+        "hi-photo w0 n1 c0.8 -",
+        "hi-si w0 n1 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "h2",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-soil w0.17 n1 c0.77 -",
+        "hi-photo w0.08 n1 c0.8 -",
+        "hi-water w0.08 n1 c0.82 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "h3",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-photo w0 n1 c0.8 -",
+        "hi-monsoon+hi-digest w0 n1 c0.8 -",
+        "hi-water w0 n1 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "h4",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-photo w0.11 n1 c0.8 -",
+        "hi-const w0.11 n1 c0.76 -",
+        "hi-gravity w0 n1 c0.78 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "h5",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-const w0.09 n1 c0.79 -",
+        "hi-digest+hi-soil w0.09 n0 c0.76 -",
+        "hi-gravity w0.09 n0 c0.74 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "h6",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-const w0.19 n1 c0.78 -",
+        "hi-photo w0.07 n1 c0.76 -",
+        "hi-digest+hi-soil w0.07 n1 c0.75 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "h7",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-water w0.05 n1 c0.78 -",
+        "hi-gravity w0.05 n1 c0.78 -",
+        "hi-photo w0.05 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "h8",
+      "kind": "numbers",
+      "match": "none",
+      "expected": "method:right-passage",
+      "top3": [
+        "hi-si w0.22 n0.67 c0.82 -",
+        "hi-monsoon w0.04 n0.33 c0.83 -",
+        "hi-gravity w0.12 n0 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "h9",
+      "kind": "exact",
+      "match": "none",
+      "expected": "verbatim:right-passage",
+      "top3": [
+        "hi-si w0.22 n1 c0.82 -",
+        "hi-gravity w0.12 n0 c0.79 -",
+        "hi-const w0.12 n0 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "h10",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-monsoon+hi-digest w0.05 n1 c0.75 -",
+        "hi-soil w0.05 n1 c0.73 -",
+        "hi-water w0.05 n1 c0.75 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "h11",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-photo w0.13 n1 c0.8 -",
+        "hi-const w0.13 n1 c0.79 -",
+        "hi-digest+hi-soil w0.13 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "h12",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-photo w0.2 n1 c0.78 -",
+        "hi-monsoon+hi-digest w0.1 n1 c0.79 -",
+        "hi-digest+hi-soil w0.1 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "h13",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-digest+hi-soil w0.1 n1 c0.78 -",
+        "hi-photo w0.1 n1 c0.78 -",
+        "hi-soil w0.1 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "s1",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-agua+es-foto w0.7 n1 c0.85 -",
+        "es-volcan+es-corazon w0.27 n1 c0.81 -",
+        "es-foto+es-rev+es-cervantes w0.27 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "s2",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-agua+es-foto w0.65 n1 c0.86 -",
+        "es-foto+es-rev+es-cervantes w0.4 n1 c0.79 -",
+        "es-volcan+es-corazon w0.31 n1 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "s3",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-agua+es-foto w0.41 n1 c0.84 -",
+        "es-foto+es-rev+es-cervantes w0.31 n1 c0.81 -",
+        "es-volcan+es-corazon w0.07 n1 c0.81 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "s4",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-agua+es-foto w0.48 n1 c0.89 -",
+        "es-foto+es-rev+es-cervantes w0.35 n1 c0.79 -",
+        "es-volcan+es-corazon w0.17 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "s5",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-foto+es-rev+es-cervantes w0.73 n1 c0.84 -",
+        "es-cervantes w0.34 n1 c0.76 -",
+        "es-corazon+es-dieta w0.18 n1 c0.72 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "s6",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-foto+es-rev+es-cervantes w0.61 n1 c0.84 -",
+        "es-agua+es-foto w0.2 n1 c0.72 -",
+        "es-cervantes w0.12 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "s7",
+      "kind": "numbers",
+      "match": "method:right-passage",
+      "expected": "method:right-passage",
+      "top3": [
+        "es-interes w1 n0.67 c0.9 method",
+        "es-agua+es-foto w0.15 n0 c0.78 -",
+        "es-volcan+es-corazon w0.09 n0 c0.81 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "s8",
+      "kind": "exact",
+      "match": "verbatim:right-passage",
+      "expected": "verbatim:right-passage",
+      "top3": [
+        "es-interes w1 n1 c0.91 verbatim",
+        "es-agua+es-foto w0.15 n0 c0.79 -",
+        "es-volcan+es-corazon w0.09 n0.33 c0.82 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "s9",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-volcan+es-corazon w0.39 n1 c0.85 -",
+        "es-interes w0.25 n1 c0.82 -",
+        "es-agua+es-foto w0.14 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "s10",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-volcan+es-corazon w0.81 n1 c0.83 -",
+        "es-agua+es-foto w0.39 n1 c0.8 -",
+        "es-interes w0.33 n1 c0.81 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "s11",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-corazon+es-dieta w0.59 n1 c0.85 -",
+        "es-volcan+es-corazon w0.59 n1 c0.84 -",
+        "es-foto+es-rev+es-cervantes w0.15 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "s12",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-corazon+es-dieta w0.36 n1 c0.88 -",
+        "es-foto+es-rev+es-cervantes w0.24 n1 c0.78 -",
+        "es-volcan+es-corazon w0.12 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "s13",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-foto+es-rev+es-cervantes w0.78 n1 c0.84 -",
+        "es-cervantes w0.29 n1 c0.83 -",
+        "es-volcan+es-corazon w0.25 n1 c0.75 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "p1",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "mito+osmo w0.51 n1 c0.84 -",
+        "dna+nerve w0.22 n1 c0.83 -",
+        "photo-en w0.2 n1 c0.83 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "p2",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "mito+osmo w0.33 n1 c0.82 -",
+        "photo-en w0.16 n1 c0.81 -",
+        "dna+nerve w0.24 n1 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "p3",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "risks+dividend+headcount w0.22 n1 c0.82 -",
+        "table+margin w0.05 n1 c0.77 -",
+        "margin+outlook w0.05 n1 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "p4",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "risks+dividend+headcount w0.2 n1 c0.79 -",
+        "margin+outlook w0.13 n1 c0.79 -",
+        "table+margin w0.28 n1 c0.76 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "p5",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "speed+trap w0.6 n1 c0.84 -",
+        "pct w0.04 n1 c0.76 -",
+        "quad w0.15 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "p6",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-agua+es-foto w0.15 n1 c0.85 -",
+        "es-corazon+es-dieta w0.15 n1 c0.78 -",
+        "es-volcan+es-corazon w0.15 n1 c0.81 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "p7",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-volcan+es-corazon w0.31 n1 c0.84 -",
+        "es-corazon+es-dieta w0.31 n1 c0.82 -",
+        "es-foto+es-rev+es-cervantes w0.12 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "p8",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-corazon+es-dieta w0.43 n1 c0.85 -",
+        "es-volcan+es-corazon w0.23 n1 c0.79 -",
+        "es-agua+es-foto w0.15 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "p9",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-foto+es-rev+es-cervantes w0.37 n1 c0.84 -",
+        "es-cervantes w0.23 n1 c0.87 -",
+        "es-volcan+es-corazon w0.19 n1 c0.76 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "p10",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-foto+es-rev+es-cervantes w0.14 n0 c0.84 -",
+        "es-interes w0.14 n0 c0.76 -",
+        "es-cervantes w0.05 n0 c0.78 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "p11",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-photo w0.14 n1 c0.84 -",
+        "hi-const w0.14 n1 c0.8 -",
+        "hi-digest+hi-soil w0.07 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "p12",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-water w0.09 n1 c0.77 -",
+        "hi-gravity w0.09 n1 c0.76 -",
+        "hi-monsoon+hi-digest w0.09 n1 c0.76 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "p13",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-digest+hi-soil w0.1 n1 c0.81 -",
+        "hi-water w0.1 n1 c0.81 -",
+        "hi-photo w0.1 n1 c0.81 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "p14",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-soil w0.1 n1 c0.77 -",
+        "hi-digest+hi-soil w0.1 n1 c0.76 -",
+        "hi-gravity w0.1 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "x1",
+      "kind": "cross",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-const w0 n1 c0.73 -",
+        "hi-monsoon+hi-digest w0 n1 c0.72 -",
+        "hi-gravity w0 n1 c0.71 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "x2",
+      "kind": "cross",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-photo w0 n1 c0.7 -",
+        "hi-gravity w0 n1 c0.71 -",
+        "hi-water w0 n1 c0.7 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "x3",
+      "kind": "cross",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-photo w0 n1 c0.74 -",
+        "hi-water w0 n1 c0.71 -",
+        "hi-digest+hi-soil w0 n1 c0.73 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "x4",
+      "kind": "cross",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-foto+es-rev+es-cervantes w0 n1 c0.76 -",
+        "es-cervantes w0 n1 c0.7 -",
+        "es-corazon+es-dieta w0 n1 c0.66 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "x5",
+      "kind": "cross",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-cervantes w0 n1 c0.73 -",
+        "es-volcan+es-corazon w0.04 n1 c0.78 -",
+        "es-corazon+es-dieta w0.04 n1 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "sc1",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": []
+    },
+    {
+      "extraction": "space",
+      "scope": "doc",
+      "id": "sc2",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": []
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "m1",
+      "kind": "exact",
+      "match": "verbatim:right-passage",
+      "expected": "verbatim:right-passage",
+      "top3": [
+        "ci w1 n1 c0.92 verbatim",
+        "si+pct w0.6 n0.33 c0.87 -",
+        "ci+quad w0.36 n0.67 c0.87 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "m2",
+      "kind": "near",
+      "match": "none",
+      "expected": "verbatim:right-passage | none",
+      "top3": [
+        "ci w0.82 n1 c0.92 -",
+        "si+pct w0.53 n0.33 c0.87 -",
+        "ci+quad w0.32 n0.67 c0.88 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "m3",
+      "kind": "numbers",
+      "match": "method:right-passage",
+      "expected": "method:right-passage",
+      "top3": [
+        "ci w1 n0.33 c0.89 method",
+        "si+pct w0.6 n0.67 c0.87 -",
+        "ci+quad w0.36 n0.33 c0.86 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "m4",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "ci w0.21 n1 c0.89 -",
+        "ci+quad w0.14 n1 c0.85 -",
+        "si+pct w0.18 n1 c0.86 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "m5",
+      "kind": "exact",
+      "match": "verbatim:right-passage",
+      "expected": "verbatim:right-passage",
+      "top3": [
+        "quad w0.46 n1 c0.88 -",
+        "ci+quad w1 n1 c0.87 verbatim",
+        "ci w0 n0.5 c0.82 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "m6",
+      "kind": "numbers",
+      "match": "method:right-passage",
+      "expected": "method:right-passage",
+      "top3": [
+        "quad w0.46 n0.5 c0.82 -",
+        "ci+quad w1 n0.5 c0.82 method",
+        "ci w0 n0.5 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "m7",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "quad w0.41 n1 c0.88 -",
+        "ci+quad w0.33 n1 c0.83 -",
+        "trap w0.19 n1 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "m8",
+      "kind": "numbers",
+      "match": "method:right-passage",
+      "expected": "method:right-passage",
+      "top3": [
+        "si+pct w1 n0.33 c0.88 method",
+        "ci w0.76 n0.33 c0.87 -",
+        "ci+quad w0.25 n0.67 c0.85 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "m9",
+      "kind": "numbers",
+      "match": "method:right-passage",
+      "expected": "method:right-passage",
+      "top3": [
+        "si+pct w0.85 n0.5 c0.85 method",
+        "pct w0.35 n0 c0.86 -",
+        "risks+dividend+headcount w0.35 n0 c0.81 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "m10",
+      "kind": "exact",
+      "match": "verbatim:right-passage",
+      "expected": "verbatim:right-passage",
+      "top3": [
+        "speed+trap w1 n1 c0.89 verbatim",
+        "quad w0.15 n0 c0.79 -",
+        "ci w0.26 n0 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "m11",
+      "kind": "numbers",
+      "match": "method:right-passage",
+      "expected": "method:right-passage",
+      "top3": [
+        "speed+trap w0.8 n0.33 c0.86 method",
+        "quad w0.15 n0 c0.79 -",
+        "trap w0.22 n0 c0.78 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "m12",
+      "kind": "numbers",
+      "match": "method:right-passage",
+      "expected": "method:right-passage",
+      "top3": [
+        "trap w1 n0 c0.9 method",
+        "speed+trap w1 n0.33 c0.84 method",
+        "quad w0.26 n0.33 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "m13",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "trap w0.53 n1 c0.87 -",
+        "speed+trap w0.52 n1 c0.81 -",
+        "quad w0.16 n1 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "m14",
+      "kind": "exact",
+      "match": "verbatim:right-passage",
+      "expected": "verbatim:right-passage",
+      "top3": [
+        "si+pct w1 n1 c0.88 verbatim",
+        "ci w0.76 n0.33 c0.85 -",
+        "ci+quad w0.25 n0.33 c0.84 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "n1",
+      "kind": "negative",
+      "match": "method:right-passage",
+      "expected": "method:right-passage | none",
+      "top3": [
+        "ci w0.9 n0.33 c0.86 method",
+        "si+pct w0.88 n1 c0.87 -",
+        "ci+quad w0.37 n0.33 c0.85 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "n2",
+      "kind": "negative",
+      "match": "method:right-passage",
+      "expected": "method:right-passage | none",
+      "top3": [
+        "si+pct w1 n0.33 c0.87 method",
+        "ci w0.76 n1 c0.88 -",
+        "ci+quad w0.25 n0.67 c0.86 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "f1",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "table+margin w0.8 n1 c0.81 -",
+        "risks+dividend+headcount w0.3 n1 c0.8 -",
+        "ci+quad w0.07 n1 c0.75 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "f2",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "table+margin w0.55 n1 c0.8 -",
+        "es-foto+es-rev+es-cervantes w0 n1 c0.74 -",
+        "risks+dividend+headcount w0.2 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "f3",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "table+margin w0.47 n1 c0.82 -",
+        "risks+dividend+headcount w0.37 n1 c0.79 -",
+        "ci w0.1 n1 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "f4",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "risks+dividend+headcount w0.39 n1 c0.81 -",
+        "quad w0.07 n1 c0.73 -",
+        "hi-photo w0 n1 c0.73 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "f5",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "margin+outlook w0.33 n1 c0.86 -",
+        "table+margin w0.44 n1 c0.81 -",
+        "ci w0.06 n1 c0.78 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "f6",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "risks+dividend+headcount w0 n1 c0.78 -",
+        "margin+outlook w0 n1 c0.76 -",
+        "hi-const w0 n1 c0.74 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "f7",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "risks+dividend+headcount w0.44 n1 c0.8 -",
+        "ci w0.16 n1 c0.72 -",
+        "table+margin w0.18 n1 c0.75 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "b1",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "mito+osmo w0.45 n1 c0.88 -",
+        "dna+nerve w0 n1 c0.82 -",
+        "photo-en w0 n1 c0.83 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "b2",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "mito+osmo w0.42 n1 c0.83 -",
+        "enz w0.27 n1 c0.79 -",
+        "es-foto+es-rev+es-cervantes w0.06 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "b3",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "enz w0.55 n1 c0.88 -",
+        "mito+osmo w0.23 n1 c0.84 -",
+        "photo-en w0.23 n1 c0.82 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "b4",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "dna+nerve w0.31 n1 c0.85 -",
+        "mito+osmo w0.38 n1 c0.8 -",
+        "quad w0 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "b5",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "dna+nerve w0.27 n1 c0.82 -",
+        "trap w0.29 n1 c0.8 -",
+        "quad w0.21 n1 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "b6",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "photo-en w0.13 n1 c0.85 -",
+        "dna+nerve w0.27 n1 c0.8 -",
+        "mito+osmo w0 n1 c0.81 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "h1",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-agua+es-foto w0 n1 c0.82 -",
+        "hi-water w0 n1 c0.82 -",
+        "hi-photo w0 n1 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "h2",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-soil w0.2 n1 c0.77 -",
+        "hi-photo w0.11 n1 c0.8 -",
+        "hi-water w0.11 n1 c0.82 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "h3",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-photo w0 n1 c0.8 -",
+        "hi-monsoon+hi-digest w0 n1 c0.8 -",
+        "hi-water w0 n1 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "h4",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-photo w0.12 n1 c0.8 -",
+        "hi-const w0.12 n1 c0.76 -",
+        "es-agua+es-foto w0 n1 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "h5",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-const w0.12 n1 c0.79 -",
+        "hi-digest+hi-soil w0.12 n0 c0.76 -",
+        "hi-soil w0.12 n0 c0.75 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "h6",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-const w0.22 n1 c0.78 -",
+        "hi-photo w0.09 n1 c0.76 -",
+        "hi-digest+hi-soil w0.09 n1 c0.75 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "h7",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-water w0.07 n1 c0.78 -",
+        "hi-gravity w0.07 n1 c0.78 -",
+        "hi-photo w0.07 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "h8",
+      "kind": "numbers",
+      "match": "none",
+      "expected": "method:right-passage",
+      "top3": [
+        "si+pct w0 n0.67 c0.87 -",
+        "ci+quad w0 n0.67 c0.85 -",
+        "hi-si w0.25 n0.67 c0.82 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "h9",
+      "kind": "exact",
+      "match": "none",
+      "expected": "verbatim:right-passage",
+      "top3": [
+        "ci w0 n0.33 c0.87 -",
+        "hi-si w0.25 n1 c0.82 -",
+        "si+pct w0 n0.33 c0.88 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "h10",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-monsoon+hi-digest w0.07 n1 c0.75 -",
+        "hi-soil w0.07 n1 c0.73 -",
+        "hi-water w0.07 n1 c0.75 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "h11",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-photo w0.17 n1 c0.8 -",
+        "hi-const w0.17 n1 c0.79 -",
+        "hi-digest+hi-soil w0.17 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "h12",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-photo w0.24 n1 c0.78 -",
+        "hi-monsoon+hi-digest w0.13 n1 c0.79 -",
+        "hi-digest+hi-soil w0.13 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "h13",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-digest+hi-soil w0.14 n1 c0.78 -",
+        "hi-photo w0.14 n1 c0.78 -",
+        "hi-soil w0.14 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "s1",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-agua+es-foto w0.74 n1 c0.85 -",
+        "es-volcan+es-corazon w0.31 n1 c0.81 -",
+        "es-foto+es-rev+es-cervantes w0.31 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "s2",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-agua+es-foto w0.71 n1 c0.86 -",
+        "es-foto+es-rev+es-cervantes w0.48 n1 c0.79 -",
+        "es-volcan+es-corazon w0.37 n1 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "s3",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-agua+es-foto w0.46 n1 c0.84 -",
+        "es-foto+es-rev+es-cervantes w0.35 n1 c0.81 -",
+        "es-volcan+es-corazon w0.08 n1 c0.81 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "s4",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-agua+es-foto w0.55 n1 c0.89 -",
+        "es-foto+es-rev+es-cervantes w0.42 n1 c0.79 -",
+        "es-volcan+es-corazon w0.23 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "s5",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-foto+es-rev+es-cervantes w0.77 n1 c0.84 -",
+        "es-cervantes w0.39 n1 c0.76 -",
+        "es-interes w0.11 n1 c0.72 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "s6",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-foto+es-rev+es-cervantes w0.66 n1 c0.84 -",
+        "es-cervantes w0.16 n1 c0.77 -",
+        "es-agua+es-foto w0.26 n1 c0.72 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "s7",
+      "kind": "numbers",
+      "match": "method:right-passage",
+      "expected": "method:right-passage",
+      "top3": [
+        "es-interes w1 n0.67 c0.9 method",
+        "si+pct w0.08 n1 c0.86 -",
+        "hi-si w0 n0.67 c0.82 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "s8",
+      "kind": "exact",
+      "match": "verbatim:right-passage",
+      "expected": "verbatim:right-passage",
+      "top3": [
+        "es-interes w1 n1 c0.91 verbatim",
+        "si+pct w0.08 n0.33 c0.86 -",
+        "hi-si w0 n0.67 c0.82 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "s9",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-volcan+es-corazon w0.46 n1 c0.85 -",
+        "es-interes w0.31 n1 c0.82 -",
+        "es-agua+es-foto w0.18 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "s10",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-volcan+es-corazon w0.84 n1 c0.83 -",
+        "es-agua+es-foto w0.45 n1 c0.8 -",
+        "es-interes w0.37 n1 c0.81 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "s11",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-corazon+es-dieta w0.64 n1 c0.85 -",
+        "es-volcan+es-corazon w0.64 n1 c0.84 -",
+        "es-interes w0.19 n1 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "s12",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-corazon+es-dieta w0.41 n1 c0.88 -",
+        "es-foto+es-rev+es-cervantes w0.27 n1 c0.78 -",
+        "es-volcan+es-corazon w0.16 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "s13",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-foto+es-rev+es-cervantes w0.82 n1 c0.84 -",
+        "es-cervantes w0.33 n1 c0.83 -",
+        "es-volcan+es-corazon w0.29 n1 c0.75 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "p1",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "mito+osmo w0.53 n1 c0.84 -",
+        "dna+nerve w0.27 n1 c0.83 -",
+        "photo-en w0.23 n1 c0.83 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "p2",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "mito+osmo w0.36 n1 c0.82 -",
+        "photo-en w0.16 n1 c0.81 -",
+        "dna+nerve w0.26 n1 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "p3",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "risks+dividend+headcount w0.27 n1 c0.82 -",
+        "ci w0.06 n1 c0.77 -",
+        "table+margin w0.06 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "p4",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "risks+dividend+headcount w0.18 n1 c0.79 -",
+        "enz w0.1 n1 c0.73 -",
+        "margin+outlook w0.1 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "p5",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "speed+trap w0.61 n1 c0.84 -",
+        "dna+nerve w0.2 n1 c0.79 -",
+        "hi-gravity w0 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "p6",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-agua+es-foto w0.21 n1 c0.85 -",
+        "es-volcan+es-corazon w0.21 n1 c0.81 -",
+        "es-interes w0.21 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "p7",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-volcan+es-corazon w0.38 n1 c0.84 -",
+        "es-corazon+es-dieta w0.38 n1 c0.82 -",
+        "es-foto+es-rev+es-cervantes w0.16 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "p8",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-corazon+es-dieta w0.49 n1 c0.85 -",
+        "es-volcan+es-corazon w0.28 n1 c0.79 -",
+        "es-agua+es-foto w0.2 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "p9",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-foto+es-rev+es-cervantes w0.41 n1 c0.84 -",
+        "es-cervantes w0.28 n1 c0.87 -",
+        "es-volcan+es-corazon w0.2 n1 c0.76 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "p10",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-foto+es-rev+es-cervantes w0.18 n0 c0.84 -",
+        "es-cervantes w0.08 n0 c0.78 -",
+        "es-interes w0.18 n0 c0.76 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "p11",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-photo w0.18 n1 c0.84 -",
+        "hi-const w0.18 n1 c0.8 -",
+        "hi-monsoon w0.09 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "p12",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-water w0.13 n1 c0.77 -",
+        "hi-gravity w0.13 n1 c0.76 -",
+        "hi-monsoon+hi-digest w0.13 n1 c0.76 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "p13",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-digest+hi-soil w0.14 n1 c0.81 -",
+        "hi-water w0.14 n1 c0.81 -",
+        "hi-photo w0.14 n1 c0.81 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "p14",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-photo w0.14 n1 c0.77 -",
+        "hi-digest+hi-soil w0.14 n1 c0.76 -",
+        "hi-gravity w0.14 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "x1",
+      "kind": "cross",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "margin+outlook w0 n1 c0.77 -",
+        "trap w0.07 n1 c0.7 -",
+        "pct w0.07 n1 c0.68 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "x2",
+      "kind": "cross",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "speed+trap w0.11 n1 c0.66 -",
+        "pct w0.05 n1 c0.65 -",
+        "quad w0.05 n1 c0.68 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "x3",
+      "kind": "cross",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "quad w0 n1 c0.74 -",
+        "hi-photo w0 n1 c0.74 -",
+        "hi-monsoon+hi-digest w0 n1 c0.74 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "x4",
+      "kind": "cross",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-foto+es-rev+es-cervantes w0 n1 c0.76 -",
+        "pct w0.09 n1 c0.66 -",
+        "quad w0.09 n1 c0.69 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "x5",
+      "kind": "cross",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "speed+trap w0.13 n1 c0.79 -",
+        "enz w0.13 n1 c0.77 -",
+        "photo-en w0.07 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "sc1",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-const w0 n1 c0.74 -",
+        "quad w0.07 n1 c0.72 -",
+        "pct w0.07 n1 c0.68 -"
+      ]
+    },
+    {
+      "extraction": "space",
+      "scope": "all",
+      "id": "sc2",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "mito+osmo w0.28 n1 c0.76 -",
+        "photo-en w0.28 n1 c0.75 -",
+        "quad w0.06 n1 c0.75 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "m1",
+      "kind": "exact",
+      "match": "verbatim:right-passage",
+      "expected": "verbatim:right-passage",
+      "top3": [
+        "ci w1 n1 c0.92 verbatim",
+        "si+pct w0.59 n0.33 c0.87 -",
+        "ci+quad w0.34 n0.67 c0.87 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "m2",
+      "kind": "near",
+      "match": "none",
+      "expected": "verbatim:right-passage | none",
+      "top3": [
+        "ci w0.8 n1 c0.92 -",
+        "si+pct w0.51 n0.33 c0.87 -",
+        "ci+quad w0.3 n0.67 c0.88 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "m3",
+      "kind": "numbers",
+      "match": "method:right-passage",
+      "expected": "method:right-passage",
+      "top3": [
+        "ci w1 n0.33 c0.89 method",
+        "si+pct w0.59 n0.67 c0.87 -",
+        "ci+quad w0.34 n0.33 c0.86 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "m4",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "ci w0.18 n1 c0.89 -",
+        "ci+quad w0.11 n1 c0.85 -",
+        "si+pct w0.18 n1 c0.86 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "m5",
+      "kind": "exact",
+      "match": "verbatim:right-passage",
+      "expected": "verbatim:right-passage",
+      "top3": [
+        "quad w0.44 n1 c0.88 -",
+        "ci+quad w1 n1 c0.87 verbatim",
+        "ci w0 n0.5 c0.82 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "m6",
+      "kind": "numbers",
+      "match": "method:right-passage",
+      "expected": "method:right-passage",
+      "top3": [
+        "quad w0.44 n0.5 c0.82 -",
+        "ci+quad w1 n0.5 c0.82 method",
+        "ci w0 n0.5 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "m7",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "quad w0.38 n1 c0.88 -",
+        "ci+quad w0.29 n1 c0.83 -",
+        "trap w0.18 n1 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "m8",
+      "kind": "numbers",
+      "match": "method:right-passage",
+      "expected": "method:right-passage",
+      "top3": [
+        "si+pct w1 n0.33 c0.88 method",
+        "ci w0.73 n0.33 c0.87 -",
+        "ci+quad w0.21 n0.67 c0.85 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "m9",
+      "kind": "numbers",
+      "match": "method:right-passage",
+      "expected": "method:right-passage",
+      "top3": [
+        "si+pct w0.85 n0.5 c0.85 method",
+        "pct w0.31 n0 c0.86 -",
+        "ci w0.15 n0 c0.82 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "m10",
+      "kind": "exact",
+      "match": "verbatim:right-passage",
+      "expected": "verbatim:right-passage",
+      "top3": [
+        "speed+trap w1 n1 c0.89 verbatim",
+        "quad w0.15 n0 c0.79 -",
+        "ci w0.26 n0 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "m11",
+      "kind": "numbers",
+      "match": "none",
+      "expected": "method:right-passage",
+      "top3": [
+        "speed+trap w0.78 n0.33 c0.86 -",
+        "quad w0.14 n0 c0.79 -",
+        "trap w0.2 n0 c0.78 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "m12",
+      "kind": "numbers",
+      "match": "method:right-passage",
+      "expected": "method:right-passage",
+      "top3": [
+        "trap w1 n0 c0.91 method",
+        "speed+trap w1 n0.33 c0.84 method",
+        "quad w0.27 n0.33 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "m13",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "trap w0.48 n1 c0.87 -",
+        "speed+trap w0.54 n1 c0.82 -",
+        "quad w0.18 n1 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "m14",
+      "kind": "exact",
+      "match": "verbatim:right-passage",
+      "expected": "verbatim:right-passage",
+      "top3": [
+        "si+pct w1 n1 c0.88 verbatim",
+        "ci w0.73 n0.33 c0.85 -",
+        "ci+quad w0.21 n0.33 c0.84 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "n1",
+      "kind": "negative",
+      "match": "method:right-passage",
+      "expected": "method:right-passage | none",
+      "top3": [
+        "ci w0.86 n0.33 c0.86 method",
+        "si+pct w0.89 n1 c0.87 -",
+        "ci+quad w0.33 n0.33 c0.85 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "n2",
+      "kind": "negative",
+      "match": "method:right-passage",
+      "expected": "method:right-passage | none",
+      "top3": [
+        "si+pct w1 n0.33 c0.87 method",
+        "ci w0.73 n1 c0.88 -",
+        "ci+quad w0.21 n0.67 c0.86 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "f1",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "table+margin w0.77 n1 c0.82 -",
+        "risks+dividend+headcount w0.32 n1 c0.81 -",
+        "outlook w0.09 n0 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "f2",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "table+margin w0.51 n1 c0.81 -",
+        "risks+dividend+headcount w0.22 n1 c0.78 -",
+        "outlook w0.22 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "f3",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "table+margin w0.43 n1 c0.83 -",
+        "outlook w0.14 n1 c0.8 -",
+        "risks+dividend+headcount w0.29 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "f4",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "risks+dividend+headcount w0.38 n1 c0.81 -",
+        "table+margin w0.1 n1 c0.76 -",
+        "outlook w0 n1 c0.74 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "f5",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "outlook w0.3 n1 c0.86 -",
+        "table+margin w0.38 n1 c0.82 -",
+        "risks+dividend+headcount w0.14 n1 c0.83 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "f6",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "risks+dividend+headcount w0 n1 c0.78 -",
+        "table+margin w0 n1 c0.77 -",
+        "outlook w0 n1 c0.75 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "f7",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "risks+dividend+headcount w0.41 n1 c0.81 -",
+        "table+margin w0.18 n1 c0.76 -",
+        "outlook w0 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "b1",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "mito+osmo+enz w0.41 n1 c0.88 -",
+        "dna+nerve w0 n1 c0.83 -",
+        "photo-en w0 n1 c0.82 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "b2",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "mito+osmo+enz w0.38 n1 c0.83 -",
+        "enz w0.24 n1 c0.79 -",
+        "photo-en w0.24 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "b3",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "enz w0.53 n1 c0.89 -",
+        "mito+osmo+enz w0.21 n1 c0.84 -",
+        "photo-en w0.21 n1 c0.81 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "b4",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "dna+nerve w0.27 n1 c0.85 -",
+        "mito+osmo+enz w0.39 n1 c0.8 -",
+        "photo-en w0.07 n1 c0.76 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "b5",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "dna+nerve w0.41 n1 c0.84 -",
+        "mito+osmo+enz w0.33 n1 c0.78 -",
+        "photo-en w0.23 n1 c0.78 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "b6",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "photo-en w0.1 n1 c0.85 -",
+        "dna+nerve w0.23 n1 c0.81 -",
+        "mito+osmo+enz w0 n1 c0.81 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "h1",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-water+hi-photo w0.64 n1 c0.86 -",
+        "hi-photo+hi-const+hi-gravity w0.13 n1 c0.8 -",
+        "hi-monsoon+hi-digest w0.13 n1 c0.81 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "h2",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-water+hi-photo w0.37 n1 c0.85 -",
+        "hi-soil w0.25 n1 c0.78 -",
+        "hi-monsoon+hi-digest w0.37 n1 c0.82 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "h3",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-water+hi-photo w0.39 n1 c0.81 -",
+        "hi-monsoon+hi-digest w0.22 n1 c0.82 -",
+        "hi-photo+hi-const+hi-gravity w0.35 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "h4",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-water+hi-photo w0.35 n1 c0.81 -",
+        "hi-photo+hi-const+hi-gravity w0.2 n1 c0.81 -",
+        "hi-monsoon+hi-digest w0.08 n1 c0.81 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "h5",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-photo+hi-const+hi-gravity w0.52 n1 c0.83 -",
+        "hi-monsoon+hi-digest w0.23 n0 c0.74 -",
+        "hi-si+hi-monsoon w0.16 n0 c0.74 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "h6",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-photo+hi-const+hi-gravity w0.76 n1 c0.79 -",
+        "hi-si+hi-monsoon w0.08 n1 c0.74 -",
+        "hi-soil w0.08 n1 c0.72 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "h7",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-gravity w0.4 n1 c0.86 -",
+        "hi-water+hi-photo w0.14 n1 c0.82 -",
+        "hi-photo+hi-const+hi-gravity w0.26 n1 c0.81 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "h8",
+      "kind": "numbers",
+      "match": "method:right-passage",
+      "expected": "method:right-passage",
+      "top3": [
+        "hi-si+hi-monsoon w1 n0.67 c0.87 method",
+        "hi-photo+hi-const+hi-gravity w0.17 n0 c0.76 -",
+        "hi-water+hi-photo w0.17 n0 c0.76 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "h9",
+      "kind": "exact",
+      "match": "verbatim:right-passage",
+      "expected": "verbatim:right-passage",
+      "top3": [
+        "hi-si+hi-monsoon w1 n1 c0.89 verbatim",
+        "hi-photo+hi-const+hi-gravity w0.17 n0 c0.76 -",
+        "hi-gravity w0.17 n0 c0.75 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "h10",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-si+hi-monsoon w0.47 n1 c0.84 -",
+        "hi-monsoon+hi-digest w0.47 n1 c0.87 -",
+        "hi-water+hi-photo w0.17 n1 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "h11",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-monsoon+hi-digest w0.73 n1 c0.84 -",
+        "hi-photo+hi-const+hi-gravity w0.18 n1 c0.78 -",
+        "hi-water+hi-photo w0.18 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "h12",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-soil w0.47 n1 c0.91 -",
+        "hi-monsoon+hi-digest w0.22 n1 c0.82 -",
+        "hi-si+hi-monsoon w0.12 n1 c0.78 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "h13",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-soil w0.67 n1 c0.88 -",
+        "hi-monsoon+hi-digest w0.58 n1 c0.82 -",
+        "hi-photo+hi-const+hi-gravity w0.17 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "s1",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-agua+es-foto w0.7 n1 c0.85 -",
+        "es-volcan+es-corazon w0.27 n1 c0.81 -",
+        "es-foto+es-rev+es-cervantes w0.27 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "s2",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-agua+es-foto w0.65 n1 c0.86 -",
+        "es-foto+es-rev+es-cervantes w0.4 n1 c0.79 -",
+        "es-volcan+es-corazon w0.31 n1 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "s3",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-agua+es-foto w0.41 n1 c0.84 -",
+        "es-foto+es-rev+es-cervantes w0.31 n1 c0.81 -",
+        "es-volcan+es-corazon w0.07 n1 c0.81 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "s4",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-agua+es-foto w0.48 n1 c0.89 -",
+        "es-foto+es-rev+es-cervantes w0.35 n1 c0.79 -",
+        "es-volcan+es-corazon w0.17 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "s5",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-foto+es-rev+es-cervantes w0.73 n1 c0.84 -",
+        "es-cervantes w0.34 n1 c0.76 -",
+        "es-corazon+es-dieta w0.18 n1 c0.72 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "s6",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-foto+es-rev+es-cervantes w0.61 n1 c0.84 -",
+        "es-agua+es-foto w0.2 n1 c0.72 -",
+        "es-cervantes w0.12 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "s7",
+      "kind": "numbers",
+      "match": "method:right-passage",
+      "expected": "method:right-passage",
+      "top3": [
+        "es-interes w1 n0.67 c0.9 method",
+        "es-agua+es-foto w0.15 n0 c0.78 -",
+        "es-volcan+es-corazon w0.09 n0 c0.81 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "s8",
+      "kind": "exact",
+      "match": "verbatim:right-passage",
+      "expected": "verbatim:right-passage",
+      "top3": [
+        "es-interes w1 n1 c0.91 verbatim",
+        "es-agua+es-foto w0.15 n0 c0.79 -",
+        "es-volcan+es-corazon w0.09 n0.33 c0.82 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "s9",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-volcan+es-corazon w0.39 n1 c0.85 -",
+        "es-interes w0.25 n1 c0.82 -",
+        "es-agua+es-foto w0.14 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "s10",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-volcan+es-corazon w0.81 n1 c0.83 -",
+        "es-agua+es-foto w0.39 n1 c0.8 -",
+        "es-interes w0.33 n1 c0.81 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "s11",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-corazon+es-dieta w0.59 n1 c0.85 -",
+        "es-volcan+es-corazon w0.59 n1 c0.84 -",
+        "es-foto+es-rev+es-cervantes w0.15 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "s12",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-corazon+es-dieta w0.36 n1 c0.88 -",
+        "es-foto+es-rev+es-cervantes w0.24 n1 c0.78 -",
+        "es-volcan+es-corazon w0.12 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "s13",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-foto+es-rev+es-cervantes w0.78 n1 c0.84 -",
+        "es-cervantes w0.29 n1 c0.83 -",
+        "es-volcan+es-corazon w0.25 n1 c0.75 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "p1",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "mito+osmo+enz w0.51 n1 c0.84 -",
+        "dna+nerve w0.22 n1 c0.83 -",
+        "photo-en w0.2 n1 c0.82 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "p2",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "mito+osmo+enz w0.33 n1 c0.82 -",
+        "photo-en w0.16 n1 c0.81 -",
+        "dna+nerve w0.24 n1 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "p3",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "risks+dividend+headcount w0.22 n1 c0.83 -",
+        "table+margin w0.05 n1 c0.79 -",
+        "outlook w0.05 n1 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "p4",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "risks+dividend+headcount w0.2 n1 c0.79 -",
+        "outlook w0.13 n1 c0.79 -",
+        "table+margin w0.28 n1 c0.76 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "p5",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "speed+trap w0.6 n1 c0.85 -",
+        "pct w0.04 n1 c0.76 -",
+        "quad w0.15 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "p6",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-agua+es-foto w0.15 n1 c0.85 -",
+        "es-corazon+es-dieta w0.15 n1 c0.78 -",
+        "es-volcan+es-corazon w0.15 n1 c0.81 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "p7",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-volcan+es-corazon w0.31 n1 c0.84 -",
+        "es-corazon+es-dieta w0.31 n1 c0.82 -",
+        "es-foto+es-rev+es-cervantes w0.12 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "p8",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-corazon+es-dieta w0.43 n1 c0.85 -",
+        "es-volcan+es-corazon w0.23 n1 c0.79 -",
+        "es-agua+es-foto w0.15 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "p9",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-foto+es-rev+es-cervantes w0.37 n1 c0.84 -",
+        "es-cervantes w0.23 n1 c0.87 -",
+        "es-volcan+es-corazon w0.19 n1 c0.76 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "p10",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-foto+es-rev+es-cervantes w0.14 n0 c0.84 -",
+        "es-interes w0.14 n0 c0.76 -",
+        "es-cervantes w0.05 n0 c0.78 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "p11",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-water+hi-photo w0.4 n1 c0.82 -",
+        "hi-photo+hi-const+hi-gravity w0.4 n1 c0.81 -",
+        "hi-monsoon+hi-digest w0.15 n1 c0.81 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "p12",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-monsoon+hi-digest w0.6 n1 c0.81 -",
+        "hi-soil w0.24 n1 c0.78 -",
+        "hi-photo+hi-const+hi-gravity w0.2 n1 c0.78 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "p13",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-monsoon+hi-digest w0.53 n1 c0.83 -",
+        "hi-water+hi-photo w0.26 n1 c0.82 -",
+        "hi-photo+hi-const+hi-gravity w0.39 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "p14",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-photo+hi-const+hi-gravity w0.55 n1 c0.78 -",
+        "hi-gravity w0.39 n1 c0.82 -",
+        "hi-monsoon+hi-digest w0.14 n1 c0.76 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "x1",
+      "kind": "cross",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-photo+hi-const+hi-gravity w0 n1 c0.73 -",
+        "hi-monsoon+hi-digest w0 n1 c0.83 -",
+        "hi-water+hi-photo w0 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "x2",
+      "kind": "cross",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-photo+hi-const+hi-gravity w0 n1 c0.77 -",
+        "hi-monsoon+hi-digest w0 n1 c0.68 -",
+        "hi-water+hi-photo w0 n1 c0.69 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "x3",
+      "kind": "cross",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-photo+hi-const+hi-gravity w0 n1 c0.74 -",
+        "hi-soil w0 n1 c0.8 -",
+        "hi-gravity w0 n1 c0.73 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "x4",
+      "kind": "cross",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-foto+es-rev+es-cervantes w0 n1 c0.76 -",
+        "es-cervantes w0 n1 c0.7 -",
+        "es-corazon+es-dieta w0 n1 c0.66 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "x5",
+      "kind": "cross",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-cervantes w0 n1 c0.73 -",
+        "es-volcan+es-corazon w0.04 n1 c0.78 -",
+        "es-corazon+es-dieta w0.04 n1 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "sc1",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": []
+    },
+    {
+      "extraction": "clean",
+      "scope": "doc",
+      "id": "sc2",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": []
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "m1",
+      "kind": "exact",
+      "match": "verbatim:right-passage",
+      "expected": "verbatim:right-passage",
+      "top3": [
+        "ci w1 n1 c0.92 verbatim",
+        "si+pct w0.6 n0.33 c0.87 -",
+        "ci+quad w0.36 n0.67 c0.87 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "m2",
+      "kind": "near",
+      "match": "none",
+      "expected": "verbatim:right-passage | none",
+      "top3": [
+        "ci w0.81 n1 c0.92 -",
+        "si+pct w0.53 n0.33 c0.87 -",
+        "ci+quad w0.32 n0.67 c0.88 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "m3",
+      "kind": "numbers",
+      "match": "method:right-passage",
+      "expected": "method:right-passage",
+      "top3": [
+        "ci w1 n0.33 c0.89 method",
+        "si+pct w0.6 n0.67 c0.87 -",
+        "ci+quad w0.36 n0.33 c0.86 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "m4",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "ci w0.2 n1 c0.89 -",
+        "ci+quad w0.13 n1 c0.85 -",
+        "si+pct w0.18 n1 c0.86 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "m5",
+      "kind": "exact",
+      "match": "verbatim:right-passage",
+      "expected": "verbatim:right-passage",
+      "top3": [
+        "quad w0.46 n1 c0.88 -",
+        "ci+quad w1 n1 c0.87 verbatim",
+        "ci w0 n0.5 c0.82 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "m6",
+      "kind": "numbers",
+      "match": "method:right-passage",
+      "expected": "method:right-passage",
+      "top3": [
+        "quad w0.46 n0.5 c0.82 -",
+        "ci+quad w1 n0.5 c0.82 method",
+        "ci w0 n0.5 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "m7",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "quad w0.41 n1 c0.88 -",
+        "ci+quad w0.33 n1 c0.83 -",
+        "trap w0.19 n1 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "m8",
+      "kind": "numbers",
+      "match": "method:right-passage",
+      "expected": "method:right-passage",
+      "top3": [
+        "si+pct w1 n0.33 c0.88 method",
+        "ci w0.76 n0.33 c0.87 -",
+        "ci+quad w0.24 n0.67 c0.85 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "m9",
+      "kind": "numbers",
+      "match": "method:right-passage",
+      "expected": "method:right-passage",
+      "top3": [
+        "si+pct w0.85 n0.5 c0.85 method",
+        "pct w0.35 n0 c0.86 -",
+        "risks+dividend+headcount w0.35 n0 c0.82 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "m10",
+      "kind": "exact",
+      "match": "verbatim:right-passage",
+      "expected": "verbatim:right-passage",
+      "top3": [
+        "speed+trap w1 n1 c0.89 verbatim",
+        "ci w0.25 n0 c0.77 -",
+        "quad w0.15 n0 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "m11",
+      "kind": "numbers",
+      "match": "none",
+      "expected": "method:right-passage",
+      "top3": [
+        "speed+trap w0.8 n0.33 c0.86 -",
+        "quad w0.14 n0 c0.79 -",
+        "trap w0.21 n0 c0.78 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "m12",
+      "kind": "numbers",
+      "match": "method:right-passage",
+      "expected": "method:right-passage",
+      "top3": [
+        "trap w1 n0 c0.91 method",
+        "speed+trap w1 n0.33 c0.84 method",
+        "quad w0.25 n0.33 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "m13",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "trap w0.53 n1 c0.87 -",
+        "speed+trap w0.59 n1 c0.82 -",
+        "quad w0.16 n1 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "m14",
+      "kind": "exact",
+      "match": "verbatim:right-passage",
+      "expected": "verbatim:right-passage",
+      "top3": [
+        "si+pct w1 n1 c0.88 verbatim",
+        "ci w0.76 n0.33 c0.85 -",
+        "ci+quad w0.24 n0.33 c0.84 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "n1",
+      "kind": "negative",
+      "match": "method:right-passage",
+      "expected": "method:right-passage | none",
+      "top3": [
+        "ci w0.9 n0.33 c0.86 method",
+        "si+pct w0.88 n1 c0.87 -",
+        "ci+quad w0.37 n0.33 c0.85 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "n2",
+      "kind": "negative",
+      "match": "method:right-passage",
+      "expected": "method:right-passage | none",
+      "top3": [
+        "si+pct w1 n0.33 c0.87 method",
+        "ci w0.76 n1 c0.88 -",
+        "ci+quad w0.24 n0.67 c0.86 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "f1",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "table+margin w0.79 n1 c0.82 -",
+        "risks+dividend+headcount w0.3 n1 c0.81 -",
+        "ci+quad w0.07 n1 c0.75 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "f2",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "table+margin w0.54 n1 c0.81 -",
+        "es-foto+es-rev+es-cervantes w0 n1 c0.74 -",
+        "outlook w0.28 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "f3",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "table+margin w0.47 n1 c0.83 -",
+        "risks+dividend+headcount w0.37 n1 c0.79 -",
+        "ci w0.1 n1 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "f4",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "risks+dividend+headcount w0.39 n1 c0.81 -",
+        "hi-si+hi-monsoon w0 n1 c0.73 -",
+        "quad w0.06 n1 c0.73 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "f5",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "outlook w0.33 n1 c0.86 -",
+        "table+margin w0.43 n1 c0.82 -",
+        "ci w0.06 n1 c0.78 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "f6",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "table+margin w0 n1 c0.77 -",
+        "hi-photo+hi-const+hi-gravity w0 n1 c0.72 -",
+        "hi-si+hi-monsoon w0 n1 c0.73 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "f7",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "risks+dividend+headcount w0.43 n1 c0.81 -",
+        "ci w0.15 n1 c0.72 -",
+        "table+margin w0.17 n1 c0.76 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "b1",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "mito+osmo+enz w0.44 n1 c0.88 -",
+        "dna+nerve w0 n1 c0.83 -",
+        "photo-en w0 n1 c0.82 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "b2",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "mito+osmo+enz w0.42 n1 c0.83 -",
+        "enz w0.26 n1 c0.79 -",
+        "es-foto+es-rev+es-cervantes w0.05 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "b3",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "enz w0.55 n1 c0.89 -",
+        "mito+osmo+enz w0.23 n1 c0.84 -",
+        "photo-en w0.23 n1 c0.81 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "b4",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "dna+nerve w0.3 n1 c0.85 -",
+        "mito+osmo+enz w0.38 n1 c0.8 -",
+        "quad w0 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "b5",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "dna+nerve w0.43 n1 c0.84 -",
+        "trap w0.3 n1 c0.8 -",
+        "quad w0.22 n1 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "b6",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "photo-en w0.13 n1 c0.85 -",
+        "dna+nerve w0.27 n1 c0.81 -",
+        "mito+osmo+enz w0 n1 c0.81 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "h1",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-water+hi-photo w0.68 n1 c0.86 -",
+        "hi-photo+hi-const+hi-gravity w0.16 n1 c0.8 -",
+        "hi-monsoon+hi-digest w0.16 n1 c0.81 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "h2",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-water+hi-photo w0.43 n1 c0.85 -",
+        "hi-monsoon+hi-digest w0.43 n1 c0.82 -",
+        "hi-si+hi-monsoon w0.15 n1 c0.82 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "h3",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-water+hi-photo w0.43 n1 c0.81 -",
+        "hi-monsoon+hi-digest w0.26 n1 c0.82 -",
+        "hi-photo+hi-const+hi-gravity w0.4 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "h4",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-water+hi-photo w0.4 n1 c0.81 -",
+        "hi-photo+hi-const+hi-gravity w0.24 n1 c0.81 -",
+        "hi-monsoon+hi-digest w0.1 n1 c0.81 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "h5",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-photo+hi-const+hi-gravity w0.56 n1 c0.83 -",
+        "hi-monsoon+hi-digest w0.27 n0 c0.74 -",
+        "hi-soil w0.16 n0 c0.74 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "h6",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-photo+hi-const+hi-gravity w0.79 n1 c0.79 -",
+        "hi-si+hi-monsoon w0.11 n1 c0.74 -",
+        "hi-soil w0.11 n1 c0.72 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "h7",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-gravity w0.46 n1 c0.86 -",
+        "hi-water+hi-photo w0.18 n1 c0.82 -",
+        "hi-photo+hi-const+hi-gravity w0.31 n1 c0.81 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "h8",
+      "kind": "numbers",
+      "match": "method:right-passage",
+      "expected": "method:right-passage",
+      "top3": [
+        "hi-si+hi-monsoon w1 n0.67 c0.87 method",
+        "si+pct w0 n0.67 c0.87 -",
+        "ci+quad w0 n0.67 c0.85 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "h9",
+      "kind": "exact",
+      "match": "verbatim:right-passage",
+      "expected": "verbatim:right-passage",
+      "top3": [
+        "hi-si+hi-monsoon w1 n1 c0.89 verbatim",
+        "ci w0 n0.33 c0.87 -",
+        "si+pct w0 n0.33 c0.88 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "h10",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-monsoon+hi-digest w0.54 n1 c0.87 -",
+        "hi-si+hi-monsoon w0.54 n1 c0.84 -",
+        "hi-water+hi-photo w0.22 n1 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "h11",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-monsoon+hi-digest w0.77 n1 c0.84 -",
+        "hi-water+hi-photo w0.23 n1 c0.79 -",
+        "hi-photo+hi-const+hi-gravity w0.23 n1 c0.78 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "h12",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-soil w0.52 n1 c0.91 -",
+        "hi-monsoon+hi-digest w0.27 n1 c0.82 -",
+        "hi-photo+hi-const+hi-gravity w0.16 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "h13",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-soil w0.69 n1 c0.88 -",
+        "hi-monsoon+hi-digest w0.63 n1 c0.82 -",
+        "hi-photo+hi-const+hi-gravity w0.2 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "s1",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-agua+es-foto w0.73 n1 c0.85 -",
+        "es-volcan+es-corazon w0.31 n1 c0.81 -",
+        "es-foto+es-rev+es-cervantes w0.31 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "s2",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-agua+es-foto w0.71 n1 c0.86 -",
+        "es-volcan+es-corazon w0.37 n1 c0.8 -",
+        "es-foto+es-rev+es-cervantes w0.47 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "s3",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-agua+es-foto w0.46 n1 c0.84 -",
+        "es-foto+es-rev+es-cervantes w0.35 n1 c0.81 -",
+        "es-volcan+es-corazon w0.08 n1 c0.81 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "s4",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-agua+es-foto w0.54 n1 c0.89 -",
+        "es-foto+es-rev+es-cervantes w0.42 n1 c0.79 -",
+        "es-volcan+es-corazon w0.22 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "s5",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-foto+es-rev+es-cervantes w0.77 n1 c0.84 -",
+        "es-cervantes w0.39 n1 c0.76 -",
+        "es-corazon+es-dieta w0.23 n1 c0.72 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "s6",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-foto+es-rev+es-cervantes w0.66 n1 c0.84 -",
+        "es-cervantes w0.16 n1 c0.77 -",
+        "es-agua+es-foto w0.25 n1 c0.72 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "s7",
+      "kind": "numbers",
+      "match": "method:right-passage",
+      "expected": "method:right-passage",
+      "top3": [
+        "es-interes w1 n0.67 c0.9 method",
+        "si+pct w0.08 n1 c0.86 -",
+        "hi-si+hi-monsoon w0 n0.67 c0.84 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "s8",
+      "kind": "exact",
+      "match": "verbatim:right-passage",
+      "expected": "verbatim:right-passage",
+      "top3": [
+        "es-interes w1 n1 c0.91 verbatim",
+        "si+pct w0.08 n0.33 c0.86 -",
+        "hi-si+hi-monsoon w0 n0.67 c0.85 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "s9",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-volcan+es-corazon w0.45 n1 c0.85 -",
+        "es-interes w0.3 n1 c0.82 -",
+        "es-agua+es-foto w0.18 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "s10",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-volcan+es-corazon w0.84 n1 c0.83 -",
+        "es-agua+es-foto w0.45 n1 c0.8 -",
+        "es-interes w0.37 n1 c0.81 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "s11",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-corazon+es-dieta w0.63 n1 c0.85 -",
+        "es-volcan+es-corazon w0.63 n1 c0.84 -",
+        "es-foto+es-rev+es-cervantes w0.19 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "s12",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-corazon+es-dieta w0.41 n1 c0.88 -",
+        "es-foto+es-rev+es-cervantes w0.27 n1 c0.78 -",
+        "es-volcan+es-corazon w0.16 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "s13",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-foto+es-rev+es-cervantes w0.82 n1 c0.84 -",
+        "es-cervantes w0.32 n1 c0.83 -",
+        "es-volcan+es-corazon w0.29 n1 c0.75 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "p1",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "mito+osmo+enz w0.53 n1 c0.84 -",
+        "dna+nerve w0.27 n1 c0.83 -",
+        "photo-en w0.23 n1 c0.82 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "p2",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "mito+osmo+enz w0.36 n1 c0.82 -",
+        "photo-en w0.16 n1 c0.81 -",
+        "dna+nerve w0.25 n1 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "p3",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "risks+dividend+headcount w0.27 n1 c0.83 -",
+        "ci w0.06 n1 c0.77 -",
+        "table+margin w0.06 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "p4",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "risks+dividend+headcount w0.18 n1 c0.79 -",
+        "enz w0.09 n1 c0.73 -",
+        "photo-en w0.15 n1 c0.73 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "p5",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "speed+trap w0.61 n1 c0.85 -",
+        "dna+nerve w0.19 n1 c0.79 -",
+        "hi-gravity w0 n1 c0.8 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "p6",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-agua+es-foto w0.2 n1 c0.85 -",
+        "es-volcan+es-corazon w0.2 n1 c0.81 -",
+        "es-interes w0.2 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "p7",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-volcan+es-corazon w0.37 n1 c0.84 -",
+        "es-corazon+es-dieta w0.37 n1 c0.82 -",
+        "es-foto+es-rev+es-cervantes w0.15 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "p8",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-corazon+es-dieta w0.49 n1 c0.85 -",
+        "es-volcan+es-corazon w0.28 n1 c0.79 -",
+        "es-agua+es-foto w0.19 n1 c0.77 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "p9",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-foto+es-rev+es-cervantes w0.4 n1 c0.84 -",
+        "es-cervantes w0.28 n1 c0.87 -",
+        "es-volcan+es-corazon w0.2 n1 c0.76 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "p10",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-foto+es-rev+es-cervantes w0.18 n0 c0.84 -",
+        "es-cervantes w0.08 n0 c0.78 -",
+        "es-interes w0.18 n0 c0.76 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "p11",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-water+hi-photo w0.47 n1 c0.82 -",
+        "hi-photo+hi-const+hi-gravity w0.47 n1 c0.81 -",
+        "hi-monsoon+hi-digest w0.19 n1 c0.81 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "p12",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-monsoon+hi-digest w0.65 n1 c0.81 -",
+        "hi-soil w0.28 n1 c0.78 -",
+        "hi-photo+hi-const+hi-gravity w0.25 n1 c0.78 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "p13",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-monsoon+hi-digest w0.59 n1 c0.83 -",
+        "hi-water+hi-photo w0.31 n1 c0.82 -",
+        "hi-photo+hi-const+hi-gravity w0.45 n1 c0.79 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "p14",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-photo+hi-const+hi-gravity w0.61 n1 c0.78 -",
+        "hi-gravity w0.45 n1 c0.82 -",
+        "hi-monsoon+hi-digest w0.18 n1 c0.76 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "x1",
+      "kind": "cross",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "pct w0.06 n1 c0.68 -",
+        "photo-en w0.06 n1 c0.73 -",
+        "trap w0.06 n1 c0.7 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "x2",
+      "kind": "cross",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-photo+hi-const+hi-gravity w0 n1 c0.77 -",
+        "quad w0.05 n1 c0.68 -",
+        "pct w0.05 n1 c0.65 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "x3",
+      "kind": "cross",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "trap w0.07 n1 c0.72 -",
+        "hi-soil w0 n1 c0.8 -",
+        "hi-photo+hi-const+hi-gravity w0 n1 c0.74 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "x4",
+      "kind": "cross",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "es-foto+es-rev+es-cervantes w0 n1 c0.76 -",
+        "hi-photo+hi-const+hi-gravity w0 n1 c0.71 -",
+        "pct w0.09 n1 c0.66 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "x5",
+      "kind": "cross",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "speed+trap w0.13 n1 c0.79 -",
+        "photo-en w0.07 n1 c0.77 -",
+        "enz w0.13 n1 c0.76 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "sc1",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "hi-gravity w0 n1 c0.74 -",
+        "quad w0.07 n1 c0.72 -",
+        "pct w0.07 n1 c0.68 -"
+      ]
+    },
+    {
+      "extraction": "clean",
+      "scope": "all",
+      "id": "sc2",
+      "kind": "paraphrase",
+      "match": "none",
+      "expected": "none",
+      "top3": [
+        "photo-en w0.28 n1 c0.74 -",
+        "mito+osmo+enz w0.28 n1 c0.76 -",
+        "quad w0.06 n1 c0.75 -"
+      ]
+    }
+  ]
+}

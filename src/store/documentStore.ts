@@ -14,6 +14,9 @@ export type DocStatus =
   | 'ocr-processing'
   | 'loading-model'
   | 'embedding'
+  // v1.1: a stored document whose vectors came from an older model, being re-embedded from
+  // its saved text (reindex.ts). Not searchable until it's back to 'ready'.
+  | 'reindexing'
   | 'ready'
   | 'error'
 

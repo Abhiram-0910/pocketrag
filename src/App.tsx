@@ -9,6 +9,7 @@ import { LandingPage } from './components/LandingPage'
 import { PrivacyPage } from './components/PrivacyPage'
 import { REPO_URL } from './lib/privacyFacts'
 import { getAllDocuments } from './lib/db'
+import { isCurrentModel, reindexOutdated } from './lib/reindex'
 import type { KeyConfig } from './lib/answerRequest'
 import { getHasVisitedApp, setHasVisitedApp } from './lib/landingVisitSetting'
 import { useChatStore } from './store/chatStore'
@@ -70,7 +71,7 @@ function App() {
   }, [])
 
   // Restore the document list from IndexedDB on load — persisted docs are fully embedded,
-  // so they come back as `ready`. We land on the list and select nothing (multi-document
+  // so they come back as `ready` (or `reindexing`, when their vectors are from an older model). We land on the list and select nothing (multi-document
   // is the model now; auto-opening one would undermine it). Ref-guarded so StrictMode's
   // double-invoke runs it once; restoreDocuments merges by id so it can't clobber a doc
   // dropped in the same instant.
@@ -78,20 +79,22 @@ function App() {
     if (restored.current) return
     restored.current = true
     getAllDocuments()
-      .then((docs) =>
+      .then((docs) => {
         restoreDocuments(
           docs.map((doc) => ({
             id: doc.id,
             fileName: doc.fileName,
-            status: 'ready',
+            // Vectors from an older embedding model are re-embedded first (reindex.ts).
+            status: isCurrentModel(doc) ? 'ready' : 'reindexing',
             error: null,
             embedProgress: null,
             chunkCount: doc.chunkCount,
             // Older records predate this field — see db.ts's DocumentRecord.source.
             source: doc.source ?? 'document',
           })),
-        ),
-      )
+        )
+        void reindexOutdated(docs)
+      })
       .catch(() => {})
     // Chat history: lists conversations and opens the most recent one. Nothing is
     // focused — restoring must not move the user's focus. A failure shows the storage

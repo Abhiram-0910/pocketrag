@@ -388,7 +388,7 @@ async function main() {
   // Download labels: each model's observed requests match its rows' purpose (the reranker
   // loads lazily, on the first question).
   const purposeCounts = {}
-  for (const [model, purpose] of [['all-MiniLM-L6-v2', 'embed-model-download'], ['ms-marco-MiniLM-L-2-v2', 'rerank-model-download']]) {
+  for (const [model, purpose] of [['multilingual-e5-small', 'embed-model-download'], ['ms-marco-MiniLM-L-2-v2', 'rerank-model-download']]) {
     const requests = heads.filter(({ req }) => req.url().includes(model)).length
     const rows = [...ledger.values()].filter((r) => r.purpose === purpose).length
     purposeCounts[purpose] = { requests, rows }

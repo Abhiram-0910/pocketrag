@@ -10,18 +10,15 @@ import {
 } from '@huggingface/transformers'
 import { chunkText, type Tokenizer } from '../lib/chunker'
 import { downloadFetch } from '../lib/egress'
+import { EMBEDDING_MODEL, RERANK_MODEL } from '../lib/searchModels'
 import { resolveBackend } from './backend'
 import type { EmbeddedChunk, RerankCandidate, RerankScore, WorkerRequest, WorkerResponse } from './embedding.types'
 
 // transformers.js loads ONNX Runtime from jsDelivr at a pinned version path; the CSP
 // restricts it to that path, but the files themselves aren't integrity-checked (see ortPin.ts).
 
-const MODEL_ID = 'Xenova/all-MiniLM-L6-v2'
-// Smaller of the two common MS MARCO cross-encoder sizes (~16MB q8 vs. ~23MB for
-// -L-6-v2, checked against the real published ONNX file sizes) — this app already
-// downloads one ~23MB model for embeddings, so the smaller reranker keeps the total
-// download from roughly doubling on first use.
-const RERANK_MODEL_ID = 'Xenova/ms-marco-MiniLM-L-2-v2'
+// Both models and their pinned revisions: src/lib/searchModels.ts. The reranker is the
+// smaller MS MARCO cross-encoder (~16MB q8 vs ~23MB for -L-6-v2).
 
 // Vite bundles this file as a module worker; `self` here is the worker global,
 // not `Window` — narrow it manually instead of pulling in the `webworker` lib,
@@ -39,7 +36,7 @@ function post(message: WorkerResponse) {
 
 // Every model file and ONNX Runtime download goes through egress.ts, which reports it to
 // the main thread's egress log. egress.bypass.test.ts checks this assignment stays.
-env.fetch = downloadFetch(RERANK_MODEL_ID, (record) => post({ type: 'egress', record }))
+env.fetch = downloadFetch(RERANK_MODEL.id, (record) => post({ type: 'egress', record }))
 
 function onModelProgress(info: ProgressInfo) {
   if (info.status === 'progress_total') {
@@ -48,7 +45,8 @@ function onModelProgress(info: ProgressInfo) {
 }
 
 function createExtractor(device: 'webgpu' | 'wasm'): Promise<FeatureExtractionPipeline> {
-  return pipeline('feature-extraction', MODEL_ID, {
+  return pipeline('feature-extraction', EMBEDDING_MODEL.id, {
+    revision: EMBEDDING_MODEL.revision,
     dtype: 'q8',
     device,
     progress_callback: onModelProgress,
@@ -70,7 +68,7 @@ let extractorPromise: ReturnType<typeof resolveBackend<FeatureExtractionPipeline
 let tokenizerPromise: ReturnType<typeof AutoTokenizer.from_pretrained> | null = null
 
 async function getTokenizer(): Promise<Tokenizer> {
-  tokenizerPromise ??= tagLoad(AutoTokenizer.from_pretrained(MODEL_ID))
+  tokenizerPromise ??= tagLoad(AutoTokenizer.from_pretrained(EMBEDDING_MODEL.id, { revision: EMBEDDING_MODEL.revision }))
   const hfTokenizer = await tokenizerPromise
   return { countTokens: (text) => hfTokenizer(text, { add_special_tokens: false }).input_ids.data.length }
 }
@@ -99,8 +97,9 @@ interface Reranker {
 // not assumed from the embedding model's own API shape.
 async function createReranker(device: 'webgpu' | 'wasm'): Promise<Reranker> {
   const [tokenizer, model] = await Promise.all([
-    AutoTokenizer.from_pretrained(RERANK_MODEL_ID),
-    AutoModelForSequenceClassification.from_pretrained(RERANK_MODEL_ID, {
+    AutoTokenizer.from_pretrained(RERANK_MODEL.id, { revision: RERANK_MODEL.revision }),
+    AutoModelForSequenceClassification.from_pretrained(RERANK_MODEL.id, {
+      revision: RERANK_MODEL.revision,
       dtype: 'q8',
       device,
       progress_callback: onModelProgress,
@@ -157,7 +156,7 @@ ctx.onmessage = async (event) => {
       const embeddedChunks: EmbeddedChunk[] = []
       let dims = 0
       for (const chunk of chunks) {
-        const embedding = await embedText(extractor, chunk.text)
+        const embedding = await embedText(extractor, EMBEDDING_MODEL.passagePrefix + chunk.text)
         dims = embedding.length
         embeddedChunks.push({ ...chunk, embedding })
         post({ type: 'embed-progress', done: embeddedChunks.length, total: chunks.length })
@@ -169,8 +168,19 @@ ctx.onmessage = async (event) => {
 
     if (msg.type === 'embed-query') {
       const extractor = await getExtractor()
-      const embedding = await embedText(extractor, msg.text)
+      const embedding = await embedText(extractor, EMBEDDING_MODEL.queryPrefix + msg.text)
       post({ type: 'query-embedding', embedding })
+      return
+    }
+
+    if (msg.type === 'embed-texts') {
+      const extractor = await getExtractor()
+      const embeddings: number[][] = []
+      for (const text of msg.texts) {
+        embeddings.push(await embedText(extractor, EMBEDDING_MODEL.passagePrefix + text))
+        post({ type: 'embed-progress', done: embeddings.length, total: msg.texts.length })
+      }
+      post({ type: 'texts-result', embeddings })
       return
     }
 

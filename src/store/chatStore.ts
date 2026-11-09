@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { SourceMatch } from '../lib/sourceMatch'
 import type { DocLabel, HistoryTurn, WebSource } from '../lib/answerRequest'
 import type { EgressRecord } from '../lib/egress'
 import {
@@ -37,6 +38,7 @@ export interface NewTurn {
   model: string | null
   imageIncluded: boolean
   webSearchRequested: boolean
+  sourceMatch?: SourceMatch | null
 }
 
 // What the caller sends with the new turn's request, derived from its ancestors.
@@ -223,6 +225,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         model: input.model,
         imageIncluded: input.imageIncluded,
         webSearchRequested: input.webSearchRequested,
+        sourceMatch: input.sourceMatch ?? null,
         webGrounded: false,
         failure: null,
         egress: [],

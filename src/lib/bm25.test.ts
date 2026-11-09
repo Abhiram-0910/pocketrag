@@ -88,4 +88,17 @@ describe('bm25Score', () => {
     const catDogScore = bm25Score('cat dog', docs).find((r) => r.id === 'catOnly')!.score
     expect(catDogScore).toBeCloseTo(catOnlyScore, 10)
   })
+
+  it('keeps accented and Devanagari words whole (vowel signs included)', () => {
+    // `\w` split "fotosíntesis" at the í and saw no word at all in Hindi.
+    const [es] = bm25Score('fotosíntesis', [{ id: 'd1', text: 'La fotosíntesis ocurre en los cloroplastos' }])
+    expect(es.score).toBeGreaterThan(0)
+    const [hiMatch, hiOther] = bm25Score('पानी', [
+      { id: 'water', text: 'नदियों का पानी भाप बनता है' },
+      { id: 'other', text: 'पान की दुकान' },
+    ])
+    expect(hiMatch.score).toBeGreaterThan(0)
+    // "पान" is a different word from "पानी" (the ी is a vowel sign): no partial match.
+    expect(hiOther.score).toBe(0)
+  })
 })

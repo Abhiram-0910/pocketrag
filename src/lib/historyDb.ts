@@ -1,4 +1,5 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
+import type { SourceMatch } from './sourceMatch'
 import type { DocLabel } from './answerRequest'
 import type { FailureCode, FailureSource } from './apiError'
 import type { EgressRecord } from './egress'
@@ -70,6 +71,10 @@ export interface TurnRecord {
   // Every request made for this turn, retries included — what the Receipts view will show.
   // Always [] for now: records go to egress.ts's session log until the UI is wired.
   egress: EgressRecord[]
+  // v1.1: a top passage held this question word for word ('verbatim', shown as "From your
+  // notes") or a worked example it follows with new numbers ('method', sent with
+  // followMethod). Absent on turns saved before v1.1, and null when neither matched.
+  sourceMatch?: SourceMatch | null
 }
 
 interface HistoryDB extends DBSchema {

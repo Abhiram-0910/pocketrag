@@ -4,6 +4,8 @@ import { embedQuery, rerankChunks } from '../lib/embeddingClient'
 import { getAllChunks, getChunksByIds, getChunksForDocument, type ChunkRecord } from '../lib/db'
 import { hybridRankChunks, type ScoredChunk } from '../lib/retrieval'
 import { applyRerank, type RerankScore } from '../lib/reranker'
+import { shouldRerank } from '../lib/searchModels'
+import { exampleForRequest, findSourceMatch, type SourceMatch } from '../lib/sourceMatch'
 import type { RerankCandidate } from '../workers/embedding.types'
 import { attemptAnswer, fetchAnswerFromWorker, type ImageAttachment, type KeyConfig } from '../lib/answerRequest'
 import { buildRetrievalQuery, pathTo, previousQuestionFor } from '../lib/conversation'
@@ -24,6 +26,7 @@ import { useDocumentStore } from '../store/documentStore'
 import { answerFor, useChatStore, type HistoryStorageState, type TurnKey, type TurnRequestContext } from '../store/chatStore'
 import { SessionReceipts, TurnReceipt } from './Receipts'
 import { TurnAnswer } from './TurnAnswer'
+import { SourceExample } from './SourceExample'
 import { StatusBanner } from './ui/StatusBanner'
 import { Button } from './ui/Button'
 
@@ -257,6 +260,7 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
       activeKeyConfig: KeyConfig,
       image?: ImageAttachment,
       enableWebSearch?: boolean,
+      match?: SourceMatch | null,
     ) => {
       setAwaitingAnswer(true)
       setTimedOutTurnId(null)
@@ -264,12 +268,27 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
       // and a stale failure must not sit beside the answer that retry produced.
       setAnswerError(null)
 
-      const requestChunks = chunks.map(({ chunk, score }) => ({
+      let requestChunks = chunks.map(({ chunk, score }) => ({
         text: chunk.text,
         page: chunk.page,
         score,
         documentId: chunk.documentId,
       }))
+      // A worked example to follow with new numbers (sourceMatch.ts): it goes first, joined
+      // with the rest of the example on its page (≤ 2,000 characters, still one passage), and
+      // the Worker is told to use its method. Passages it already contains aren't repeated.
+      let followMethod = false
+      const matched = match?.kind === 'method' ? chunks.find(({ chunk }) => chunk.id === match.chunkId) : undefined
+      if (match && matched) {
+        const example = exampleForRequest(match.chunkId, await getChunksForDocument(match.documentId).catch(() => []))
+        if (example) {
+          requestChunks = [
+            { text: example, page: matched.chunk.page, score: matched.score, documentId: matched.chunk.documentId },
+            ...requestChunks.filter((c) => !example.includes(c.text)),
+          ]
+          followMethod = true
+        }
+      }
       // Prompt history (Milestone 11 Phase C2) comes from the store: the last answered
       // turns on this turn's path, never a grounded one. Every attempt's egress — retries
       // included — is recorded on the turn.
@@ -284,6 +303,7 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
         image,
         enableWebSearch,
         (record) => void appendEgress(turnId, record),
+        followMethod,
       )
 
       if (result.outcome === 'success') {
@@ -367,7 +387,13 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
         onQueryEmbedding: (msg) => {
           const chunkSource = useAll ? getAllChunks() : getChunksForDocument(selectedReadyId as string)
           chunkSource
-            .then(async (chunks) => {
+            .then(async (stored) => {
+              // Only 'ready' documents' vectors come from the current model: one still being
+              // re-indexed (or that failed to) must never be compared with this query.
+              const readyIds = new Set(
+                useDocumentStore.getState().documents.filter((d) => d.status === 'ready').map((d) => d.id),
+              )
+              const chunks = stored.filter((chunk) => readyIds.has(chunk.documentId))
               // Hybrid search narrows the full pool to a wider candidate set first,
               // using the blended retrieval query for both cosine and BM25 matching;
               // the cross-encoder reranker then narrows that down to the final TOP_K
@@ -375,7 +401,8 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
               // actually being asked, not the blended recall-oriented query).
               const candidates = hybridRankChunks(msg.embedding, retrievalQuery, chunks, RERANK_POOL_SIZE)
               let ranked = candidates.slice(0, TOP_K)
-              if (candidates.length > TOP_K) {
+              // The reranker is English-only; on other languages it made results worse (eval/).
+              if (candidates.length > TOP_K && shouldRerank(question)) {
                 try {
                   const scores = await rerankChunksAsync(
                     question,
@@ -427,6 +454,15 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
                 }
               }
 
+              // Worked-example fidelity (v1.1): the user's own question word for word, or a
+              // worked example it follows with new numbers. Deterministic, no model call.
+              const sourceMatch = findSourceMatch(
+                question,
+                msg.embedding,
+                ranked.map(({ chunk }) => chunk),
+                chunks,
+              )
+
               // Saved as 'pending' before the request goes out (chatStore.startTurn).
               const context = await startTurn({
                 question,
@@ -441,6 +477,7 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
                 ...turnKeyFor(activeKeyConfig),
                 imageIncluded: image !== undefined,
                 webSearchRequested: activeWebSearchEnabled,
+                sourceMatch,
               })
               const turnId = context.turnId
               setLiveTurnId(turnId)
@@ -448,7 +485,7 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
               setPendingImage(image ? { turnId, image } : null)
               setPendingWebSearch({ turnId, enabled: activeWebSearchEnabled })
 
-              await runAnswerAttempt(turnId, context, question, ranked, false, activeKeyConfig, image, activeWebSearchEnabled)
+              await runAnswerAttempt(turnId, context, question, ranked, false, activeKeyConfig, image, activeWebSearchEnabled, sourceMatch)
             })
             .catch((err) => setError(err instanceof Error ? err.message : 'Failed to retrieve chunks.'))
             .finally(() => setBusy(false))
@@ -491,7 +528,7 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
     const image = pendingImage?.turnId === turnId ? pendingImage.image : undefined
     const enableWebSearch =
       pendingWebSearch?.turnId === turnId ? pendingWebSearch.enabled : leaf.webSearchRequested && isGeminiEffective
-    await runAnswerAttempt(turnId, context, leaf.question, leafSources.chunks, wasLive, keyConfig, image, enableWebSearch)
+    await runAnswerAttempt(turnId, context, leaf.question, leafSources.chunks, wasLive, keyConfig, image, enableWebSearch, leaf.sourceMatch)
     // The banner holding "Try again" unmounts when the retry starts, dropping focus to
     // <body>; the input is disabled while busy, so re-enable it first, then focus it —
     // or the answer area, if the input stays disabled.
@@ -753,10 +790,19 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
       {/* The current answer, a restored turn's outcome, and this session's live failure
           region. tabIndex -1: focusable by script only (see handleRetry). */}
       <div id="answer-area" ref={answerAreaRef} tabIndex={-1} className="focus:outline-none">
+        {/* The source's own solution needs no model call, so it shows whatever the answer's fate. */}
+        {leaf?.sourceMatch?.kind === 'verbatim' && (
+          <div className="mt-4">
+            <SourceExample match={leaf.sourceMatch} fileName={titleFor(leaf.sourceMatch.documentId)} />
+          </div>
+        )}
         {leaf?.status === 'answered' && (
           <div className="mt-4 space-y-2 rounded border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
             {showLeafQuestion && <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{leaf.question}</p>}
             <TurnAnswer turn={leaf} text={answerFor({ groundedSession }, leaf)} />
+            {leaf.sourceMatch?.kind === 'method' && (
+              <SourceExample match={leaf.sourceMatch} fileName={titleFor(leaf.sourceMatch.documentId)} />
+            )}
             {leaf.docLabels.length > 0 && (
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 {leaf.docLabels.map((d) => `Doc ${d.label} = ${titleFor(d.documentId)}`).join(' · ')}

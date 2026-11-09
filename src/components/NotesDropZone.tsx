@@ -3,6 +3,7 @@ import { classifyEmbeddingError } from '../lib/errorTaxonomy'
 import { UploadSimple } from '@phosphor-icons/react'
 import { embedDocument } from '../lib/embeddingClient'
 import { saveDocument, type ChunkRecord } from '../lib/db'
+import { EMBEDDING_MODEL_KEY } from '../lib/searchModels'
 import { attemptOcr, fetchOcrFromWorker } from '../lib/ocrRequest'
 import { retryCopy, retryTimingFor } from '../lib/retryTiming'
 import { useDocumentStore } from '../store/documentStore'
@@ -119,7 +120,7 @@ export function NotesDropZone() {
                   hasImage: chunk.hasImage,
                 }))
                 saveDocument(
-                  { id, fileName: file.name, uploadedAt: Date.now(), chunkCount: msg.chunks.length, source: 'note' },
+                  { id, fileName: file.name, uploadedAt: Date.now(), chunkCount: msg.chunks.length, source: 'note', embeddingModel: EMBEDDING_MODEL_KEY },
                   chunkRecords,
                 )
                   .then(() => {

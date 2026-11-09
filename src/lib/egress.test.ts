@@ -37,6 +37,10 @@ describe('payloadCategories / describePayload', () => {
     expect(egress.describePayload({ keySource: 'shared' })).toEqual({ categories: ['none'], counts: {} })
   })
 
+  it('treats followMethod (v1.1) as a setting: no new category, so Receipts read the same', () => {
+    expect(egress.payloadCategories({ question: 'q', followMethod: true })).toEqual(['question'])
+  })
+
   it('counts passages and history turns by length, and document ids as distinct ids across chunks and docLabels', () => {
     const chunks = [
       { text: 'a', documentId: 'doc-1' },

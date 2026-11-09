@@ -13,7 +13,10 @@ export interface BM25Result {
 const K1 = 1.2
 const B = 0.75
 
-const WORD_PATTERN = /\w+/g
+// Letters, digits and combining marks in any script. `\w` is ASCII-only, which gave Hindi no
+// terms at all and split Spanish words at every accent; without \p{M}, Devanagari words
+// would split at every vowel sign.
+const WORD_PATTERN = /[\p{L}\p{N}\p{M}]+/gu
 
 function tokenize(text: string): string[] {
   return text.toLowerCase().match(WORD_PATTERN) ?? []

@@ -10,6 +10,11 @@ export interface DocumentRecord {
   // before this field existed simply won't have it — App.tsx's restore path defaults
   // a missing value to 'document', never assume it's present.
   source: 'document' | 'note'
+  // Which embedding model made this document's vectors (searchModels.ts's
+  // EMBEDDING_MODEL_KEY). Missing on documents saved before v1.1 (all-MiniLM-L6-v2): those
+  // are re-embedded from their stored passage text on load (reindex.ts) and aren't
+  // searchable until then — vectors from two models must never be compared.
+  embeddingModel?: string
 }
 
 export interface ChunkRecord {
