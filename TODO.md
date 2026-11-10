@@ -7,6 +7,19 @@ Read this at the start of every session to know what to work on next.
 
 ## 🔴 Current Sprint
 
+### v1.2 — edit / regenerate / branch, dark-mode fields, axe (Phase 7b)
+- [x] Edit any question / regenerate an answer → a sibling version with a fresh retrieval;
+      "‹ n/m ›" navigator; active branch persisted; history from the active path only;
+      Retry stays separate (same turn).
+- [x] Point 11: dark-mode key field, picker and options, placeholders, autofill rules
+      (stylesheet only); axe-core over landing / app / picker / Receipts / privacy, both
+      themes, Chromium + Firefox: 1 serious fixed, 0 left.
+- [ ] Switching to an earlier turn's other version opens that branch's *newest* leaf, not
+      the leaf last viewed in it (`latestLeafUnder`). Remember a per-branch last leaf if
+      users find this surprising.
+- [ ] Deleting a single version (not the whole conversation) isn't offered.
+- [ ] Verify the branch announcements with a real screen reader (DOM-checked only).
+
 ### v1.1 — answers from your documents, any subject, any language (Phase 7a)
 - [x] Eval harness (`npm run eval`, `eval/`): generated own-content fixtures (maths
       worked examples incl. new-number variants and hard negatives, finance table,
@@ -212,7 +225,9 @@ Read this at the start of every session to know what to work on next.
   - [ ] Wire `e2e/step-b-failures.cjs` and `e2e/step-c-csp.cjs` into CI when the CI
         item lands.
 - [ ] a11y: `aria-live` for the answer itself and other status updates (failure
-      banners done in Step B), autofill handling. (API-key input label done in Step B.)
+      banners done in Step B; branch changes done in v1.2). Autofill styling done in v1.2
+      (stylesheet only; the autofill state itself can't be automated — check by hand once
+      with a saved key in Chrome and Firefox). (API-key input label done in Step B.)
 - [ ] Verify the `aria-live` announcements with a real screen reader (NVDA/Narrator);
       only DOM-checked so far.
 - [ ] PWA (manifest + offline shell).

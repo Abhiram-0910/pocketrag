@@ -92,6 +92,7 @@ pocketrag/
 | `src/lib/searchModels.ts` | v1.1: both search models with pinned Hugging Face revisions, the e5 query/passage prefixes, `EMBEDDING_MODEL_KEY` (stamped on each document), `shouldRerank()` (English-only reranking) |
 | `src/lib/reindex.ts` | v1.1: re-embeds documents saved under an older embedding model from their stored passage text ("Updating search index"), one at a time, in one transaction per document; never writes back a document deleted meanwhile |
 | `src/lib/sourceMatch.ts` | v1.1 worked-example fidelity: `findSourceMatch()` (verbatim / method / none, deterministic, thresholds from eval/), `expandToPage()` (display), `exampleForRequest()` (the widened example sent with `followMethod`) |
+| `src/components/TurnControls.tsx` | v1.2: a turn's question with Edit question / Regenerate answer and the "‹ n/m ›" version navigator (`aria-disabled` at the ends so focus stays) |
 | `src/components/SourceExample.tsx` | "From your notes (page N)" / "Method from your notes" block, quoted from IndexedDB; the method block carries the arithmetic warning |
 | `eval/` | Retrieval eval (`npm run eval`): fixture source (`fixtures.ts`), generated PDFs (`fixtures/`, committed), the harness (`retrieval.eval.ts`), results (`results/`). Not part of `npm run test` |
 | `src/lib/conversation.ts` | `buildRetrievalQuery()` — blends the immediately preceding question into retrieval only, never sent to the Worker as-is (see Key Architectural Decisions). Also the conversation-tree ops over `historyDb.ts` turns: `pathTo`, `childrenOf`, `latestLeafUnder`, `historyForRequest` (answered, non-grounded turns only), `previousQuestionFor`, `docLabelsFor` |
@@ -792,6 +793,33 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
   long `/ocr` transcriptions. The remaining unpinned request: `AutoTokenizer.from_pretrained`
   probes `resolve/main/tokenizer_config.json` (1-byte range GET, `get_tokenizer_files()` takes
   no options in 4.2.0); every file actually loaded comes from the pinned commit (TODO).
+
+- **v1.2 — edit, regenerate, branch (Phase 7b).** The tree was already there (`parentId`,
+  `activeLeafId`, `selectBranch`); v1.2 is the UI. A turn is one question + answer, so its
+  siblings are the versions of that question. **Edit** (any turn) and **Regenerate** (answered
+  turns) both go through QueryPanel's `ask(question, parentId)`: a fresh retrieval, then
+  `startTurn({ parentId: turn.parentId })`, so the new version's history is its ancestors
+  only — never another branch. **Retry** still re-sends the same turn record (failed or
+  timed-out leaf only). Switching versions (`siblingPosition` + `selectBranch` →
+  `latestLeafUnder`) persists `activeLeafId`, so a reload reopens the same branch; a version
+  opened from an earlier turn shows that branch's newest leaf. Grounded answers stay
+  unstored for regenerations too (`saveTurn` drops them by turn, whatever its parent).
+  Branch changes are announced in an always-mounted polite region; the navigator's
+  buttons are `aria-disabled` at the ends, and after a switch focus is handed to the same
+  button on the newly shown version (the element is replaced because turns are keyed by id).
+  Edit/Regenerate are disabled while a request is in flight or no query can run; switching
+  versions is disabled only while a request is in flight.
+- **v1.2 — dark-mode fields and axe (point 11).** Stylesheet-only (`src/index.css`; the CSP
+  has no `'unsafe-inline'` for styles): `::placeholder` slate-500 / slate-400 (4.76:1 /
+  6.96:1), dark `select option` colours (Firefox drew light option text on the light system
+  list), and autofill overrides — an inset `box-shadow` in the theme's field colour covers
+  the browser's autofill fill in both engines, with `-webkit-text-fill-color` for the text
+  (Firefox also honours it). Autofill itself can't be triggered by automation; the rules
+  were confirmed parsed in both engines and the field/option colours measured in dark
+  mode. axe-core 4.10.3 (scratchpad install, not a dependency) over landing, app with
+  documents (answer, Receipt, versions), the BYOK picker and the privacy view, light + dark,
+  Chromium + Firefox: one serious finding (selected-row secondary text slate-500 on blue-50,
+  4.37:1 → slate-600), then 0 violations.
 
 ---
 

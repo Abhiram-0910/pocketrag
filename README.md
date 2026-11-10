@@ -42,6 +42,12 @@ your documents but see your IP address. Two disclosed exceptions to "nothing lea
 (above) and an opt-in toggle that sends a page image for diagram-aware questions,
 default off — see Features below for both.
 
+### Versions of a question
+
+| 360 px | 1280 px |
+| --- | --- |
+| ![Branching at 360px: a question with a "‹ 2/2 ›" version navigator, Edit question and Regenerate answer](docs/screenshots/branching-360.png) | ![Branching at 1280px: the conversation with an earlier turn's versions and the current answer](docs/screenshots/branching-1280.png) |
+
 ## How answers are grounded
 
 1. **Search runs in your browser.** Each passage is embedded with `multilingual-e5-small`
@@ -109,6 +115,10 @@ Milestone 16 retest):
   what it carried (question, passage and turn counts, never the text itself), its size
   and outcome, retries included — saved with the answer; a "This session" list covers
   model downloads, OCR uploads and model-list checks (see [Receipts](#receipts) below)
+- Edit, regenerate and branch: edit any earlier question or regenerate an answer, and each
+  becomes a new version of that turn, with a fresh search. Step between versions with
+  "‹ 1/2 ›"; the version you're on is what's sent as context, and it's kept across reloads
+  (see the screenshots below)
 - Chat history: conversations saved in this browser and reopened on reload; delete one,
   all history, or everything (documents + history). Web-grounded answers are never
   stored

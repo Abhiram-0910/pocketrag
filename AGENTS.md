@@ -6,7 +6,7 @@ Claude reads this at the START of every new session to understand what happened 
 ---
 
 ## Project State
-**Last updated:** 2026-11-10 (v1.1.0, Session 43; the summary below predates it — see Session 43)
+**Last updated:** 2026-11-10 (v1.2.0, Session 44; the summary below predates v1.1 — see Sessions 43-44)
 **Current branch:** master (through Session 28's BYOK-Gemini model-default fix —
 see below)
 **Remote:** `github.com/Abhiram-0910/pocketrag` (private) — pushed through this
@@ -143,7 +143,7 @@ provider error text; the UI shows it verbatim with a per-code action (Step B). 6
 - **A restored (earlier-session) failure renders outside the live regions**; only this
   session's live turn uses them. **Focus never drops to `<body>`** — when the usual
   target is disabled or gone, use the fallback (`#answer-area`, the list heading).
-- **e2e: keep the live `/models` check in its own route-free tab.** On the long-lived,
+- **e2e: keep the live `/models` check in its own route-free browser context** (a tab of the main context was not enough: it hung twice in a row in v1.2). On the long-lived,
   route-mocked main page that real request intermittently never completed in Chromium
   (in-flight in the app's own log for 30s+; curl answered in ~1s).
 - **Never invent a timer** (Step D). The Worker sends `retryAfterSeconds`/`resetAt` only
@@ -4352,6 +4352,59 @@ code. pdf.js extraction unchanged (native join measured no gain). One unpinned 1
 remains (`tokenizer_config.json` on `main`, library limitation). Two post-plan code commits
 (`7c3f4ba`, `02d949e`). **Unverified:** a multi-part Gemini answer live; Safari; WebGPU;
 real-world (non-Chromium) Hindi/Telugu PDFs; in-browser memory (Node RSS only).
+
+### Session 44 — 2026-11-10 (Claude Code)
+**Goal:** Phase 7b (v1.2): edit / regenerate / branch on the `parentId` tree; point 11 (dark-mode
+key field, picker, autofill; axe pass); deploy per the standing gates; tag `v1.2.0`.
+
+**A. Branching** (`6328a3a`): `TurnControls` (question, Edit question, Regenerate answer,
+"‹ n/m ›" with `aria-disabled` ends) on every turn of the active path; QueryPanel's submit is now
+`ask(question, parentId?)` — Edit/Regenerate create a sibling with a fresh retrieval, history
+from the ancestors only; Retry unchanged (same record, failed/timed-out leaf). `siblingPosition`
+in conversation.ts; `selectBranch` persists `activeLeafId`. Polite always-mounted announcement;
+focus handed to the same ‹/› on the version shown (turns are keyed, so the element is replaced).
+Tests: tree ops (siblings, newest leaf, history per branch), store (regenerated grounded
+sibling not stored, history skips the other branch, active branch after a reload).
+
+**B. Point 11:** stylesheet only (`src/index.css`): placeholders slate-500/400, dark `select
+option` colours (Firefox drew light option text on its light list), autofill: inset box-shadow
+in the theme's field colour + `-webkit-text-fill-color`, both engines (rules confirmed parsed:
+Chromium `:-webkit-autofill` + `:autofill`, Firefox `:autofill`). Dark-mode key field / select /
+option computed: slate-100 on slate-900. The autofill state itself can't be triggered by
+automation — unverified by hand. axe-core 4.10.3 (scratchpad, not a dependency), WCAG 2.0/2.1
+A+AA + best-practice, landing / app with documents + answer + open Receipts + versions / BYOK
+picker / privacy, light + dark, Chromium + Firefox: **1 serious** (selected conversation's
+date, slate-500 on blue-50 4.37:1; same pairing on the selected document row) → slate-600; then
+**0 violations, none left to list**; no horizontal overflow in any view.
+
+**Gates:** tsc exit 0 both; oxlint 0 diagnostics / 148 files; frontend 389/389 (was 385),
+Worker 543/543 (no Worker change → not deployed); build + size guard pass; JS
+`index-lwyn6W2G.js` → `index-DJVdKJEQ.js`, CSS `index-B3t7OCzh.css` → `index-CrBJyyv2.css`
+(new rules/controls); `git diff 6158529 -- public/_headers` empty; step-b Chromium exit 0, 33
+scenarios (was 32), 0 failures; step-c Chromium + Firefox exit 0, 15/15 flows, 28/28 matched, 0
+unmatched, 0 unexpected.
+
+**Deployed (Pages only):** `ca72b358` → **`264dfbb6-b390-46c2-beea-d3e85186a028`** (Production,
+`6328a3a`). CSP byte-identical 446 B, five headers, no Set-Cookie; Worker `54534f88` unchanged
+(preflight 200, invalid 400, fake key `key_rejected`). Production smoke (`/answer` mocked):
+regenerate → 2/2, ‹ → 1/2, reload keeps 1/2, no overflow 360/1280, 0 CSP, 0 page errors. ONE
+shared `/answer`: 200, `gemini` / `gemini-3.5-flash-lite`, "Mitochondria produce ATP through
+cellular respiration (Doc 1, page 1)." — a full answer (the v1.1 multi-part join held here; this
+answer may have been one part). README screenshots `docs/screenshots/branching-{360,1280}.png`.
+Rollback:
+```bash
+npx wrangler whoami >/dev/null
+TOKEN=$(grep -oP '^oauth_token = "\K[^"]+' ~/.config/.wrangler/config/default.toml)
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+  https://api.cloudflare.com/client/v4/accounts/da55acd99cee5a43df7d397dd80af4e3/pages/projects/pocketrag/deployments/ca72b358-6ca3-4dec-9588-84859a2d5030/rollback
+```
+(Safe on its own: v1.1 reads the same tree; extra sibling turns just aren't navigable there.)
+
+**Deviations:** step-b's live `/models` check hung twice in a row in its tab of the main context
+(answered in ~1 s from a fresh context and from curl) → moved to its own browser context
+(standing rule updated). Switching to an earlier turn's other version opens that branch's newest
+leaf, not the last one viewed (TODO). No per-version delete (not asked). **Unverified:** the
+autofill state by hand; branch announcements with a real screen reader; Safari.
 
 ---
 
