@@ -104,6 +104,7 @@ pocketrag/
 | `public/_headers` | Cloudflare Pages response headers: the enforced CSP (defined once, under `/*`) and the other security headers — see Key Architectural Decisions (Step C) |
 | `src/workers/ortPin.ts` | The pinned ONNX Runtime version, its jsDelivr `dist/` path (must equal `_headers`' `connect-src` entry), and the recorded sha384 of each runtime file; `ortPin.test.ts` keeps all of it in step with `node_modules` and `_headers` |
 | `src/lib/diagramHeuristic.ts`, `src/lib/pageRender.ts`, `src/lib/sessionFiles.ts` | Diagram-aware Q&A (Milestone 10): lexical diagram-likely detection, on-demand page-image rendering, and the session-only (never persisted) raw-`File` cache page rendering needs |
+| `src/lib/figures.ts`, `src/lib/textLayout.ts`, `src/lib/pageView.ts`, `src/components/PageImages.tsx`, `src/components/useAnswerFigures.ts`, `src/components/CitationDialog.tsx` | v1.4: figure regions from the operator list, chunk-to-text-item ranges and highlight rectangles, local page rendering (crops, thumbnails, highlighted page), the answer card's figures, and the click-to-verify dialog |
 | `src/lib/diagramImageSetting.ts`, `src/lib/webSearchSetting.ts`, `src/lib/landingVisitSetting.ts` | Opt-in localStorage flags (diagram image sending, Gemini web-search grounding, landing-page-seen) — all default OFF/unset, same read-once-at-mount pattern |
 | `src/lib/ocrRequest.ts` | Client-side call to the Worker's `/ocr` endpoint for Notes-tab transcription |
 | `src/lib/pdfExport.ts` | `buildConversationPdf()` — jsPDF conversation export with real manual page-break logic (`ensureSpace()`) |
@@ -855,6 +856,41 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
   documents (answer, Receipt, versions), the BYOK picker and the privacy view, light + dark,
   Chromium + Firefox: one serious finding (selected-row secondary text slate-500 on blue-50,
   4.37:1 → slate-600), then 0 violations.
+- **v1.4 — figures from the user's own page (point 2).** `figures.ts` walks the pdf.js
+  operator list with its own transform stack (`save`/`restore`/`transform`, form XObject
+  matrices): an image is the unit square under the current transform; each painted path
+  (`constructPath` with a fill/stroke op) contributes the `minMax` box pdf.js records,
+  transformed the same way. Path boxes within 10 pt merge into one drawing (sort-and-sweep
+  union-find, repeated until stable); boxes smaller than 40 × 30 pt and page-size boxes
+  (≥80% of the page: backgrounds) are dropped; one image covering ≥80% is a scan. For each
+  page the answer cites, in order (`citedPages`, the Worker's citation pattern): a figure
+  within 1/6 of the page height of the cited passage's text is shown; otherwise, if
+  `isDiagramLikely` fired, the nearest figure, or the whole page "figure not isolated"; at
+  most 2 per answer. Scans and notes are shown whole. `pageView.ts` opens the PDF once per
+  call (loading task destroyed after), renders the page to a canvas at ≤1800 px long edge,
+  copies crops (≤1200 px) or thumbnails (≤900 px) into `ImageBitmap`s and zeroes every
+  canvas; `useAnswerFigures` closes the bitmaps when the answer changes or the panel
+  unmounts. Pages are `<canvas role="img">`, not `<img>`: the CSP's `img-src 'self'` rules
+  out blob:/data: URLs, and `_headers` stays unchanged. The export draws the bitmaps into
+  JPEGs for jsPDF. Measured on the fixtures: raster and vector figures found, the finance
+  table counts as a figure, the maths fraction bars don't. The page-image opt-in (Milestone
+  10) is untouched and still covers Documents-tab PDFs only (notes now have a session File
+  too, so it's gated on `source`).
+- **v1.4 — click-to-verify (point 4).** The chunker returns each chunk's `[start, end)` in
+  its page text; ingest stores `itemRange` = `[startItem, offset, endItem, endOffset]`
+  over pdf.js's text items (the page text is the items joined by one space; pdf.ts now also
+  returns `itemLengths`). Additive and optional: no DB version change. At view time the
+  stored range is used only if it still reads as the chunk's text; otherwise (pre-v1.4
+  chunks, or a different reading) the chunk is found by text search, exact then
+  whitespace-insensitive. Rectangles come from each item's transform and width, the first
+  and last items cut in proportion to the characters covered, filled as one path with
+  `multiply` so overlapping chunks aren't darker. Resolution on all eval fixtures with the
+  real e5 tokenizer: 36/36 chunks by stored range and 36/36 by search
+  (`eval/results/highlight.json`; the scanned fixture has no text and no chunks). The
+  dialog is a native `<dialog>` opened with `showModal()` (inert background, Esc), plus a
+  Tab wrap (a modal dialog otherwise lets Tab out to the browser UI) and focus returned to
+  the citation. The PDF still lives only in tab memory (`sessionFiles.ts`, now
+  subscribable); after a reload both features ask for the file again by name.
 
 ---
 

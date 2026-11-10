@@ -7,6 +7,19 @@ Read this at the start of every session to know what to work on next.
 
 ## 🔴 Current Sprint
 
+### v1.4 — diagram crop + click-to-verify (Phase 7d)
+- [x] Figures cut from the cited page (operator list: images + merged vector paths), at most
+      2 per answer, whole page "figure not isolated" / scans / notes, in the PDF export.
+- [x] Click-to-verify dialog with pdf.js highlight; `itemRange` stored per chunk, text search
+      for older chunks (36/36 fixture chunks both ways); scans/notes without highlight.
+- [ ] Safari/WebKit and a real screen reader on the dialog (Chromium + Firefox only).
+- [ ] Figures from a multi-page scanned note: OCR notes have no page numbers, so page 1 is
+      shown. Needs per-page OCR text to fix.
+- [ ] Vector figures made only of text (a text-box "diagram") aren't found; a table counts as
+      a figure. Both are heuristic limits; revisit with real user PDFs.
+- [ ] Optional: store the PDF itself (opt-in, IndexedDB) so figures and highlights survive a
+      reload without choosing the file again. A storage/privacy decision, not done.
+
 ### v1.3 — streaming (Phase 7c)
 - [x] Streamed answers (Gemini shared + BYOK, OpenAI, Anthropic), Stop, interrupted turns,
       Receipt `interrupted`, Discord phase, loading stages, download bytes, indexing bars.

@@ -31,7 +31,9 @@ privacy model.
 1. Drop in a PDF, or a photo/PDF of handwritten or scanned notes.
 2. Ask a question, in English or another language (search is multilingual; measured on
    English, Hindi and Spanish).
-3. Get a grounded answer, with citations back to the source document and page.
+3. Get a grounded answer, with citations back to the source document and page. Click a
+   citation to see that page with the passage highlighted; a figure next to the cited text
+   is shown cut from your own page.
 
 PDF parsing, chunking, embedding, and retrieval on the Documents tab all run
 client-side (WebGPU with a WASM fallback) — the answer request (your question, a few
@@ -47,6 +49,13 @@ default off — see Features below for both.
 | 360 px | 1280 px |
 | --- | --- |
 | ![Branching at 360px: a question with a "‹ 2/2 ›" version navigator, Edit question and Regenerate answer](docs/screenshots/branching-360.png) | ![Branching at 1280px: the conversation with an earlier turn's versions and the current answer](docs/screenshots/branching-1280.png) |
+
+### Figures and click-to-verify
+
+| 360 px | 1280 px |
+| --- | --- |
+| ![An answer at 360px with the water-cycle diagram cut from page 2 of the user's PDF](docs/screenshots/figure-360.jpg) | ![The same answer card at 1280px, with the figure, its caption and "Cut from your own file in this browser; nothing was sent."](docs/screenshots/figure-1280.jpg) |
+| ![The citation dialog at 360px: page 1 with the cited passage highlighted, and the passage text below](docs/screenshots/verify-360.jpg) | ![The citation dialog at 1280px: "Doc 1, page 1" with the cited passage highlighted in yellow](docs/screenshots/verify-1280.jpg) |
 
 ## How answers are grounded
 
@@ -110,6 +119,14 @@ Milestone 16 retest):
 - Handwritten/scanned notes (photos and PDFs) via OCR, with per-file upload consent
 - Diagram-aware Q&A — opt-in: sends the best-matching passage's page as an image when
   that page has a picture or the passage mentions a figure, chart or table
+- Figures from your own pages: when an answer cites a page with a figure next to the cited
+  text (or the diagram hint fires), the figure is cut from your PDF and shown in the answer
+  card as it appears, at most two per answer. Found from the PDF's own drawing commands
+  (images and drawn shapes), with no model and no network; if a figure can't be isolated,
+  the whole page is shown, labelled "figure not isolated". Scanned pages and notes are shown
+  whole. Included in the PDF export
+- Click-to-verify: a citation such as "(Doc 1, page 3)" opens that page with the cited
+  passage highlighted, from pdf.js's text positions. Drawn in your browser; nothing is sent
 - Export a conversation as a PDF
 - Receipts: every answer lists each request that carried your data — where it went,
   what it carried (question, passage and turn counts, never the text itself), its size
@@ -295,6 +312,15 @@ so they fail the build's tests if they drift.
 - **English questions about notes in another language** retrieve worse than questions in
   the notes' own language (recall@1 20% in the all-documents scope, 5 questions).
 - **A scanned page in a PDF has no text** on the Documents tab. Use the Notes tab.
+- **Highlights are for typed PDFs only.** A scanned page (one image covering the page) and
+  notes (photos or scans read by OCR) are shown without a highlight, and the dialog says
+  so. A multi-page scanned note shows its first page, because OCR'd notes have no page
+  numbers.
+- **Figures and highlights need the PDF in this tab.** PocketRAG never stores your file,
+  only its text and search vectors, so after a reload it asks you to choose the file again
+  (kept in this tab's memory only). Figure detection is a heuristic: a table's borders
+  count as a figure, a figure made only of text isn't found, and a decorative image near
+  the cited text can be shown.
 - **First visit downloads ~135 MB** for the search model (it was ~24 MB before v1.1), plus
   ~16 MB for the reranker on the first English question. Documents saved before v1.1 are
   re-indexed once from their stored text ("Updating search index").

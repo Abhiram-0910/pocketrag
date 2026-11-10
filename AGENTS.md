@@ -6,7 +6,7 @@ Claude reads this at the START of every new session to understand what happened 
 ---
 
 ## Project State
-**Last updated:** 2026-11-10 (v1.3.0, Session 45; the summary below predates v1.1 — see Sessions 43-45)
+**Last updated:** 2026-11-10 (v1.4.0, Session 46; the summary below predates v1.1 — see Sessions 43-46)
 **Current branch:** master (through Session 28's BYOK-Gemini model-default fix —
 see below)
 **Remote:** `github.com/Abhiram-0910/pocketrag` (private) — pushed through this
@@ -196,6 +196,21 @@ provider error text; the UI shows it verbatim with a per-code action (Step B). 6
 - **Watch CPU on the Free plan.** Per-event work stays one JSON.parse + coalesced writes per
   upstream read. Measure with the GraphQL Analytics API (`workersInvocationsAdaptive`,
   `cpuTime` in µs) — `wrangler tail` gave nothing in Session 45.
+
+## Standing Rules — figures and click-to-verify (v1.4, Phase 7d)
+
+- **The PDF is never stored.** Figures and highlights render from `sessionFiles.ts` (tab
+  memory). After a reload, ask for the file again (same name); don't add IndexedDB storage of
+  source bytes without an explicit decision.
+- **No image leaves the device for these features.** Pages are drawn locally (pdf.js +
+  canvas). The only path that sends a page image is the Milestone 10 opt-in, Documents-tab
+  only (gated on `source`). step-c's figure flow asserts 0 requests with image bytes.
+- **Pages are `<canvas role="img">`, never `<img src=blob:|data:>`** — `img-src 'self'`.
+- **Release pixels:** canvases zeroed after copying into an `ImageBitmap`; bitmaps closed
+  when replaced/unmounted; one PDF open per job, `loadingTask.destroy()` after.
+- **`itemRange` is optional and checked before use** (it must read back as the chunk text);
+  otherwise fall back to text search. pdf.js's item join (one space) must stay identical
+  in `pdf.ts`, `pageView.ts` and `textLayout.ts`.
 
 ## Standing release gates (from Phase 6-E, Session 41 — later phases reference this)
 
@@ -4481,6 +4496,103 @@ tokenizer loaded separately (17.1 MB). The step-c mock now serves JSON whenever 
 grounding (the real Worker never streams those). `wrangler tail` captured nothing; CPU came
 from the GraphQL analytics API. **Unverified:** OpenAI and Anthropic streaming live (no key
 files); a provider's mid-stream error live; Safari; a screen reader.
+
+---
+
+### Session 46 — 2026-11-10 (Claude Code) — Phase 7d (v1.4.0): diagram crop + click-to-verify
+**Goal:** Phase 7d: show a figure cut from the user's own cited page in the answer card (point
+2) and a citation dialog with the cited passage highlighted (point 4); local only; deploy per the
+standing gates; tag `v1.4.0`.
+
+**A. Diagram crop:**
+- **Detection** (`src/lib/figures.ts`) works on the pdf.js operator list, with its own
+  transform stack:
+  - An image is the unit square under the current transform.
+  - Painted paths contribute their `minMax` box. Boxes within 10 pt merge into one drawing.
+  - Anything under 40 × 30 pt is dropped, and so is any box ≥80% of the page (a background).
+  - One image covering ≥80% of the page means a scan.
+- **What is shown**, per cited page:
+  - A figure within 1/6 of the page height of the cited text.
+  - Otherwise, if `isDiagramLikely` fired, the nearest figure, or the whole page labelled
+    "figure not isolated".
+  - At most 2 per answer. Scans and notes are shown whole.
+- **Rendering** (`src/lib/pageView.ts`): render at ≤1800 px, copy into `ImageBitmap`s
+  (≤1200 px crops, ≤900 px thumbnails), zero every canvas, open the PDF once and destroy the
+  loading task. Bitmaps are closed on change or unmount.
+- **CSP:** the figures are drawn on `<canvas role="img">` because `img-src 'self'` rules out
+  blob: and data: URLs. `_headers` is unchanged.
+- **Export:** figures go into the PDF export as JPEGs.
+- **Notes:** a note's file is now kept in tab memory too. The Milestone 10 page-image opt-in is
+  unchanged and now gated on `source === 'document'`.
+- **On the fixtures:**
+  - The raster figure (240×135 pt) and the vector SVG (270×152 pt) are found.
+  - The finance table counts as a figure.
+  - The maths fraction bars are not figures.
+
+**B. Click-to-verify:**
+- **Ingest:** the chunker returns `start`/`end`, `pdf.ts` returns `itemLengths`, and each
+  chunk stores an additive `itemRange` (`[startItem, offset, endItem, endOffset]`). There is
+  no DB version change.
+- **Viewing:**
+  - A stored range is used only if it still reads as the chunk; otherwise the chunk is found
+    by text search (exact, then ignoring whitespace).
+  - Rectangles come from the item transforms, with partial items cut in proportion, filled as
+    one path with multiply.
+- **Fixture resolution** (`eval/results/highlight.json`, real e5 tokenizer):
+  - 36/36 chunks by stored range and 36/36 by text search, all with highlight rectangles.
+  - The scanned fixture has no text layer, so it has 0 chunks.
+- **Dialog:**
+  - Native `showModal()` dialog with a Tab wrap, Esc, and focus back to the citation.
+  - The status line stays outside the scroll area, and the scroll area is focusable.
+  - Scans and notes are shown without a highlight, and the dialog says so.
+  - After a reload, it asks for "Choose <file> again", which must have the same name and is
+    kept in tab memory only.
+
+**Gates:**
+- **Static checks:** tsc 0 (root) and 0 (worker); oxlint 0 warnings, 0 errors, exit 0.
+- **Unit tests:** frontend **425/425** (was 402); Worker **569/569** (unchanged, not deployed).
+- **Build:** the size guard passes. JS `index-DFBGTE_o.js` → `index-CLLdvuIo.js`; CSS
+  `index-FmQGoV7Y.css` → `index-COF-fOWu.css`. `git diff 6158529 -- public/_headers` is empty.
+- **step-b, Chromium:** exit 0, **35 scenarios** (was 34), 0 failures, 0 page errors.
+  - The new `figures` scenario covers the raster and vector crops, nothing for the text-only
+    page, and the scan shown whole.
+  - The dialog: focus on Close, Tab and Shift+Tab stay inside, highlight pixels, alt text,
+    Esc returns focus to the citation, 328 px wide at 360 with no overflow.
+  - 4 requests with 0 images, and no Receipt mentions a page image. The export contains 1
+    image.
+  - Reload: it asks for the file, refuses a wrong name, and the figure comes back.
+  - Chunks stripped of `itemRange` still highlight.
+- **step-c:** Chromium and Firefox each exit 0, **16/16 flows**, 29/29 matched, 0 unexpected
+  CSP violations, 0 page errors, 5 streamed answers. The new flow saw 0 requests carrying
+  image bytes and a highlighted page.
+
+**Deployed:** Pages only, because the Worker is unchanged.
+- `a039f0cc` → **`7e3f6ee2-c9cf-4dd9-b2e2-1917a75e6dbd`** (Production, `ae9f789`).
+- CSP byte-identical 446 B, all five headers, no Set-Cookie, serves `index-CLLdvuIo.js`.
+- **Smoke** (`/answer` aborted by the route, so it never reached the Worker): 0 CSP events,
+  0 page errors, no overflow at 360 or 1280.
+- **ONE shared answer** on `figures-notes.pdf`:
+  - Grounded, streamed, cited "(Doc 1, page 1)".
+  - Raster figure drawn (549×324 px, 46k ink pixels); the citation dialog showed
+    `highlight`.
+  - The request had no `image` key and no image bytes.
+  - Receipt OK · 3.4 s · gemini-3.5-flash-lite · 3 passages · 2.2 kB.
+
+**Rollback** (Pages only; v1.3 ignores the extra `itemRange` field):
+```bash
+npx wrangler whoami >/dev/null
+TOKEN=$(grep -oP '^oauth_token = "\K[^"]+' ~/.config/.wrangler/config/default.toml)
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+  https://api.cloudflare.com/client/v4/accounts/da55acd99cee5a43df7d397dd80af4e3/pages/projects/pocketrag/deployments/a039f0cc-7176-4b04-8e63-142c6bf101b5/rollback
+```
+
+**Deviations:**
+- Rendering needs the PDF, which isn't stored, so after a reload the user picks the file again.
+  Storing the PDF is a TODO decision.
+- A multi-page note shows page 1, because OCR'd notes have no page numbers.
+- The README screenshots are JPEG to stay under 100 KB; the 1280 dialog was re-encoded to 96 KB.
+
+**Unverified:** Safari, a real screen reader, and real-world scanned PDFs beyond the fixture.
 
 ---
 
