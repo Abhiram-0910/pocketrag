@@ -8,7 +8,7 @@ import { shouldRerank } from '../lib/searchModels'
 import { exampleForRequest, findSourceMatch, type SourceMatch } from '../lib/sourceMatch'
 import type { RerankCandidate } from '../workers/embedding.types'
 import { attemptAnswer, fetchAnswerFromWorker, type ImageAttachment, type KeyConfig } from '../lib/answerRequest'
-import { buildRetrievalQuery, pathTo, previousQuestionFor } from '../lib/conversation'
+import { buildRetrievalQuery, pathTo, previousQuestionFor, siblingPosition } from '../lib/conversation'
 import { isDiagramLikely } from '../lib/diagramHeuristic'
 import { getDiagramImagesEnabled, setDiagramImagesEnabled } from '../lib/diagramImageSetting'
 import { getWebSearchEnabled, setWebSearchEnabled } from '../lib/webSearchSetting'
@@ -27,6 +27,7 @@ import { answerFor, useChatStore, type HistoryStorageState, type TurnKey, type T
 import { SessionReceipts, TurnReceipt } from './Receipts'
 import { TurnAnswer } from './TurnAnswer'
 import { SourceExample } from './SourceExample'
+import { TurnControls } from './TurnControls'
 import { StatusBanner } from './ui/StatusBanner'
 import { Button } from './ui/Button'
 
@@ -171,6 +172,7 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
   const settleTurn = useChatStore((s) => s.settleTurn)
   const appendEgress = useChatStore((s) => s.appendEgress)
   const newConversation = useChatStore((s) => s.newConversation)
+  const selectBranch = useChatStore((s) => s.selectBranch)
 
   // Linear history: the open conversation's active root-to-leaf path. The leaf is the
   // current answer; everything before it is "Conversation".
@@ -360,19 +362,21 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
     [appendEgress, settleTurn],
   )
 
-  const handleSubmit = useCallback(
-    (e: FormEvent) => {
-      e.preventDefault()
+  // One question → retrieval → turn → answer. `parentId` omitted: continue the open path
+  // (the question box). An existing turn's parentId: a new version of that turn — Edit or
+  // Regenerate (v1.2) — with a fresh retrieval, and history from its ancestors only.
+  const ask = useCallback(
+    (question: string, parentId?: string | null) => {
       const useAll = scope === 'all'
-      if (!canQuery || keyConfig === null || (!useAll && !selectedReadyId) || !query.trim() || busy) return
+      if (!canQuery || keyConfig === null || (!useAll && !selectedReadyId) || !question || busy) return
       const activeKeyConfig = keyConfig
+      const ancestors = parentId === undefined ? path : pathTo(turns, parentId)
 
-      const question = query.trim()
       // Retrieval-query blending (Milestone 11 Phase C2): fold the nearest answered
       // ancestor's question — and only that one — into the query used for retrieval.
       // The literal, unblended `question` below is still what's sent to the Worker as
       // the actual question being answered; the blended string never crosses the wire.
-      const retrievalQuery = buildRetrievalQuery(previousQuestionFor(path), question)
+      const retrievalQuery = buildRetrievalQuery(previousQuestionFor(ancestors), question)
       // Milestone 12: captured once at submit time — a retry resends this exact choice,
       // even if the checkbox changes in between.
       const activeWebSearchEnabled = isGeminiEffective && webSearchEnabled
@@ -466,6 +470,7 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
               // Saved as 'pending' before the request goes out (chatStore.startTurn).
               const context = await startTurn({
                 question,
+                ...(parentId === undefined ? {} : { parentId }),
                 citations: ranked.map(({ chunk, score }, rank) => ({
                   chunkId: chunk.id,
                   documentId: chunk.documentId,
@@ -501,9 +506,9 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
       keyConfig,
       scope,
       selectedReadyId,
-      query,
       busy,
       path,
+      turns,
       startTurn,
       runAnswerAttempt,
       diagramImagesEnabled,
@@ -511,6 +516,71 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
       webSearchEnabled,
     ],
   )
+
+  const handleSubmit = useCallback(
+    (e: FormEvent) => {
+      e.preventDefault()
+      ask(query.trim())
+    },
+    [ask, query],
+  )
+
+  // v1.2 branching. A version change is announced politely (the region below); focus stays
+  // on the control the user pressed, or moves to the answer area once the form closes.
+  const [branchNote, setBranchNote] = useState('')
+  const handleEdit = useCallback(
+    (turn: TurnRecord, question: string) => {
+      setBranchNote(`Asking your edited question as a new version: “${question.slice(0, 80)}”.`)
+      ask(question, turn.parentId)
+      answerAreaRef.current?.focus()
+    },
+    [ask],
+  )
+  const handleRegenerate = useCallback(
+    (turn: TurnRecord) => {
+      setBranchNote(`Regenerating the answer to “${turn.question.slice(0, 80)}” as a new version.`)
+      ask(turn.question, turn.parentId)
+    },
+    [ask],
+  )
+  // The version shown at that spot is a different turn (a remounted element), so focus is
+  // handed to the same ‹/› button on it once it renders — never left on <body>.
+  const [focusAfterNav, setFocusAfterNav] = useState<{ turnId: string; label: string } | null>(null)
+  useEffect(() => {
+    if (!focusAfterNav) return
+    const button = document.querySelector<HTMLElement>(
+      `[data-turn-controls="${focusAfterNav.turnId}"] [aria-label="${focusAfterNav.label}"]`,
+    )
+    if (button) {
+      button.focus()
+      setFocusAfterNav(null)
+    }
+  }, [focusAfterNav, turns, conversations])
+  const handleNavigate = useCallback(
+    (target: TurnRecord, position: number, count: number, label: string) => {
+      setBranchNote(`Showing version ${position} of ${count}: “${target.question.slice(0, 80)}”.`)
+      setFocusAfterNav({ turnId: target.id, label })
+      void selectBranch(target.id)
+    },
+    [selectBranch],
+  )
+  const controlsFor = (turn: TurnRecord) => {
+    const { index, count, prev, next } = siblingPosition(turns, turn)
+    return (
+      <TurnControls
+        key={turn.id}
+        turn={turn}
+        index={index}
+        count={count}
+        canAsk={canQuery && !busy}
+        canNavigate={!busy}
+        onEdit={(question) => handleEdit(turn, question)}
+        onRegenerate={turn.status === 'answered' ? () => handleRegenerate(turn) : undefined}
+        onPrevious={() => prev && handleNavigate(prev, index, count, 'Previous version')}
+        onNext={() => next && handleNavigate(next, index + 2, count, 'Next version')}
+      />
+    )
+  }
 
   // Re-sends the leaf turn: its chunks from this session, or rebuilt from its citations
   // for a restored turn (no page image then — it was never stored).
@@ -583,8 +653,6 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
   const offerOwnKey = answerAction === 'use-own-key' || (liveTiming !== null && liveError?.shared === true)
   const leafTimedOut = leaf !== null && timedOutTurnId === leaf.id
   const grounded = leaf ? groundedSession.get(leaf.id) : undefined
-  // The question just submitted is still in the input; a restored one isn't anywhere else.
-  const showLeafQuestion = leaf !== null && !isLive
 
   const placeholder = canQuery
     ? scope === 'all'
@@ -662,6 +730,10 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
 
   return (
     <div className="text-left">
+      {/* v1.2: version changes (edit, regenerate, ‹ › navigation), announced politely. */}
+      <p aria-live="polite" aria-atomic="true" className="sr-only" data-branch-announcement>
+        {branchNote}
+      </p>
       <div aria-live="polite" aria-atomic="true">
         {storage !== 'ok' && (
           <StatusBanner variant={STORAGE_COPY[storage].variant} className="mb-2" inLiveRegion>
@@ -798,7 +870,7 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
         )}
         {leaf?.status === 'answered' && (
           <div className="mt-4 space-y-2 rounded border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
-            {showLeafQuestion && <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{leaf.question}</p>}
+            {controlsFor(leaf)}
             <TurnAnswer turn={leaf} text={answerFor({ groundedSession }, leaf)} />
             {leaf.sourceMatch?.kind === 'method' && (
               <SourceExample match={leaf.sourceMatch} fileName={titleFor(leaf.sourceMatch.documentId)} />
@@ -843,11 +915,15 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
 
         {leaf !== null && leaf.status !== 'answered' && !isLive && (
           <div className="mt-4 space-y-2">
-            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{leaf.question}</p>
+            {controlsFor(leaf)}
             {restoredOutcome(leaf, true)}
             <TurnReceipt turn={leaf} />
           </div>
         )}
+
+        {/* This session's pending or failed leaf: Edit stays available ("Try again" below
+            re-sends the same turn; Regenerate is for answers only). */}
+        {leaf !== null && leaf.status !== 'answered' && isLive && <div className="mt-4">{controlsFor(leaf)}</div>}
 
         <div aria-live="polite" aria-atomic="true">
           {liveError && (
@@ -917,7 +993,7 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
                 key={turn.id}
                 className="space-y-2 rounded border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900"
               >
-                <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{turn.question}</p>
+                {controlsFor(turn)}
                 {turn.status === 'answered' ? (
                   <>
                     <TurnAnswer turn={turn} text={answerFor({ groundedSession }, turn)} />

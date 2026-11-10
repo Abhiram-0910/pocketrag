@@ -29,3 +29,49 @@ body {
   font-family: var(--font-sans);
   @apply bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-50;
 }
+
+/* Form fields in both themes (v1.2). Stylesheet only — the CSP has no 'unsafe-inline' for
+   styles. Placeholders: slate-500 on white 4.76:1, slate-400 on slate-900 6.96:1. */
+::placeholder {
+  color: --theme(--color-slate-500);
+  opacity: 1;
+}
+@media (prefers-color-scheme: dark) {
+  ::placeholder {
+    color: --theme(--color-slate-400);
+  }
+  /* Firefox paints a native <select>'s options with the select's (light) text colour on the
+     system's light list background; give the options the field's own colours. */
+  select option {
+    background-color: --theme(--color-slate-900);
+    color: --theme(--color-slate-100);
+  }
+}
+
+/* Autofill (a saved key offered for the password-type key field). Browsers repaint an
+   autofilled field with their own pale background, which left light dark-mode text on a
+   light fill. An inset shadow covers that background in both engines; Chromium also takes
+   -webkit-text-fill-color; Firefox forces FieldText, which follows color-scheme (light text
+   in dark mode), so matching the shadow to the theme keeps it readable there too. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-text-fill-color: --theme(--color-slate-900);
+  caret-color: --theme(--color-slate-900);
+  box-shadow: 0 0 0 1000px --theme(--color-white) inset;
+}
+input:autofill {
+  box-shadow: 0 0 0 1000px --theme(--color-white) inset;
+}
+@media (prefers-color-scheme: dark) {
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus {
+    -webkit-text-fill-color: --theme(--color-slate-100);
+    caret-color: --theme(--color-slate-100);
+    box-shadow: 0 0 0 1000px --theme(--color-slate-900) inset;
+  }
+  input:autofill {
+    box-shadow: 0 0 0 1000px --theme(--color-slate-900) inset;
+  }
+}

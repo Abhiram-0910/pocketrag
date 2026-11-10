@@ -139,6 +139,43 @@ describe('chatStore', () => {
     expect(useChatStore.getState().conversations[0].activeLeafId).toBe(q2.turnId)
   })
 
+  it('regenerate (v1.2): a sibling with the same question; a grounded one is never stored, and history skips the sibling branch', async () => {
+    const q1 = await useChatStore.getState().startTurn(newTurn('Q1'))
+    await useChatStore.getState().settleTurn(q1.turnId, answered('A1'))
+    const q2 = await useChatStore.getState().startTurn(newTurn('Q2'))
+    await useChatStore.getState().settleTurn(q2.turnId, answered('A2'))
+
+    const regen = await useChatStore.getState().startTurn(newTurn('Q2', { parentId: q1.turnId }))
+    expect(regen.history).toEqual([{ question: 'Q1', answer: 'A1' }])
+    await useChatStore.getState().settleTurn(regen.turnId, answered('Grounded A2', true))
+    const conversationId = useChatStore.getState().activeConversationId as string
+    const stored = await getTurns(conversationId)
+    expect(stored.find((t) => t.id === regen.turnId)).toMatchObject({ answer: null, webGrounded: true, question: 'Q2' })
+    expect(stored.find((t) => t.id === q2.turnId)?.answer).toBe('A2')
+
+    // A follow-up under the grounded regeneration sends only Q1/A1: not A2 (other branch),
+    // not the grounded text.
+    const next = await useChatStore.getState().startTurn(newTurn('Q3'))
+    expect(next.history).toEqual([{ question: 'Q1', answer: 'A1' }])
+  })
+
+  it('the active branch survives a reload (v1.2)', async () => {
+    const q1 = await useChatStore.getState().startTurn(newTurn('Q1'))
+    await useChatStore.getState().settleTurn(q1.turnId, answered('A1'))
+    const v1 = await useChatStore.getState().startTurn(newTurn('Q2'))
+    await useChatStore.getState().settleTurn(v1.turnId, answered('A2'))
+    const v2 = await useChatStore.getState().startTurn(newTurn('Q2 edited', { parentId: q1.turnId }))
+    await useChatStore.getState().settleTurn(v2.turnId, answered('A2 edited'))
+    await useChatStore.getState().selectBranch(v1.turnId)
+
+    // A fresh load: memory cleared, then restore() from IndexedDB.
+    useChatStore.setState({ conversations: [], activeConversationId: null, turns: [] })
+    await useChatStore.getState().restore()
+    const s = useChatStore.getState()
+    expect(s.conversations.find((c) => c.id === s.activeConversationId)?.activeLeafId).toBe(v1.turnId)
+    expect(s.turns).toHaveLength(3)
+  })
+
   it('restore() sweeps a stale pending turn to interrupted and lists the conversation', async () => {
     await saveTurn(
       makeConversation({ id: 'c-stale', updatedAt: Date.now() }),

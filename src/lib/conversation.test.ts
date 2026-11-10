@@ -8,6 +8,7 @@ import {
   latestLeafUnder,
   pathTo,
   previousQuestionFor,
+  siblingPosition,
 } from './conversation'
 import { makeTurn } from './historyFixtures'
 
@@ -104,3 +105,30 @@ describe('conversation tree', () => {
     expect(docLabelsFor([])).toEqual([])
   })
 })
+
+describe('branching (v1.2): siblings, active path, history', () => {
+  // q1 → a (original answer) → q3; b is a regenerated answer to q1 (same parent as a);
+  // c is an edited q1 (different question, same parent).
+  const q1 = makeTurn({ id: 'q1', parentId: null, createdAt: 1 })
+  const a = makeTurn({ id: 'a', parentId: 'q1', createdAt: 2, question: 'Q2', answer: 'A-original' })
+  const q3 = makeTurn({ id: 'q3', parentId: 'a', createdAt: 3, question: 'Q3', answer: 'A3' })
+  const b = makeTurn({ id: 'b', parentId: 'q1', createdAt: 4, question: 'Q2', answer: 'A-regenerated' })
+  const c = makeTurn({ id: 'c', parentId: 'q1', createdAt: 5, question: 'Q2 edited', answer: 'A-edited' })
+  const turns = [q1, a, q3, b, c]
+
+  it('places a turn among its siblings, oldest first, with neighbours for the navigator', () => {
+    expect(siblingPosition(turns, a)).toMatchObject({ index: 0, count: 3, prev: null, next: { id: 'b' } })
+    expect(siblingPosition(turns, b)).toMatchObject({ index: 1, count: 3, prev: { id: 'a' }, next: { id: 'c' } })
+    expect(siblingPosition(turns, c)).toMatchObject({ index: 2, count: 3, next: null })
+    expect(siblingPosition(turns, q1)).toMatchObject({ index: 0, count: 1, prev: null, next: null })
+  })
+
+  it("switching to a branch opens its newest leaf, and only that path's turns become history", () => {
+    expect(latestLeafUnder(turns, 'a')).toBe('q3')
+    expect(latestLeafUnder(turns, 'b')).toBe('b')
+    // Asking under c: history is q1 and c only — never the sibling branches a/b/q3.
+    expect(historyForRequest(pathTo(turns, 'c')).map((t) => t.answer)).toEqual([q1.answer, 'A-edited'])
+    expect(historyForRequest(pathTo(turns, 'q3')).map((t) => t.answer)).toEqual([q1.answer, 'A-original', 'A3'])
+  })
+})
+

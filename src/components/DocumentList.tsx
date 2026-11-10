@@ -144,7 +144,7 @@ export function DocumentList({ source }: DocumentListProps) {
                 >
                   <p className="truncate text-sm font-medium text-slate-900 dark:text-slate-100">{doc.fileName}</p>
                   <p
-                    className={`mt-0.5 text-xs ${doc.status === 'error' ? 'text-red-600 dark:text-red-400' : 'text-slate-500 dark:text-slate-400'}`}
+                    className={`mt-0.5 text-xs ${doc.status === 'error' ? 'text-red-600 dark:text-red-400' : 'text-slate-600 dark:text-slate-400'}`}
                   >
                     {statusText(doc)}
                   </p>

@@ -81,3 +81,14 @@ export function previousQuestionFor(path: ContextTurn[]): string | null {
 export function docLabelsFor(path: ContextTurn[]): DocLabel[] {
   return path.findLast((t) => t.status === 'answered')?.docLabels ?? []
 }
+
+/** Where `turn` sits among its siblings (the versions of that question: edits and
+ * regenerations share a parent), oldest first, for the "‹ 1/2 ›" navigator. */
+export function siblingPosition<T extends TreeTurn>(
+  turns: T[],
+  turn: T,
+): { index: number; count: number; prev: T | null; next: T | null } {
+  const siblings = childrenOf(turns, turn.parentId)
+  const index = siblings.findIndex((t) => t.id === turn.id)
+  return { index, count: siblings.length, prev: siblings[index - 1] ?? null, next: siblings[index + 1] ?? null }
+}

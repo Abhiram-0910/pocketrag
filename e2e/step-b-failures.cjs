@@ -519,7 +519,11 @@ async function main() {
   // for 30s+), while the same call from curl answered in ~1s every time.
   answerHandler = null
   {
-    const live = await context.newPage()
+    // v1.2: its own browser context, not just its own tab — in a tab of the main context the
+    // request hung twice running in a row (it answered in ~1s in a fresh context and from curl).
+    const liveContext = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+    await liveContext.addInitScript(() => localStorage.setItem('pocketrag:has-visited-app', 'true'))
+    const live = await liveContext.newPage()
     live.on('pageerror', (e) => pageErrors.push(`live tab: ${String(e)}`))
     await live.goto(APP)
     await live.getByLabel('Use your own API key').check()
@@ -542,7 +546,7 @@ async function main() {
     check(liveRow.httpStatus === 502 && liveRow.code === 'key_rejected', 'live: not a key_rejected 502')
     check(liveRow.focusAfterClick === 'OpenAI API key', `live: focus on ${liveRow.focusAfterClick}`)
     results.push(liveRow)
-    await live.close()
+    await liveContext.close()
   }
 
   // ---- Restored from IndexedDB in a fresh tab (Phase 2b) ----
@@ -620,6 +624,7 @@ async function main() {
   await modelDownloadBlocked(browser, pageErrors)
   await workedExamples(browser, pageErrors)
   await reindexOutdated(browser, pageErrors)
+  await branching(browser, pageErrors)
 
   check(pageErrors.length === 0, `page errors: ${pageErrors.join('; ')}`)
   console.log(JSON.stringify({ results, answerCalls, pageErrors, failures }, null, 2))
@@ -741,6 +746,144 @@ async function workedExamples(browser, pageErrors) {
   await page.locator('section[data-source-match="verbatim"]').waitFor({ timeout: 30_000 }).catch(() => {})
   row.verbatimAfterReload = !!(await blockText('verbatim'))
   check(row.verbatimAfterReload, 'worked exact: verbatim block not restored after reload')
+  row.answerCalls = bodies.length
+  results.push(row)
+  await context.close()
+}
+
+// v1.2 branching: regenerate an answer (sibling, same question), step between versions with
+// ‹ › (mouse and keyboard; focus stays on the button; a polite announcement), edit an earlier
+// question (sibling with a fresh retrieval; history from its ancestors only), reload keeps
+// the active branch, 360px has no horizontal scroll, delete removes the whole tree.
+// SHOTS_DIR also writes the README screenshots (branching-360.png / branching-1280.png).
+async function branching(browser, pageErrors) {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+  await context.addInitScript(() => localStorage.setItem('pocketrag:has-visited-app', 'true'))
+  const page = await context.newPage()
+  page.on('pageerror', (e) => pageErrors.push(`branching: ${String(e)}`))
+  const bodies = []
+  await context.route(`${API}/answer`, (route) => {
+    const req = route.request()
+    if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS })
+    const body = JSON.parse(req.postData() || '{}')
+    bodies.push(body)
+    const ids = [...new Set(body.chunks.map((c) => c.documentId))]
+    return route.fulfill({
+      status: 200,
+      headers: { ...CORS, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ answer: `Branch answer ${bodies.length} (Doc 1, page 1).`, groundingWarning: false, docLabels: ids.map((d, i) => ({ label: i + 1, documentId: d })) }),
+    })
+  })
+  await page.goto(APP)
+  await page.setInputFiles('input[type="file"][accept="application/pdf"]', writeTestPdf())
+  await page.waitForFunction(() => document.querySelector('form input[type="text"]')?.disabled === false, null, { timeout: 300_000 })
+  const row = { scenario: 'v1.2 branching (edit, regenerate, navigate, reload, delete)' }
+  const answerArea = page.locator('#answer-area')
+  const waitAnswer = (n) => page.getByText(`Branch answer ${n} `).first().waitFor({ timeout: 120_000 })
+  const leafControls = answerArea.locator('[data-turn-controls]').first()
+  const counter = async (controls) => ((await controls.locator('[role="group"] span').count()) ? (await controls.locator('[role="group"] span').innerText()).trim() : null)
+  const announcement = () => page.locator('[data-branch-announcement]').innerText()
+  const focusedLabel = () => page.evaluate(() => document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.tagName)
+  const ask = async (q, n) => {
+    await page.locator('form input[type="text"]').fill(q)
+    await page.getByRole('button', { name: 'Search' }).click()
+    await waitAnswer(n)
+  }
+
+  await ask('What does the mitochondrion do?', 1)
+  await ask('What do ribosomes do?', 2)
+  check(bodies[1].history.length === 1, `branching: Q2 history ${bodies[1].history.length}`)
+
+  // Regenerate the leaf: a sibling with the same question; history = Q1/A1 only.
+  await leafControls.getByRole('button', { name: 'Regenerate answer' }).click()
+  await waitAnswer(3)
+  row.regenerate = { question: bodies[2].question, history: bodies[2].history.map((h) => h.answer), counter: await counter(leafControls), announced: await announcement() }
+  check(bodies[2].question === 'What do ribosomes do?' && row.regenerate.history.length === 1 && /answer 1/.test(row.regenerate.history[0]), `branching: regenerate ${JSON.stringify(row.regenerate)}`)
+  check(row.regenerate.counter === '2/2', `branching: counter after regenerate ${row.regenerate.counter}`)
+
+  // ‹ by mouse: back to the original answer; focus stays on the ‹ button; announced.
+  await leafControls.getByRole('button', { name: 'Previous version' }).click()
+  await page.getByText('Branch answer 2 ').first().waitFor({ timeout: 10_000 })
+  await page.waitForTimeout(200)
+  row.navigateMouse = { counter: await counter(leafControls), focus: await focusedLabel(), announced: await announcement(), answer3Shown: await answerArea.getByText('Branch answer 3 ').count() }
+  check(row.navigateMouse.counter === '1/2' && row.navigateMouse.answer3Shown === 0, `branching: previous ${JSON.stringify(row.navigateMouse)}`)
+  check(row.navigateMouse.focus === 'Previous version', `branching: focus after ‹ on ${row.navigateMouse.focus}`)
+  check(/Showing version 1 of 2/.test(row.navigateMouse.announced), `branching: announcement ${row.navigateMouse.announced}`)
+  // At the first version ‹ is aria-disabled (still focusable) and does nothing.
+  row.firstDisabled = await leafControls.getByRole('button', { name: 'Previous version' }).getAttribute('aria-disabled')
+  check(row.firstDisabled === 'true', 'branching: ‹ not aria-disabled at version 1')
+
+  // › by keyboard.
+  await leafControls.getByRole('button', { name: 'Next version' }).focus()
+  await page.keyboard.press('Enter')
+  await page.getByText('Branch answer 3 ').first().waitFor({ timeout: 10_000 })
+  await page.waitForTimeout(200)
+  row.navigateKeyboard = { counter: await counter(leafControls), focus: await focusedLabel() }
+  check(row.navigateKeyboard.counter === '2/2' && row.navigateKeyboard.focus === 'Next version', `branching: keyboard › ${JSON.stringify(row.navigateKeyboard)}`)
+
+  // Edit the first question (an earlier turn, under "Conversation"): a sibling root turn,
+  // fresh retrieval, no history.
+  await page.locator('summary', { hasText: /^Conversation/ }).click()
+  const firstControls = page.locator('details li [data-turn-controls]').first()
+  await firstControls.getByRole('button', { name: 'Edit question' }).click()
+  await page.getByLabel('Edit question').fill('What powers the cell?')
+  await page.getByRole('button', { name: 'Send edited question' }).click()
+  await waitAnswer(4)
+  row.edit = { question: bodies[3].question, history: bodies[3].history.length, chunks: bodies[3].chunks.length, counter: await counter(leafControls), pastTurns: await page.locator('summary', { hasText: /^Conversation/ }).count() }
+  check(row.edit.question === 'What powers the cell?' && row.edit.history === 0 && row.edit.chunks > 0, `branching: edit ${JSON.stringify(row.edit)}`)
+  check(row.edit.counter === '2/2' && row.edit.pastTurns === 0, `branching: after edit ${JSON.stringify(row.edit)}`)
+
+  // Back to the original first question: its branch opens at its newest leaf (answer 3).
+  await leafControls.getByRole('button', { name: 'Previous version' }).click()
+  await page.getByText('Branch answer 3 ').first().waitFor({ timeout: 10_000 })
+  await page.waitForTimeout(300)
+  if (SHOTS_DIR) {
+    await page.locator('summary', { hasText: /^Conversation/ }).click()
+    fs.mkdirSync(SHOTS_DIR, { recursive: true })
+    await page.locator('main').screenshot({ path: path.join(SHOTS_DIR, 'branching-1280.png') })
+  }
+  // Reload: the active branch (original Q1 → regenerated Q2) comes back.
+  await page.reload()
+  await page.getByText('Branch answer 3 ').first().waitFor({ timeout: 30_000 }).catch(() => {})
+  row.afterReload = { answer3: await answerArea.getByText('Branch answer 3 ').count(), answer4: await answerArea.getByText('Branch answer 4 ').count(), leafCounter: await counter(leafControls) }
+  check(row.afterReload.answer3 === 1 && row.afterReload.answer4 === 0 && row.afterReload.leafCounter === '2/2', `branching: reload ${JSON.stringify(row.afterReload)}`)
+
+  // Restore selects no document (by design), which disables Edit/Regenerate; select it so the
+  // 360px view (and its screenshot) shows the controls usable.
+  await page.locator('li button', { hasText: 'cells.pdf' }).first().click()
+  row.editEnabledAfterSelect = await leafControls.getByRole('button', { name: 'Edit question' }).isEnabled()
+  check(row.editEnabledAfterSelect, 'branching: Edit question disabled with a document selected')
+  await page.setViewportSize({ width: 360, height: 800 })
+  await page.waitForTimeout(300)
+  row.overflow360 = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+  check(row.overflow360 <= 0, `branching: 360px scrolls horizontally by ${row.overflow360}px`)
+  if (SHOTS_DIR) {
+    await page.locator('summary', { hasText: /^Conversation/ }).click()
+    await page.locator('#answer-area').scrollIntoViewIfNeeded()
+    await page.screenshot({ path: path.join(SHOTS_DIR, 'branching-360.png'), fullPage: false })
+  }
+  await page.setViewportSize({ width: 1280, height: 900 })
+
+  // Delete the conversation: every version goes, and stays gone after a reload.
+  await page.getByRole('button', { name: /^Delete conversation:/ }).first().click()
+  await page.getByRole('button', { name: 'Delete', exact: true }).click()
+  await page.waitForTimeout(500)
+  await page.reload()
+  await page.waitForTimeout(1500)
+  row.afterDelete = {
+    conversations: await page.getByRole('button', { name: /^Delete conversation:/ }).count(),
+    storedTurns: await page.evaluate(
+      () =>
+        new Promise((resolve) => {
+          const open = indexedDB.open('pocketrag-history')
+          open.onsuccess = () => {
+            const req = open.result.transaction('turns').objectStore('turns').count()
+            req.onsuccess = () => resolve(req.result)
+          }
+        }),
+    ),
+  }
+  check(row.afterDelete.conversations === 0 && row.afterDelete.storedTurns === 0, `branching: delete ${JSON.stringify(row.afterDelete)}`)
   row.answerCalls = bodies.length
   results.push(row)
   await context.close()

@@ -185,7 +185,7 @@ export function ConversationList() {
                       }`}
                     >
                       <span className="block truncate text-sm text-slate-900 dark:text-slate-100">{c.title}</span>
-                      <span className="block text-xs tabular-nums text-slate-500 dark:text-slate-400">{updatedLabel(c.updatedAt)}</span>
+                      <span className="block text-xs tabular-nums text-slate-600 dark:text-slate-400">{updatedLabel(c.updatedAt)}</span>
                     </button>
                     <button
                       type="button"
