@@ -22,7 +22,7 @@ interface GeminiGroundingMetadata {
 }
 
 interface GeminiGenerateResponse {
-  candidates?: { content?: { parts?: { text?: string }[] }; groundingMetadata?: GeminiGroundingMetadata }[]
+  candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] }; groundingMetadata?: GeminiGroundingMetadata }[]
 }
 
 export interface GeminiImageInput {
@@ -115,7 +115,13 @@ async function generateContent(
 
   const data = (await response.json()) as GeminiGenerateResponse
   const candidate = data.candidates?.[0]
-  const text = candidate?.content?.parts?.[0]?.text
+  // Every text part, in order: Gemini can split one answer across several parts, and reading
+  // only parts[0] cut long answers (a step-by-step method answer, a long OCR page) short.
+  // Thought summaries, if a model ever returns them, are not the answer.
+  const text = (candidate?.content?.parts ?? [])
+    .filter((part) => !part.thought)
+    .map((part) => part.text ?? '')
+    .join('')
   if (!text) throw new Error(emptyResponseMessage)
   return { text, grounding: extractGrounding(candidate?.groundingMetadata) }
 }

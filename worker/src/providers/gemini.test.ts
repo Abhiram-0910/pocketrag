@@ -195,6 +195,25 @@ describe('callGemini', () => {
   })
 })
 
+describe('callGemini / transcribeImage: multi-part responses (v1.1)', () => {
+  // Seen live on production (2026-11-10): a step-by-step answer split across parts, and the
+  // Worker returned only the first ("…for 4 years.\n\n**").
+  const parts = [{ text: 'Following Step 1 (Doc 1, page 1):\n\n**' }, { text: 'Step 2:** A = 25000 × (1.06)⁴' }, { text: ' = 31561.92.' }]
+
+  it('joins every text part of an answer, in order', async () => {
+    const fetchImpl = mockFetch({ jsonBody: { candidates: [{ content: { parts } }] } })
+    const result = await callGemini(fetchImpl, 'test-key', 'gemini-3.5-flash-lite', 'q')
+    expect(result.text).toBe('Following Step 1 (Doc 1, page 1):\n\n**Step 2:** A = 25000 × (1.06)⁴ = 31561.92.')
+  })
+
+  it('joins an OCR transcription split across parts too, and skips thought parts', async () => {
+    const fetchImpl = mockFetch({
+      jsonBody: { candidates: [{ content: { parts: [{ text: 'thinking…', thought: true }, { text: 'Line one.\n' }, { text: 'Line two.' }] } }] },
+    })
+    expect(await transcribeImage(fetchImpl, 'test-key', 'gemini-3.5-flash-lite', { mimeType: 'image/jpeg', base64: 'aGVsbG8=' })).toBe('Line one.\nLine two.')
+  })
+})
+
 describe('listGeminiModels', () => {
   it('returns only models that support generateContent, stripping the "models/" name prefix', async () => {
     const fetchImpl = mockFetch({
