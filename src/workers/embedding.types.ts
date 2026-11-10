@@ -9,6 +9,9 @@ export interface EmbeddedChunk {
   page: number
   embedding: number[]
   hasImage: boolean
+  // v1.4: the chunk's [start, end) in its page's text (chunker.ts).
+  start: number
+  end: number
 }
 
 export interface PageInput {

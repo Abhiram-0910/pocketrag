@@ -106,7 +106,9 @@ export function PrivacyPage() {
             numbers, that example's passage is extended to the rest of the example on its page (at most 2,000
             characters). If you turn on diagram images (off by default, shared tier only), the page of the
             best-matching passage is added as an image when that page contains a picture or the passage mentions a
-            figure, diagram, chart, graph or table.
+            figure, diagram, chart, graph or table. The figures shown next to an answer and the highlighted page
+            behind a citation are drawn in your browser from your own file and are never sent, with that switch on or
+            off.
           </li>
           <li>
             <strong>Answering with your own key.</strong> The same content plus your API key goes to PocketRAG's server,

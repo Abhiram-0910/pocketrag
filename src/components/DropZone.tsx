@@ -6,6 +6,7 @@ import { embedDocument } from '../lib/embeddingClient'
 import { saveDocument, type ChunkRecord } from '../lib/db'
 import { EMBEDDING_MODEL_KEY } from '../lib/searchModels'
 import { rememberSessionFile } from '../lib/sessionFiles'
+import { charRangeToItems } from '../lib/textLayout'
 import { useDocumentStore } from '../store/documentStore'
 import { StatusBanner } from './ui/StatusBanner'
 
@@ -50,6 +51,7 @@ export function DropZone() {
                   page: chunk.page,
                   embedding: chunk.embedding,
                   hasImage: chunk.hasImage,
+                  itemRange: charRangeToItems(pages[chunk.page - 1]?.itemLengths ?? [], chunk.start, chunk.end) ?? undefined,
                 }))
                 saveDocument(
                   { id, fileName: file.name, uploadedAt: Date.now(), chunkCount: msg.chunks.length, source: 'document', embeddingModel: EMBEDDING_MODEL_KEY },

@@ -1,0 +1,60 @@
+{
+  "tokenizer": "Xenova/multilingual-e5-small@761b726dd34fb83930e26aab4e9ac3899aa1fa78",
+  "perFile": {
+    "biology-notes.pdf": {
+      "pages": 2,
+      "chunks": 4,
+      "stored": 4,
+      "search": 4,
+      "boxed": 4
+    },
+    "figures-notes.pdf": {
+      "pages": 4,
+      "chunks": 6,
+      "stored": 6,
+      "search": 6,
+      "boxed": 6
+    },
+    "finance-report.pdf": {
+      "pages": 2,
+      "chunks": 3,
+      "stored": 3,
+      "search": 3,
+      "boxed": 3
+    },
+    "hindi-notes.pdf": {
+      "pages": 2,
+      "chunks": 10,
+      "stored": 10,
+      "search": 10,
+      "boxed": 10
+    },
+    "maths-notes.pdf": {
+      "pages": 3,
+      "chunks": 7,
+      "stored": 7,
+      "search": 7,
+      "boxed": 7
+    },
+    "scanned-lab.pdf": {
+      "pages": 1,
+      "chunks": 0,
+      "stored": 0,
+      "search": 0,
+      "boxed": 0
+    },
+    "spanish-notes.pdf": {
+      "pages": 2,
+      "chunks": 6,
+      "stored": 6,
+      "search": 6,
+      "boxed": 6
+    }
+  },
+  "total": {
+    "chunks": 36,
+    "stored": 36,
+    "search": 36,
+    "boxed": 36
+  }
+}

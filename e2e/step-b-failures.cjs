@@ -98,6 +98,16 @@ const successFor = (tag) => (req) => {
 
 async function main() {
   const browser = await chromium.launch()
+  // ONLY=<scenario> runs one scenario function on its own (while iterating on it).
+  if (process.env.ONLY) {
+    const pageErrors = []
+    await { figures }[process.env.ONLY](browser, pageErrors)
+    check(pageErrors.length === 0, `page errors: ${pageErrors.join('; ')}`)
+    console.log(JSON.stringify({ results, pageErrors, failures }, null, 2))
+    await browser.close()
+    if (failures.length) process.exit(1)
+    return
+  }
   // One context, so the extra tabs below share the same IndexedDB. Routes stay per page
   // (each tab gets the same /answer mock): with a context-level route, the live /models
   // check's response was intermittently never reported to page.waitForResponse.
@@ -626,11 +636,209 @@ async function main() {
   await reindexOutdated(browser, pageErrors)
   await branching(browser, pageErrors)
   await streaming(browser, pageErrors)
+  await figures(browser, pageErrors)
 
   check(pageErrors.length === 0, `page errors: ${pageErrors.join('; ')}`)
   console.log(JSON.stringify({ results, answerCalls, pageErrors, failures }, null, 2))
   await browser.close()
   if (failures.length) process.exit(1)
+}
+
+// v1.4 diagram crop + click-to-verify, on the figures fixture (raster figure p1, vector
+// figure p2, text only p3, OCR'd scan p4). Answers are mocked to cite the page each
+// question is about. Checks: the figure cut from the page (pixels drawn, no image in any
+// request), nothing for the text-only page, the scan shown whole; the citation dialog
+// (focus to Close, Tab stays inside, highlight pixels, Esc returns focus to the citation,
+// 360px); the export carries the figure; after a reload the file is asked for again (a
+// wrong file is refused), and a chunk without its stored range (pre-v1.4) still
+// highlights by text search. SHOTS_DIR writes the README screenshots.
+async function figures(browser, pageErrors) {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, acceptDownloads: true })
+  await context.addInitScript(() => localStorage.setItem('pocketrag:has-visited-app', 'true'))
+  const page = await context.newPage()
+  page.on('pageerror', (e) => pageErrors.push(`figures: ${String(e)}`))
+  const FIXTURE = path.join(__dirname, '../eval/fixtures/figures-notes.pdf')
+  const bodies = []
+  const CITES = [
+    [/light reactions/, 1, 'The light reactions split water and make ATP and NADPH'],
+    [/water cycle/, 2, 'Water evaporates, condenses into clouds and falls as precipitation'],
+    [/membrane/, 3, 'The membrane is a phospholipid bilayer'],
+    [/osmosis/, 4, 'Water moves toward the more concentrated solution'],
+  ]
+  await context.route(`${API}/answer`, (route) => {
+    const req = route.request()
+    if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS })
+    const body = JSON.parse(req.postData() || '{}')
+    bodies.push(body)
+    const ids = [...new Set(body.chunks.map((c) => c.documentId))]
+    const [, pageNo, text] = CITES.find(([re]) => re.test(body.question))
+    return route.fulfill({
+      status: 200,
+      headers: { ...CORS, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ answer: `${text} (Doc 1, page ${pageNo}).`, groundingWarning: false, docLabels: ids.map((d, i) => ({ label: i + 1, documentId: d })) }),
+    })
+  })
+  await page.goto(APP)
+  await page.setInputFiles('input[type="file"][accept="application/pdf"]', FIXTURE)
+  await page.waitForFunction(() => document.querySelector('form input[type="text"]')?.disabled === false, null, { timeout: 300_000 })
+  const row = { scenario: 'v1.4 diagram crop + click-to-verify (figures fixture)' }
+  const answerArea = page.locator('#answer-area')
+  const ask = async (q) => {
+    const n = bodies.length
+    await page.locator('form input[type="text"]').fill(q)
+    await page.getByRole('button', { name: 'Search' }).click()
+    await page.waitForFunction((k) => (document.querySelector('#answer-area')?.textContent || '').includes(k), CITES.find(([re]) => re.test(q))[2], { timeout: 120_000 })
+    await page.waitForTimeout(1500) // figures render after the answer
+    return bodies[n]
+  }
+  // Drawn pixels in a canvas: how many are not near-white, and how many are highlight yellow.
+  const pixels = (sel) =>
+    page.evaluate((s) => {
+      const c = document.querySelector(s)
+      if (!c || !c.width) return null
+      const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data
+      let ink = 0
+      let yellow = 0
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i] + d[i + 1] + d[i + 2] < 700) ink++
+        if (d[i] > 200 && d[i + 1] > 160 && d[i + 2] < 120) yellow++
+      }
+      return { w: c.width, h: c.height, ink, yellow }
+    }, sel)
+  const figureKinds = () => answerArea.locator('[data-figure-kind]').evaluateAll((els) => els.map((e) => e.getAttribute('data-figure-kind')))
+  const focused = () => page.evaluate(() => ({ text: document.activeElement?.textContent?.trim(), inDialog: !!document.activeElement?.closest('dialog') }))
+
+  // Raster figure next to the cited text.
+  const b1 = await ask('What happens in the light reactions?')
+  row.raster = { pages: b1.chunks.map((c) => c.page), kinds: await figureKinds(), pixels: await pixels('#answer-area [data-figure-kind] canvas'), alt: await answerArea.locator('[data-figure-kind] canvas').first().getAttribute('aria-label') }
+  check(row.raster.kinds.join() === 'figure', `figures raster: kinds ${row.raster.kinds}`)
+  check(row.raster.pixels && row.raster.pixels.ink > 500, `figures raster: canvas ${JSON.stringify(row.raster.pixels)}`)
+  check(/^Figure from page 1 · figures-notes\.pdf/.test(row.raster.alt || ''), `figures raster: alt ${row.raster.alt}`)
+
+  // Click-to-verify on the citation.
+  const cite = answerArea.getByRole('button', { name: /Doc 1, page 1/ })
+  await cite.click()
+  const dialog = page.locator('dialog[data-citation-dialog]')
+  await dialog.locator('[data-verify-status]').waitFor({ timeout: 30_000 })
+  row.dialog = { open: await dialog.evaluate((d) => d.open), status: await dialog.locator('[data-verify-status]').getAttribute('data-verify-status'), focus: await focused() }
+  for (let i = 0; i < 3; i++) await page.keyboard.press('Tab')
+  row.dialog.focusAfterTabs = await focused()
+  await page.keyboard.press('Shift+Tab')
+  row.dialog.focusAfterShiftTab = await focused()
+  check(row.dialog.focusAfterShiftTab.inDialog, 'figures dialog: Shift+Tab left the dialog')
+  row.dialog.pixels = await pixels('dialog canvas')
+  row.dialog.alt = await dialog.locator('canvas').getAttribute('aria-label')
+  check(row.dialog.open && row.dialog.status === 'highlight', `figures dialog: ${JSON.stringify(row.dialog)}`)
+  check(row.dialog.focus.text === 'Close' && row.dialog.focus.inDialog, `figures dialog: initial focus ${JSON.stringify(row.dialog.focus)}`)
+  check(row.dialog.focusAfterTabs.inDialog, 'figures dialog: Tab left the dialog')
+  check(row.dialog.pixels && row.dialog.pixels.yellow > 200, `figures dialog: highlight ${JSON.stringify(row.dialog.pixels)}`)
+  check(/with the cited passage highlighted/.test(row.dialog.alt || ''), `figures dialog: alt ${row.dialog.alt}`)
+  if (SHOTS_DIR) await page.screenshot({ path: path.join(SHOTS_DIR, 'verify-1280.jpg'), type: 'jpeg', quality: 70 })
+  await page.setViewportSize({ width: 360, height: 780 })
+  await page.waitForTimeout(300)
+  row.dialog.overflow360 = await dialog.evaluate((d) => ({ dialog: d.scrollWidth - d.clientWidth, page: document.documentElement.scrollWidth - document.documentElement.clientWidth, width: d.getBoundingClientRect().width }))
+  check(row.dialog.overflow360.dialog <= 0 && row.dialog.overflow360.page <= 0 && row.dialog.overflow360.width <= 360, `figures dialog 360: ${JSON.stringify(row.dialog.overflow360)}`)
+  if (SHOTS_DIR) await page.screenshot({ path: path.join(SHOTS_DIR, 'verify-360.jpg'), type: 'jpeg', quality: 70 })
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(200)
+  row.dialog.afterEsc = { open: await dialog.count(), focus: await focused() }
+  check(row.dialog.afterEsc.open === 0 && /Doc 1, page 1/.test(row.dialog.afterEsc.focus.text || ''), `figures dialog Esc: ${JSON.stringify(row.dialog.afterEsc)}`)
+  await page.setViewportSize({ width: 1280, height: 900 })
+
+  // Vector figure; nothing for the text-only page; the scan whole.
+  await ask('Describe the water cycle')
+  row.vector = { kinds: await figureKinds(), pixels: await pixels('#answer-area [data-figure-kind] canvas') }
+  check(row.vector.kinds.join() === 'figure' && row.vector.pixels?.ink > 500, `figures vector: ${JSON.stringify(row.vector)}`)
+  if (SHOTS_DIR) await answerArea.screenshot({ path: path.join(SHOTS_DIR, 'figure-1280.jpg'), type: 'jpeg', quality: 70 })
+  await page.setViewportSize({ width: 360, height: 780 })
+  await page.waitForTimeout(300)
+  row.vector.overflow360 = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+  check(row.vector.overflow360 <= 0, `figures 360: page scrolls by ${row.vector.overflow360}px`)
+  if (SHOTS_DIR) await answerArea.screenshot({ path: path.join(SHOTS_DIR, 'figure-360.jpg'), type: 'jpeg', quality: 70 })
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await ask('What does the cell membrane do?')
+  row.textOnly = { kinds: await figureKinds() }
+  check(row.textOnly.kinds.length === 0, `figures text-only: ${row.textOnly.kinds}`)
+  await ask('What happened to the potato strips in the osmosis lab?')
+  row.scan = { kinds: await figureKinds() }
+  check(row.scan.kinds.join() === 'scan', `figures scan: ${row.scan.kinds}`)
+  await answerArea.getByRole('button', { name: /Doc 1, page 4/ }).click()
+  await dialog.locator('[data-verify-status]').waitFor({ timeout: 30_000 })
+  row.scan.dialog = await dialog.locator('[data-verify-status]').innerText()
+  check(/is a scan, so the passage can't be highlighted/.test(row.scan.dialog), `figures scan dialog: ${row.scan.dialog}`)
+  await dialog.getByRole('button', { name: 'Close' }).click()
+
+  // Nothing image-like in any request this scenario made.
+  row.requests = { count: bodies.length, withImage: bodies.filter((b) => 'image' in b || /\/9j\/|iVBOR|data:image/.test(JSON.stringify(b))).length }
+  check(row.requests.withImage === 0, `figures: ${row.requests.withImage} requests carried an image`)
+  row.receiptImageRows = await page.locator('details[data-receipt]').filter({ hasText: /page image/i }).count()
+  check(row.receiptImageRows === 0, `figures: ${row.receiptImageRows} receipts mention a page image`)
+
+  // Export: the scan figure goes into the PDF.
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Export as PDF' }).click()])
+  const pdfBytes = fs.readFileSync(await download.path()).toString('latin1')
+  row.export = { images: (pdfBytes.match(/\/Subtype \/Image/g) || []).length }
+  check(row.export.images === 1, `figures export: ${row.export.images} images`)
+
+  // Reload: the file isn't kept, so it's asked for again.
+  await page.reload()
+  await answerArea.locator('[data-figures-missing]').waitFor({ timeout: 30_000 })
+  row.afterReload = { missing: (await answerArea.locator('[data-figures-missing]').innerText()).replace(/\s+/g, ' ') }
+  check(/Choose figures-notes\.pdf again/.test(row.afterReload.missing), `figures reload: ${row.afterReload.missing}`)
+  await answerArea.getByRole('button', { name: /Doc 1, page 4/ }).click()
+  row.afterReload.dialog = (await dialog.innerText()).replace(/\s+/g, ' ').slice(0, 120)
+  check(/doesn't keep your file after a reload/.test(row.afterReload.dialog), `figures reload dialog: ${row.afterReload.dialog}`)
+  await page.keyboard.press('Escape')
+  const wrong = path.join(os.tmpdir(), 'not-the-notes.pdf')
+  fs.copyFileSync(FIXTURE, wrong)
+  await answerArea.locator('[data-figures-missing] input[type="file"]').setInputFiles(wrong)
+  row.afterReload.wrongFile = await answerArea.locator('[data-figures-missing] [role="status"]').innerText()
+  check(/not figures-notes\.pdf/.test(row.afterReload.wrongFile), `figures wrong file: ${row.afterReload.wrongFile}`)
+  await answerArea.locator('[data-figures-missing] input[type="file"]').setInputFiles(FIXTURE)
+  await answerArea.locator('[data-figure-kind]').first().waitFor({ timeout: 30_000 })
+  row.afterReload.kinds = await figureKinds()
+  check(row.afterReload.kinds.join() === 'scan', `figures after choosing again: ${row.afterReload.kinds}`)
+
+  // A chunk saved before v1.4 (no itemRange): strip the stored ranges, reload, choose the
+  // file again, and open page 1's citation from the conversation: found by text search.
+  row.legacy = {
+    stripped: await page.evaluate(
+      () =>
+        new Promise((resolve, reject) => {
+          const open = indexedDB.open('pocketrag')
+          open.onsuccess = () => {
+            const tx = open.result.transaction('chunks', 'readwrite')
+            const store = tx.objectStore('chunks')
+            let n = 0
+            store.openCursor().onsuccess = (e) => {
+              const cursor = e.target.result
+              if (!cursor) return
+              const value = cursor.value
+              if (value.itemRange) n++
+              delete value.itemRange
+              cursor.update(value)
+              cursor.continue()
+            }
+            tx.oncomplete = () => {
+              open.result.close()
+              resolve(n)
+            }
+            tx.onerror = () => reject(tx.error)
+          }
+        }),
+    ),
+  }
+  await page.reload()
+  await answerArea.locator('[data-figures-missing] input[type="file"]').setInputFiles(FIXTURE)
+  await page.getByText(/^Conversation \(\d+\)$/).click()
+  await page.getByRole('button', { name: /Doc 1, page 1/ }).first().click()
+  await dialog.locator('[data-verify-status]').waitFor({ timeout: 30_000 })
+  row.legacy.status = await dialog.locator('[data-verify-status]').getAttribute('data-verify-status')
+  row.legacy.pixels = await pixels('dialog canvas')
+  check(row.legacy.stripped >= 4 && row.legacy.status === 'highlight' && row.legacy.pixels?.yellow > 200, `figures legacy: ${JSON.stringify(row.legacy)}`)
+  await page.keyboard.press('Escape')
+  results.push(row)
+  await context.close()
 }
 
 // ---- Step D: retry countdowns, under Playwright's clock ----

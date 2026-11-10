@@ -11,6 +11,9 @@ export interface PageText {
    * structural diagram-likely signal — see diagramHeuristic.ts). Doesn't catch
    * vector-drawn diagrams; that's the lexical signal's job. */
   hasImage: boolean
+  /** v1.4: each pdf.js text item's length, in order; `text` is the items joined by one
+   * space, so these map a chunk's character range to item indices (textLayout.ts). */
+  itemLengths: number[]
 }
 
 // Any operator that paints a raster image onto the page — normal XObject images,
@@ -38,8 +41,8 @@ export async function extractPdfText(file: File): Promise<PageText[]> {
   for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
     const page = await pdf.getPage(pageNum)
     const [content, operatorList] = await Promise.all([page.getTextContent(), page.getOperatorList()])
-    const text = content.items.map((item) => ('str' in item ? item.str : '')).join(' ')
-    pages.push({ page: pageNum, text, hasImage: pageHasImage(operatorList) })
+    const strs = content.items.map((item) => ('str' in item ? item.str : ''))
+    pages.push({ page: pageNum, text: strs.join(' '), hasImage: pageHasImage(operatorList), itemLengths: strs.map((s) => s.length) })
   }
 
   return pages

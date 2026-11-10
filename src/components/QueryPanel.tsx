@@ -26,6 +26,9 @@ import { useDocumentStore } from '../store/documentStore'
 import { answerFor, useChatStore, type HistoryStorageState, type TurnKey, type TurnRequestContext } from '../store/chatStore'
 import { SessionReceipts, TurnReceipt } from './Receipts'
 import { TurnAnswer } from './TurnAnswer'
+import { AnswerFigures } from './PageImages'
+import { figureCaption, useAnswerFigures } from './useAnswerFigures'
+import { CitationDialog, type CitationTarget } from './CitationDialog'
 import { SourceExample } from './SourceExample'
 import { TurnControls } from './TurnControls'
 import { AnswerProgress } from './AnswerProgress'
@@ -168,6 +171,8 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
   // silent: a diagram-likely chunk matched, but the file isn't in memory to render it
   // (most commonly a document restored from a prior session — see sessionFiles.ts).
   const [diagramFallbackNote, setDiagramFallbackNote] = useState<string | null>(null)
+  // v1.4 click-to-verify: the citation whose page is open in the dialog.
+  const [citeTarget, setCiteTarget] = useState<CitationTarget | null>(null)
 
   const documents = useDocumentStore((s) => s.documents)
   const selectedId = useDocumentStore((s) => s.selectedId)
@@ -260,6 +265,20 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
       cancelled = true
     }
   }, [leafId, leafCitations, sourcesTurnId])
+
+  // v1.4 point 2: the leaf answer's figures, cut from the user's own pages in this browser.
+  const leafText = leaf?.status === 'answered' ? answerFor({ groundedSession }, leaf) : null
+  const figures = useAnswerFigures(leaf?.status === 'answered' ? leaf : null, leafText, leafSources?.chunks ?? null)
+
+  // v1.4 point 4: a citation button opens its page with the cited passages highlighted.
+  const citeHandler = useCallback(
+    (turn: TurnRecord) => (label: number, page: number) => {
+      const documentId = turn.docLabels.find((d) => d.label === label)?.documentId
+      if (!documentId) return
+      setCiteTarget({ label, documentId, page, citations: turn.citations.filter((c) => c.documentId === documentId && c.page === page) })
+    },
+    [],
+  )
 
   const runAnswerAttempt = useCallback(
     async (
@@ -485,7 +504,10 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
               if (diagramImagesEnabled && activeKeyConfig.keySource === 'shared' && ranked.length > 0) {
                 const topChunk = ranked[0].chunk
                 if (isDiagramLikely(topChunk)) {
-                  const file = getSessionFile(topChunk.documentId)
+                  // Notes keep their file in memory too (v1.4, for showing it), but this
+                  // opt-in has only ever covered Documents-tab PDFs: unchanged.
+                  const isNote = useDocumentStore.getState().documents.find((d) => d.id === topChunk.documentId)?.source === 'note'
+                  const file = isNote ? undefined : getSessionFile(topChunk.documentId)
                   if (file) {
                     try {
                       image = await renderPageToImage(file, topChunk.page)
@@ -694,8 +716,23 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
         groundingWarning: t.groundingWarning,
         docLabels: t.docLabels,
       }))
-    buildConversationPdf(exportTurns, exportSources, titleFor).save('pocketrag-conversation.pdf')
-  }, [leafSources, path, groundedSession, titleFor])
+    // The leaf's figures (v1.4), as JPEGs drawn from the bitmaps on screen.
+    const exportFigures = (figures?.figures ?? []).flatMap((f) => {
+      const canvas = document.createElement('canvas')
+      canvas.width = f.bitmap.width
+      canvas.height = f.bitmap.height
+      const ctx = canvas.getContext('2d')
+      if (!ctx || canvas.width === 0) return []
+      ctx.fillStyle = '#fff'
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      ctx.drawImage(f.bitmap, 0, 0)
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.85)
+      canvas.width = 0
+      canvas.height = 0
+      return [{ dataUrl, width: f.bitmap.width, height: f.bitmap.height, caption: figureCaption(f, titleFor(f.documentId)) }]
+    })
+    buildConversationPdf(exportTurns, exportSources, titleFor, new Date(), exportFigures).save('pocketrag-conversation.pdf')
+  }, [leafSources, path, groundedSession, titleFor, figures])
 
   const liveError = answerError !== null && answerError.turnId === leaf?.id ? answerError : null
   const answerAction = liveError?.action ?? null
@@ -971,7 +1008,8 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
         {leaf?.status === 'answered' && (
           <div className="mt-4 space-y-2 rounded border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
             {controlsFor(leaf)}
-            <TurnAnswer turn={leaf} text={answerFor({ groundedSession }, leaf)} />
+            <TurnAnswer turn={leaf} text={answerFor({ groundedSession }, leaf)} onCite={citeHandler(leaf)} />
+            <AnswerFigures state={figures} titleFor={titleFor} />
             {leaf.sourceMatch?.kind === 'method' && (
               <SourceExample match={leaf.sourceMatch} fileName={titleFor(leaf.sourceMatch.documentId)} />
             )}
@@ -1097,7 +1135,7 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
                 {controlsFor(turn)}
                 {turn.status === 'answered' ? (
                   <>
-                    <TurnAnswer turn={turn} text={answerFor({ groundedSession }, turn)} />
+                    <TurnAnswer turn={turn} text={answerFor({ groundedSession }, turn)} onCite={citeHandler(turn)} />
                     {turn.docLabels.length > 0 && (
                       <p className="text-xs text-slate-500 dark:text-slate-400">
                         {turn.docLabels.map((d) => `Doc ${d.label} = ${titleFor(d.documentId)}`).join(' · ')}
@@ -1176,6 +1214,15 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
         <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
           Some sources for this answer came from a document that has since been deleted.
         </p>
+      )}
+
+      {citeTarget && (
+        <CitationDialog
+          target={citeTarget}
+          fileName={titleFor(citeTarget.documentId)}
+          note={sourceFor(citeTarget.documentId) === 'note'}
+          onClose={() => setCiteTarget(null)}
+        />
       )}
 
       <SessionReceipts />

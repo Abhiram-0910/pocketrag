@@ -6,6 +6,7 @@ import { saveDocument, type ChunkRecord } from '../lib/db'
 import { EMBEDDING_MODEL_KEY } from '../lib/searchModels'
 import { attemptOcr, fetchOcrFromWorker } from '../lib/ocrRequest'
 import { retryCopy, retryTimingFor } from '../lib/retryTiming'
+import { rememberSessionFile } from '../lib/sessionFiles'
 import { useDocumentStore } from '../store/documentStore'
 import { StatusBanner } from './ui/StatusBanner'
 import { Button } from './ui/Button'
@@ -74,6 +75,8 @@ export function NotesDropZone() {
     (file: File, id: string): Promise<void> =>
       new Promise<void>((resolve) => {
         updateDocument(id, { status: 'ocr-uploading' })
+        // v1.4: kept in this tab's memory only, to show the note's image next to an answer.
+        rememberSessionFile(id, file)
         fileToBase64(file)
           .then((base64) => {
             updateDocument(id, { status: 'ocr-processing' })

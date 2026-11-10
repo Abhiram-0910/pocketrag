@@ -258,6 +258,26 @@ async function main() {
     ])
     return { file: download.suggestedFilename() }
   })
+  // v1.4: with the page-image opt-in off, the figure next to the cited text is cut from the
+  // page and the citation opens the highlighted page, all drawn locally: no request in this
+  // flow carries image bytes, and no answer request has an image.
+  await flow('figure crop + click-to-verify (no image leaves)', async () => {
+    await page.getByLabel('Send a page image when a matched chunk looks like it has a diagram', { exact: false }).uncheck()
+    await upload(path.join(__dirname, '../eval/fixtures/figures-notes.pdf'))
+    await waitReady('figures-notes.pdf')
+    await docButton('figures-notes.pdf').click()
+    await ask('What happens in the light reactions?', 'figure crop + click-to-verify (no image leaves)')
+    await page.locator('#answer-area [data-figure-kind="figure"] canvas').waitFor({ timeout: 60_000 })
+    await page.locator('#answer-area').getByRole('button', { name: /Doc 1, page 1/ }).first().click()
+    const status = await page.locator('dialog [data-verify-status]').getAttribute('data-verify-status', { timeout: 60_000 })
+    await page.keyboard.press('Escape')
+    const mine = observed.filter((o) => o.phase === 'figure crop + click-to-verify (no image leaves)')
+    const imageBytes = mine.filter((o) => /\/9j\/|iVBOR|data:image|"image"/.test(o.req.postData() || '')).length
+    const withImage = answerBodies.filter((b) => b.phase === 'figure crop + click-to-verify (no image leaves)' && b.hasImage).length
+    if (status !== 'highlight') throw new Error(`verify status ${status}`)
+    if (imageBytes || withImage) throw new Error(`${imageBytes} requests with image bytes, ${withImage} answer requests with an image`)
+    return { requests: mine.length, imageBytes, withImage, verify: status }
+  })
   await flow('BYOK models fetch (mocked)', async () => {
     await page.getByLabel('Use your own API key').check()
     await page.getByLabel('Provider', { exact: true }).selectOption('openai')

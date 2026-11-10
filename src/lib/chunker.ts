@@ -8,6 +8,9 @@ export interface Chunk {
   index: number
   text: string
   tokenCount: number
+  /** v1.4: where `text` sits in the input, [start, end) — for the click-to-verify highlight. */
+  start: number
+  end: number
 }
 
 export interface ChunkOptions {
@@ -70,6 +73,8 @@ export function chunkText(text: string, tokenizer: Tokenizer, options: ChunkOpti
       index: chunks.length,
       text: text.slice(slice[0].start, slice[slice.length - 1].end),
       tokenCount: slice.reduce((sum, atom) => sum + atom.tokenCount, 0),
+      start: slice[0].start,
+      end: slice[slice.length - 1].end,
     })
 
     if (end >= atoms.length) break

@@ -111,4 +111,11 @@ describe('chunkText (real tokenizer)', () => {
     const chunks = chunkText('just a short sentence for defaults', tokenizer)
     expect(chunks).toHaveLength(1)
   })
+
+  it('reports where each chunk sits in the input (v1.4)', () => {
+    const text = 'Alpha beta, gamma.  Delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho.'
+    const chunks = chunkText(text, tokenizer, { chunkSize: 8, overlap: 2 })
+    expect(chunks.length).toBeGreaterThan(1)
+    for (const chunk of chunks) expect(text.slice(chunk.start, chunk.end)).toBe(chunk.text)
+  })
 })

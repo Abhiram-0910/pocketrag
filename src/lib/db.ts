@@ -1,4 +1,5 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
+import type { ItemRange } from './textLayout'
 
 export interface DocumentRecord {
   id: string
@@ -30,6 +31,10 @@ export interface ChunkRecord {
   // schemaless, so a chunk saved before this field existed simply won't have it —
   // callers must treat a missing value as `false`, never assume it's present.
   hasImage: boolean
+  // v1.4: which pdf.js text items on its page this chunk covers (textLayout.ts), for the
+  // click-to-verify highlight. Missing on chunks saved before v1.4 and on notes (OCR text):
+  // the highlight then finds the passage by text search, or isn't shown.
+  itemRange?: ItemRange
 }
 
 interface PocketRagDB extends DBSchema {

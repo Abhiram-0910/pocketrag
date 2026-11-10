@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { forgetSessionFile, getSessionFile, rememberSessionFile } from './sessionFiles'
+import { forgetSessionFile, getSessionFile, rememberSessionFile, sessionFilesVersion, subscribeSessionFiles } from './sessionFiles'
 
 function makeFile(name: string): File {
   return new File(['pdf bytes'], name, { type: 'application/pdf' })
@@ -20,5 +20,18 @@ describe('sessionFiles', () => {
     rememberSessionFile('doc-b', makeFile('b.pdf'))
     forgetSessionFile('doc-b')
     expect(getSessionFile('doc-b')).toBeUndefined()
+  })
+
+  it('notifies subscribers and bumps the version on add and remove (v1.4)', () => {
+    let calls = 0
+    const unsubscribe = subscribeSessionFiles(() => calls++)
+    const before = sessionFilesVersion()
+    rememberSessionFile('doc-c', makeFile('c.pdf'))
+    forgetSessionFile('doc-c')
+    forgetSessionFile('doc-c') // nothing to remove: no change
+    unsubscribe()
+    rememberSessionFile('doc-d', makeFile('d.pdf'))
+    expect(calls).toBe(2)
+    expect(sessionFilesVersion()).toBe(before + 3)
   })
 })

@@ -22,6 +22,17 @@ export interface ExportTurn {
   docLabels: DocLabel[]
 }
 
+// v1.4: a figure cut from the user's page for the current answer, as a JPEG data URL.
+export interface ExportFigure {
+  dataUrl: string
+  width: number
+  height: number
+  caption: string
+}
+
+// Largest figure in the export, in points.
+const FIGURE_MAX_HEIGHT = 320
+
 export interface ExportSource {
   documentId: string
   page: number
@@ -45,6 +56,8 @@ export function buildConversationPdf(
   currentSources: ExportSource[],
   titleFor: (documentId: string) => string,
   now: Date = new Date(),
+  // Shown under the last turn (the current answer), like the Sources.
+  currentFigures: ExportFigure[] = [],
 ): jsPDF {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' })
   const pageWidth = doc.internal.pageSize.getWidth()
@@ -96,6 +109,18 @@ export function buildConversationPdf(
       cursor.y += PARAGRAPH_GAP
       const legend = turn.docLabels.map((d) => `Doc ${d.label} = ${titleFor(d.documentId)}`).join(' · ')
       writeWrapped(legend, LABEL_FONT_SIZE)
+    }
+
+    if (i === turns.length - 1) {
+      for (const figure of currentFigures) {
+        const k = Math.min(1, contentWidth / figure.width, FIGURE_MAX_HEIGHT / figure.height)
+        const [w, h] = [figure.width * k, figure.height * k]
+        cursor.y += PARAGRAPH_GAP
+        ensureSpace(h)
+        doc.addImage(figure.dataUrl, 'JPEG', PAGE_MARGIN, cursor.y, w, h)
+        cursor.y += h + PARAGRAPH_GAP
+        writeWrapped(figure.caption, LABEL_FONT_SIZE)
+      }
     }
   })
 

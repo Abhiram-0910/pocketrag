@@ -26,3 +26,21 @@ describe('TurnAnswer', () => {
     }
   })
 })
+
+describe('TurnAnswer citations (v1.4)', () => {
+  const turn = makeTurn({ docLabels: [{ label: 1, documentId: 'd1' }] })
+  const text = 'ATP is made in mitochondria (Doc 1, page 2) and also (Doc 3, page 1).'
+
+  it('makes each citation of a known document a dialog button, keeping the text intact', () => {
+    const html = render({ turn, text, onCite: () => {} })
+    expect(html).toContain('aria-haspopup="dialog"')
+    expect(html).toContain('>Doc 1, page 2</button>')
+    // Doc 3 isn't one of the turn's documents: plain text, no button.
+    expect(html.match(/<button/g)).toHaveLength(1)
+    expect(html.replace(/<[^>]+>/g, '')).toContain(text)
+  })
+
+  it('renders plain text without onCite', () => {
+    expect(render({ turn, text })).not.toContain('<button')
+  })
+})
