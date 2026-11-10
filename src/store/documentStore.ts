@@ -44,13 +44,15 @@ interface DocumentState {
   backend: BackendState | null
   backendDetail: string | null
   modelProgress: number | null
+  // Bytes of the model's files so far / in total (v1.3), when the download reports them.
+  modelBytes: { loaded: number; total: number } | null
   addDocument: (id: string, fileName: string, source: DocEntry['source']) => void
   updateDocument: (id: string, patch: Partial<Omit<DocEntry, 'id'>>) => void
   removeDocument: (id: string) => void
   restoreDocuments: (entries: DocEntry[]) => void
   selectDocument: (id: string | null) => void
   setBackend: (backend: BackendState, detail: string) => void
-  setModelProgress: (percent: number) => void
+  setModelProgress: (percent: number, loaded?: number, total?: number) => void
 }
 
 export const useDocumentStore = create<DocumentState>((set) => ({
@@ -59,6 +61,7 @@ export const useDocumentStore = create<DocumentState>((set) => ({
   backend: null,
   backendDetail: null,
   modelProgress: null,
+  modelBytes: null,
   addDocument: (id, fileName, source) =>
     set((s) => ({
       documents: [
@@ -83,5 +86,6 @@ export const useDocumentStore = create<DocumentState>((set) => ({
     }),
   selectDocument: (id) => set({ selectedId: id }),
   setBackend: (backend, backendDetail) => set({ backend, backendDetail }),
-  setModelProgress: (percent) => set({ modelProgress: percent }),
+  setModelProgress: (percent, loaded, total) =>
+    set({ modelProgress: percent, modelBytes: loaded !== undefined && total ? { loaded, total } : null }),
 }))

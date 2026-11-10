@@ -7,7 +7,7 @@ import { applyRerank, type RerankScore } from '../lib/reranker'
 import { shouldRerank } from '../lib/searchModels'
 import { exampleForRequest, findSourceMatch, type SourceMatch } from '../lib/sourceMatch'
 import type { RerankCandidate } from '../workers/embedding.types'
-import { attemptAnswer, fetchAnswerFromWorker, type ImageAttachment, type KeyConfig } from '../lib/answerRequest'
+import { STREAM_CUT_MESSAGE, attemptAnswer, canStream, fetchAnswerFromWorker, type ImageAttachment, type KeyConfig } from '../lib/answerRequest'
 import { buildRetrievalQuery, pathTo, previousQuestionFor, siblingPosition } from '../lib/conversation'
 import { isDiagramLikely } from '../lib/diagramHeuristic'
 import { getDiagramImagesEnabled, setDiagramImagesEnabled } from '../lib/diagramImageSetting'
@@ -28,6 +28,9 @@ import { SessionReceipts, TurnReceipt } from './Receipts'
 import { TurnAnswer } from './TurnAnswer'
 import { SourceExample } from './SourceExample'
 import { TurnControls } from './TurnControls'
+import { AnswerProgress } from './AnswerProgress'
+import { PROVIDER_LABELS } from '../lib/models'
+import { formatBytes } from '../lib/receipts'
 import { StatusBanner } from './ui/StatusBanner'
 import { Button } from './ui/Button'
 
@@ -100,12 +103,12 @@ function storedFailureBanner(turn: TurnRecord, restored: boolean): TaxonomyResul
 function rerankChunksAsync(
   question: string,
   candidates: RerankCandidate[],
-  onProgress: (percent: number) => void,
+  onProgress: (progress: { percent: number; loaded?: number; total?: number }) => void,
 ): Promise<RerankScore[]> {
   return new Promise((resolve, reject) => {
     rerankChunks(question, candidates, {
       onBackend: () => {},
-      onModelProgress: (msg) => onProgress(msg.percent),
+      onModelProgress: ({ percent, loaded, total }) => onProgress({ percent, loaded, total }),
       onModelReady: () => {},
       onRerankResult: (msg) => resolve(msg.scores),
       onError: (msg) => reject(new Error(classifyEmbeddingError(msg).message)),
@@ -133,7 +136,13 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
   const answerAreaRef = useRef<HTMLDivElement>(null)
   const [error, setError] = useState<string | null>(null)
   const [scope, setScope] = useState<'document' | 'all'>('document')
-  const [rerankModelProgress, setRerankModelProgress] = useState<number | null>(null)
+  const [rerankModelProgress, setRerankModelProgress] = useState<{ percent: number; loaded?: number; total?: number } | null>(null)
+  // v1.3 loading stages for this session's live question, the streamed text so far, the
+  // user's Stop, and the start/end announcement (polite; never per token).
+  const [stage, setStage] = useState<'searching' | 'asking' | 'writing' | null>(null)
+  const [streamText, setStreamText] = useState<{ turnId: string; text: string } | null>(null)
+  const stopRef = useRef<AbortController | null>(null)
+  const [answerNote, setAnswerNote] = useState('')
   // The turn submitted or retried in this session. Its failure renders inside the
   // always-mounted live region (announced); any other turn's stored failure renders
   // outside it, so opening an old conversation announces nothing.
@@ -265,6 +274,11 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
       match?: SourceMatch | null,
     ) => {
       setAwaitingAnswer(true)
+      setStage('asking')
+      setStreamText({ turnId, text: '' })
+      const stopper = new AbortController()
+      stopRef.current = stopper
+      let started = false
       setTimedOutTurnId(null)
       // Cleared on retry too: a retry can now come from a failure banner's "Try again",
       // and a stale failure must not sit beside the answer that retry produced.
@@ -306,9 +320,43 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
         enableWebSearch,
         (record) => void appendEgress(turnId, record),
         followMethod,
+        {
+          // v1.3: each piece is shown as it arrives (outside any live region); the polite
+          // region announces only the start and the end, never per token.
+          onDelta: (text) => {
+            if (!started) {
+              started = true
+              setStage('writing')
+              setAnswerNote('Writing the answer…')
+            }
+            setStreamText((prev) => (prev?.turnId === turnId ? { turnId, text: prev.text + text } : prev))
+          },
+          stopSignal: stopper.signal,
+        },
+      )
+      stopRef.current = null
+      setStage(null)
+      setStreamText(null)
+      setAnswerNote(
+        result.outcome === 'success'
+          ? 'Answer complete.'
+          : result.outcome === 'interrupted'
+            ? result.reason === 'stopped'
+              ? 'Answer stopped.'
+              : (result.message ?? STREAM_CUT_MESSAGE)
+            : '',
       )
 
-      if (result.outcome === 'success') {
+      if (result.outcome === 'interrupted') {
+        // Stored as interrupted with whatever arrived — never as a complete answer, and so
+        // never sent upstream as history.
+        await settleTurn(turnId, {
+          status: 'interrupted',
+          answer: result.partial || null,
+          interruption: result.reason === 'stopped' ? 'stopped' : 'stream-error',
+          failure: result.reason === 'error' ? { kind: 'unknown', message: result.message ?? STREAM_CUT_MESSAGE, code: result.code } : null,
+        })
+      } else if (result.outcome === 'success') {
         await settleTurn(turnId, {
           status: 'answered',
           answer: result.answer,
@@ -381,6 +429,7 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
       // even if the checkbox changes in between.
       const activeWebSearchEnabled = isGeminiEffective && webSearchEnabled
       setBusy(true)
+      setStage('searching')
       setError(null)
       setDiagramFallbackNote(null)
 
@@ -493,11 +542,15 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
               await runAnswerAttempt(turnId, context, question, ranked, false, activeKeyConfig, image, activeWebSearchEnabled, sourceMatch)
             })
             .catch((err) => setError(err instanceof Error ? err.message : 'Failed to retrieve chunks.'))
-            .finally(() => setBusy(false))
+            .finally(() => {
+              setBusy(false)
+              setStage(null)
+            })
         },
         onError: (msg) => {
           setError(classifyEmbeddingError(msg).message)
           setBusy(false)
+          setStage(null)
         },
       })
     },
@@ -713,6 +766,34 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
         </StatusBanner>
       )
     }
+    // v1.3: a streamed answer stopped part-way — the user's Stop, or the stream failed (the
+    // Worker's copy, verbatim). The partial text is shown as it arrived, marked "Stopped".
+    if (turn.status === 'interrupted' && turn.interruption) {
+      return (
+        <div className="space-y-2" data-interrupted={turn.interruption}>
+          {turn.interruption === 'stream-error' && turn.failure && (
+            <StatusBanner variant="warning" inLiveRegion>
+              {turn.failure.message}
+            </StatusBanner>
+          )}
+          {turn.answer ? (
+            <div className="rounded border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-300">Stopped</p>
+              <p className="whitespace-pre-wrap break-words text-sm text-slate-900 dark:text-slate-100">{turn.answer}</p>
+            </div>
+          ) : (
+            <p className="text-sm text-slate-600 dark:text-slate-400">Stopped before any of the answer arrived.</p>
+          )}
+          {actionable && (canRebuild ? (
+            <Button variant="secondary" onClick={() => void handleRetry()}>
+              {FAILURE_ACTION_LABELS.retry}
+            </Button>
+          ) : (
+            askAgain
+          ))}
+        </div>
+      )
+    }
     if (turn.status === 'interrupted' || turn.status === 'pending') {
       return (
         <StatusBanner variant="info" inLiveRegion>
@@ -730,6 +811,10 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
 
   return (
     <div className="text-left">
+      {/* v1.3: a streamed answer's start and end, announced politely (never per token). */}
+      <p aria-live="polite" aria-atomic="true" className="sr-only" data-answer-announcement>
+        {answerNote}
+      </p>
       {/* v1.2: version changes (edit, regenerate, ‹ › navigation), announced politely. */}
       <p aria-live="polite" aria-atomic="true" className="sr-only" data-branch-announcement>
         {branchNote}
@@ -834,18 +919,33 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
       )}
 
       {rerankModelProgress != null && (
-        <p className="mt-4 text-sm text-slate-500 motion-safe:animate-pulse dark:text-slate-400">
-          Downloading reranking model — {rerankModelProgress}%… (one-time, cached after this)
+        <p className="mt-4 text-sm text-slate-600 dark:text-slate-400">
+          Downloading the reranking model (one time, cached after this) —{' '}
+          {rerankModelProgress.loaded !== undefined && rerankModelProgress.total
+            ? `${formatBytes(rerankModelProgress.loaded)} of ${formatBytes(rerankModelProgress.total)} (${rerankModelProgress.percent}%)`
+            : `${rerankModelProgress.percent}%`}
         </p>
       )}
 
-      {awaitingAnswer && !leafTimedOut && isLive && (
-        <p className="mt-4 text-sm text-slate-500 motion-safe:animate-pulse dark:text-slate-400">
-          Generating an answer… this usually takes a few seconds, but can occasionally take up to a few
-          minutes on the free tier.
-          {pendingImage?.turnId === leaf?.id && ' A page image was included, which can take a bit longer.'} Please
-          don't close this tab.
-        </p>
+      {/* v1.3: stage, skeleton / streamed text, Stop. Searching happens before the turn exists. */}
+      {stage !== null && (stage === 'searching' || (awaitingAnswer && !leafTimedOut && isLive)) && keyConfig !== null && (
+        <AnswerProgress
+          stage={stage}
+          provider={keyConfig.keySource === 'shared' ? 'Gemini' : PROVIDER_LABELS[keyConfig.provider]}
+          streams={canStream(keyConfig, isGeminiEffective && webSearchEnabled)}
+          nonStreamingNote={keyConfig.keySource === 'own' && !canStream(keyConfig, false)}
+          text={streamText !== null && streamText.turnId === leaf?.id ? streamText.text : ''}
+          imageIncluded={pendingImage?.turnId === leaf?.id}
+          onStop={
+            stage === 'searching'
+              ? undefined
+              : () => {
+                  // Stop unmounts with this panel: move focus first, so it never drops to <body>.
+                  answerAreaRef.current?.focus()
+                  stopRef.current?.abort()
+                }
+          }
+        />
       )}
 
       {leafTimedOut && isLive && leaf?.status === 'timed-out' && (
@@ -924,6 +1024,7 @@ export function QueryPanel({ keyConfig, onFailureAction }: QueryPanelProps) {
         {/* This session's pending or failed leaf: Edit stays available ("Try again" below
             re-sends the same turn; Regenerate is for answers only). */}
         {leaf !== null && leaf.status !== 'answered' && isLive && <div className="mt-4">{controlsFor(leaf)}</div>}
+        {leaf !== null && leaf.status === 'interrupted' && isLive && <div className="mt-2">{restoredOutcome(leaf, true)}</div>}
 
         <div aria-live="polite" aria-atomic="true">
           {liveError && (

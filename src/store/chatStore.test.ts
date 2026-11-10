@@ -176,6 +176,28 @@ describe('chatStore', () => {
     expect(s.turns).toHaveLength(3)
   })
 
+  it('a stopped stream (v1.3) is stored as interrupted with its partial text, never sent as history, and cleared by a retry', async () => {
+    const q1 = await useChatStore.getState().startTurn(newTurn('Q1'))
+    await useChatStore.getState().settleTurn(q1.turnId, { status: 'interrupted', answer: 'Half an ans', interruption: 'stopped', failure: null })
+    const conversationId = useChatStore.getState().activeConversationId as string
+    const [stored] = await getTurns(conversationId)
+    expect(stored).toMatchObject({ status: 'interrupted', answer: 'Half an ans', interruption: 'stopped', failure: null })
+
+    const q2 = await useChatStore.getState().startTurn(newTurn('Q2'))
+    expect(q2.history).toEqual([])
+
+    await useChatStore.getState().retryTurn(q1.turnId, SHARED_KEY)
+    const retried = useChatStore.getState().turns.find((t) => t.id === q1.turnId)!
+    expect(retried).toMatchObject({ status: 'pending', answer: null, interruption: undefined })
+  })
+
+  it('a stream that failed part-way keeps the Worker copy as its failure (v1.3)', async () => {
+    const q = await useChatStore.getState().startTurn(newTurn('Q'))
+    const failure = { kind: 'unknown' as const, message: "The free tier couldn't respond right now.", code: 'provider_unavailable' as const }
+    await useChatStore.getState().settleTurn(q.turnId, { status: 'interrupted', answer: 'Part', interruption: 'stream-error', failure })
+    expect(useChatStore.getState().turns[0]).toMatchObject({ status: 'interrupted', answer: 'Part', interruption: 'stream-error', failure })
+  })
+
   it('restore() sweeps a stale pending turn to interrupted and lists the conversation', async () => {
     await saveTurn(
       makeConversation({ id: 'c-stale', updatedAt: Date.now() }),

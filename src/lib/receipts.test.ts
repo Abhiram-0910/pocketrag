@@ -56,6 +56,8 @@ describe('receipts', () => {
   it('labels every status', () => {
     expect(statusLabel({ outcome: 'in-flight', httpStatus: null })).toBe('Sending…')
     expect(statusLabel({ outcome: 'ok', httpStatus: 200 })).toBe('OK')
+    expect(statusLabel({ outcome: 'in-flight', httpStatus: 200 })).toBe('Receiving…')
+    expect(statusLabel({ outcome: 'interrupted', httpStatus: 200 })).toBe('Interrupted (partial answer)')
     expect(statusLabel({ outcome: 'http-error', httpStatus: 502 })).toBe('Failed (502)')
     expect(statusLabel({ outcome: 'network-error', httpStatus: null })).toBe('No response (network)')
     expect(statusLabel({ outcome: 'aborted', httpStatus: null })).toBe('Stopped (timed out or cancelled)')

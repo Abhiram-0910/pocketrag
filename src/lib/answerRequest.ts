@@ -1,5 +1,6 @@
-import { WorkerRequestError, parseWorkerErrorResponse, type FailureCode, type FailureSource } from './apiError'
-import { egressFetch, type EgressRecord } from './egress'
+import { FAILURE_CODES, WorkerRequestError, parseWorkerErrorResponse, type FailureCode, type FailureSource } from './apiError'
+import { egressFetch, egressStream, type EgressRecord } from './egress'
+import { readAnswerStream } from './sse'
 import { PROVIDERS, type Provider } from './models'
 
 // The Worker owns Doc N labelling and returns this label→documentId map so the client
@@ -90,7 +91,33 @@ export type FetchAnswerFn = (
   // v1.1: the first chunk is a worked example the question follows with new values
   // (src/lib/sourceMatch.ts); the Worker asks for that example's method.
   followMethod?: boolean,
+  // v1.3: ask for a streamed answer. `onDelta` gets each piece of text; `onActivity` every
+  // chunk (for the idle timeout). Omitted: the JSON request, unchanged.
+  stream?: { onDelta: (text: string) => void; onActivity: () => void },
 ) => Promise<AnswerResponse>
+
+// The Worker streams these (worker/src/stream.ts STREAMING_PROVIDERS); the rest answer in
+// one piece. Web-search answers never stream (Search Suggestions come with the result).
+const STREAMING_PROVIDERS: readonly Provider[] = ['gemini', 'openai', 'anthropic']
+export function canStream(keyConfig: KeyConfig, enableWebSearch: boolean): boolean {
+  if (enableWebSearch) return false
+  return keyConfig.keySource === 'shared' || STREAMING_PROVIDERS.includes(keyConfig.provider)
+}
+
+// A streamed answer that started but didn't finish: the Worker's error event (its copy,
+// shown verbatim), or a stream cut off with no event at all.
+export class StreamInterruptedError extends Error {
+  readonly partial: string
+  readonly code?: FailureCode
+  constructor(partial: string, message: string, code?: FailureCode) {
+    super(message)
+    this.partial = partial
+    this.code = code
+  }
+}
+// Client copy only for the cases the Worker can't report: the connection itself ended.
+export const STREAM_CUT_MESSAGE = 'The connection ended before the answer finished.'
+export const STREAM_STALLED_MESSAGE = 'The answer stopped arriving.'
 
 export type AnswerAttemptResult =
   | {
@@ -104,6 +131,8 @@ export type AnswerAttemptResult =
       model?: string
     }
   | { outcome: 'timeout' }
+  // v1.3: part of a streamed answer arrived (or none, if Stop came first). Never a success.
+  | { outcome: 'interrupted'; partial: string; reason: 'stopped' | 'error'; message?: string; code?: FailureCode }
   | {
       outcome: 'error'
       message: string
@@ -132,10 +161,28 @@ export async function attemptAnswer(
   enableWebSearch?: boolean,
   onEgress?: (record: EgressRecord) => void,
   followMethod?: boolean,
+  // v1.3. `onDelta` present: request a stream (if this provider streams). `stopSignal`: the
+  // user's Stop, for either kind of request. While a stream is arriving, `timeoutMs` is an
+  // idle timeout (reset on every chunk) instead of a total.
+  live?: { onDelta?: (text: string) => void; stopSignal?: AbortSignal },
 ): Promise<AnswerAttemptResult> {
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+  let stopped = false
+  const stop = () => {
+    stopped = true
+    controller.abort()
+  }
+  if (live?.stopSignal?.aborted) stop()
+  live?.stopSignal?.addEventListener('abort', stop)
+  let timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+  const onActivity = () => {
+    clearTimeout(timeoutId)
+    timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+  }
+  const stream = live?.onDelta && canStream(keyConfig, enableWebSearch === true) ? { onDelta: live.onDelta, onActivity } : undefined
   try {
+    const args = [question, chunks, keyConfig, controller.signal, docLabels, history, image, enableWebSearch, onEgress, followMethod] as const
+    // The non-streaming call keeps exactly its pre-v1.3 arguments.
     const {
       answer,
       groundingWarning,
@@ -144,7 +191,7 @@ export async function attemptAnswer(
       searchEntryPointHtml,
       provider,
       model,
-    } = await fetchAnswer(question, chunks, keyConfig, controller.signal, docLabels, history, image, enableWebSearch, onEgress, followMethod)
+    } = stream ? await fetchAnswer(...args, stream) : await fetchAnswer(...args)
     return {
       outcome: 'success',
       answer,
@@ -156,6 +203,15 @@ export async function attemptAnswer(
       model,
     }
   } catch (err) {
+    if (err instanceof StreamInterruptedError) {
+      return { outcome: 'interrupted', partial: err.partial, reason: 'error', message: err.message, code: err.code }
+    }
+    // Reading the stream failed part-way: Stop, the idle timeout, or the network.
+    const partial = (err as { partial?: unknown } | null)?.partial
+    if (stopped) return { outcome: 'interrupted', partial: typeof partial === 'string' ? partial : '', reason: 'stopped' }
+    if (typeof partial === 'string') {
+      return { outcome: 'interrupted', partial, reason: 'error', message: isAbortError(err) ? STREAM_STALLED_MESSAGE : STREAM_CUT_MESSAGE }
+    }
     if (isAbortError(err)) return { outcome: 'timeout' }
     if (err instanceof WorkerRequestError) {
       return {
@@ -172,6 +228,7 @@ export async function attemptAnswer(
     return { outcome: 'error', message: err instanceof Error ? err.message : 'unknown error' }
   } finally {
     clearTimeout(timeoutId)
+    live?.stopSignal?.removeEventListener('abort', stop)
   }
 }
 
@@ -201,10 +258,12 @@ export const fetchAnswerFromWorker: FetchAnswerFn = async (
   enableWebSearch,
   onEgress,
   followMethod,
+  stream,
 ) => {
   if (!API_BASE_URL) {
     throw new Error('Answer generation is not configured yet (VITE_API_BASE_URL is unset).')
   }
+  if (stream) return fetchStreamedAnswer({ question, chunks, ...keyConfig, docLabels, history, image, followMethod: followMethod || undefined, stream: true }, keyConfig, signal, stream, onEgress)
   const res = await egressFetch(
     `${API_BASE_URL}/answer`,
     {
@@ -225,3 +284,55 @@ export const fetchAnswerFromWorker: FetchAnswerFn = async (
   const servedBy = parseServedBy(data)
   return { ...data, provider: servedBy?.provider, model: servedBy?.model }
 }
+
+const isFailureCode = (value: unknown): value is FailureCode => (FAILURE_CODES as readonly unknown[]).includes(value)
+
+/**
+ * v1.3: the streamed /answer. A non-2xx is the Worker's normal JSON failure (it only streams
+ * once the provider has answered); a 2xx JSON body is its non-streaming fallback (a provider
+ * that can't stream); otherwise the event stream: `done` → a normal answer, an `error`
+ * event or a cut-off stream → StreamInterruptedError with the partial text. The Receipt row
+ * ends 'ok' only for a complete answer, else 'interrupted'.
+ */
+async function fetchStreamedAnswer(
+  json: Record<string, unknown>,
+  keyConfig: KeyConfig,
+  signal: AbortSignal,
+  stream: { onDelta: (text: string) => void; onActivity: () => void },
+  onEgress?: (record: EgressRecord) => void,
+): Promise<AnswerResponse> {
+  const { response, settle } = await egressStream(
+    `${API_BASE_URL}/answer`,
+    { json, signal },
+    { purpose: 'answer', upstream: keyConfig.keySource === 'own' ? keyConfig.provider : 'gemini' },
+    onEgress,
+  )
+  if (!response.ok) throw await parseWorkerErrorResponse(response, `Answer request failed (${response.status}).`)
+  if (!(response.headers.get('Content-Type') ?? '').includes('text/event-stream') || !response.body) {
+    const data = (await response.json()) as AnswerResponse
+    const servedBy = parseServedBy(data)
+    return { ...data, provider: servedBy?.provider, model: servedBy?.model }
+  }
+  let result
+  try {
+    result = await readAnswerStream(response.body, stream.onDelta, stream.onActivity)
+  } catch (err) {
+    settle('interrupted')
+    throw err
+  }
+  if (!result.done) {
+    settle('interrupted')
+    const message = typeof result.error?.error === 'string' ? result.error.error : STREAM_CUT_MESSAGE
+    throw new StreamInterruptedError(result.text, message, isFailureCode(result.error?.code) ? result.error.code : undefined)
+  }
+  settle('ok')
+  const servedBy = parseServedBy(result.meta ?? {})
+  return {
+    answer: result.text,
+    groundingWarning: result.done.groundingWarning === true,
+    docLabels: Array.isArray(result.done.docLabels) ? (result.done.docLabels as DocLabel[]) : [],
+    provider: servedBy?.provider,
+    model: servedBy?.model,
+  }
+}
+

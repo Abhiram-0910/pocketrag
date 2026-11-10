@@ -625,6 +625,7 @@ async function main() {
   await workedExamples(browser, pageErrors)
   await reindexOutdated(browser, pageErrors)
   await branching(browser, pageErrors)
+  await streaming(browser, pageErrors)
 
   check(pageErrors.length === 0, `page errors: ${pageErrors.join('; ')}`)
   console.log(JSON.stringify({ results, answerCalls, pageErrors, failures }, null, 2))
@@ -749,6 +750,185 @@ async function workedExamples(browser, pageErrors) {
   row.answerCalls = bodies.length
   results.push(row)
   await context.close()
+}
+
+// v1.3 streaming, with real chunked streams: a local HTTPS mock Worker (self-signed cert,
+// made here; ignoreHTTPSErrors for this context only) that /answer is redirected to, so the
+// SSE arrives in timed pieces. Complete (text grows, stages, start/end announcements only,
+// Receipt OK), mid-stream error (Worker copy verbatim, partial "Stopped", Receipt
+// Interrupted), Stop (partial kept as interrupted across a reload), a cut-off stream, a
+// non-streaming provider's note, and the skeleton under reduced motion.
+async function streaming(browser, pageErrors) {
+  const https = require('https')
+  const { execFileSync } = require('child_process')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pocketrag-sse-'))
+  execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', path.join(dir, 'k.pem'), '-out', path.join(dir, 'c.pem'), '-days', '1', '-subj', '/CN=127.0.0.1'], { stdio: 'ignore' })
+  let mode = 'complete'
+  let lastBody = null
+  const ev = (event, data) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
+  const server = https.createServer({ key: fs.readFileSync(path.join(dir, 'k.pem')), cert: fs.readFileSync(path.join(dir, 'c.pem')) }, (req, res) => {
+    const cors = { 'Access-Control-Allow-Origin': req.headers.origin || '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' }
+    if (req.method === 'OPTIONS') return res.writeHead(204, cors).end()
+    let raw = ''
+    req.on('data', (d) => (raw += d))
+    req.on('end', async () => {
+      lastBody = JSON.parse(raw)
+      const ids = [...new Set(lastBody.chunks.map((c) => c.documentId))]
+      res.writeHead(200, { ...cors, 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache' })
+      const pause = (ms) => new Promise((r) => setTimeout(r, ms))
+      res.write(ev('meta', { provider: 'gemini', model: 'gemini-3.5-flash-lite' }))
+      const pieces = ['Mitochondria ', 'produce ', 'ATP ', 'through respiration ', '(Doc 1, page 1).']
+      const send = mode === 'complete' ? pieces : pieces.slice(0, 2)
+      for (const t of send) {
+        await pause(400)
+        res.write(ev('delta', { t }))
+        res.write(': keep-alive\n\n')
+      }
+      if (mode === 'complete') res.end(ev('done', { groundingWarning: false, docLabels: ids.map((d, i) => ({ label: i + 1, documentId: d })) }))
+      else if (mode === 'error') res.end(ev('error', { error: COPY.sharedUn, code: 'provider_unavailable' }))
+      else if (mode === 'cut') res.destroy()
+      // 'hang': left open until the client goes away (Stop).
+    })
+  })
+  await new Promise((r) => server.listen(0, '127.0.0.1', r))
+  const mock = `https://127.0.0.1:${server.address().port}/answer`
+
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, ignoreHTTPSErrors: true })
+  await context.addInitScript(() => localStorage.setItem('pocketrag:has-visited-app', 'true'))
+  await context.route(`${API}/answer`, (route) => route.continue({ url: mock }))
+  const page = await context.newPage()
+  page.on('pageerror', (e) => pageErrors.push(`streaming: ${String(e)}`))
+  await page.goto(APP)
+  await page.setInputFiles('input[type="file"][accept="application/pdf"]', writeTestPdf())
+  await page.waitForFunction(() => document.querySelector('form input[type="text"]')?.disabled === false, null, { timeout: 300_000 })
+  const row = { scenario: 'v1.3 streaming (chunked mock Worker)' }
+  const announcements = []
+  await page.exposeFunction('__announce', (t) => announcements.push(t))
+  await page.evaluate(() => {
+    const el = document.querySelector('[data-answer-announcement]')
+    new MutationObserver(() => window.__announce(el.textContent)).observe(el, { childList: true, characterData: true, subtree: true })
+  })
+  const streamed = page.locator('[data-streamed-answer]')
+  const receiptStatus = async () => {
+    const receipt = page.locator('#answer-area details[data-receipt]').last()
+    await receipt.evaluate((d) => (d.open = true))
+    return (await receipt.innerText()).replace(/\s+/g, ' ')
+  }
+  const ask = async (q) => {
+    await page.locator('form input[type="text"]').fill(q)
+    await page.getByRole('button', { name: 'Search' }).click()
+  }
+
+  // Complete: skeleton, then text that grows, stage "Writing", announcements start/end only.
+  mode = 'complete'
+  announcements.length = 0
+  await ask('What do mitochondria do?')
+  await page.locator('[data-answer-progress="asking"]').waitFor({ timeout: 60_000 })
+  row.skeletonBeforeText = await page.locator('[data-answer-progress] [aria-hidden="true"] .motion-safe\\:animate-pulse').count()
+  await streamed.waitFor({ timeout: 30_000 })
+  const firstText = await streamed.innerText()
+  row.currentStage = await page.locator('[data-answer-progress] li[aria-current="step"]').innerText()
+  row.stopVisible = await page.getByRole('button', { name: 'Stop' }).count()
+  await page.getByText('(Doc 1, page 1).').first().waitFor({ timeout: 30_000 })
+  await page.waitForTimeout(300)
+  row.complete = { firstText, requestStream: lastBody.stream, announcements: [...new Set(announcements.filter(Boolean))], receipt: (await receiptStatus()).match(/OK|Interrupted[^·]*|Receiving…/)?.[0] }
+  check(row.skeletonBeforeText === 3, `streaming: skeleton bars ${row.skeletonBeforeText}`)
+  check(firstText.length > 0 && firstText !== 'Mitochondria produce ATP through respiration (Doc 1, page 1).', `streaming: text did not arrive progressively (${firstText})`)
+  check(/Writing/.test(row.currentStage) && row.stopVisible === 1, `streaming: stage ${row.currentStage}, stop ${row.stopVisible}`)
+  check(row.complete.requestStream === true, 'streaming: stream not requested')
+  check(JSON.stringify(row.complete.announcements) === JSON.stringify(['Writing the answer…', 'Answer complete.']), `streaming: announcements ${JSON.stringify(row.complete.announcements)}`)
+  check(row.complete.receipt === 'OK', `streaming: receipt ${row.complete.receipt}`)
+
+  // Mid-stream error event: the Worker's copy verbatim, the partial text marked Stopped.
+  mode = 'error'
+  await ask('What do ribosomes do?')
+  const errorView = page.locator('#answer-area [data-interrupted="stream-error"]')
+  await errorView.waitFor({ timeout: 60_000 })
+  row.error = { text: (await errorView.innerText()).replace(/\s+/g, ' '), receipt: (await receiptStatus()).match(/OK|Interrupted \(partial answer\)/)?.[0] }
+  check(row.error.text.includes(COPY.sharedUn) && /stopped/i.test(row.error.text) && row.error.text.includes('Mitochondria produce') && row.error.text.includes('Try again'), `streaming: error view ${row.error.text}`)
+  check(row.error.receipt === 'Interrupted (partial answer)', `streaming: error receipt ${row.error.receipt}`)
+
+  // Stop: the partial answer is kept, as interrupted, across a reload.
+  mode = 'hang'
+  announcements.length = 0
+  await ask('What does the nucleus store?')
+  await page.getByText('produce').first().waitFor({ timeout: 60_000 })
+  await streamed.filter({ hasText: 'produce' }).waitFor({ timeout: 30_000 })
+  await page.getByRole('button', { name: 'Stop' }).click()
+  const stoppedView = page.locator('#answer-area [data-interrupted="stopped"]')
+  await stoppedView.waitFor({ timeout: 10_000 })
+  await page.waitForTimeout(300)
+  row.stop = {
+    text: (await stoppedView.innerText()).replace(/\s+/g, ' '),
+    focus: await page.evaluate(() => (document.activeElement === document.body ? 'BODY' : document.activeElement?.id || document.activeElement?.tagName)),
+    announcements: [...new Set(announcements.filter(Boolean))],
+    receipt: (await receiptStatus()).match(/OK|Interrupted \(partial answer\)/)?.[0],
+  }
+  check(/stopped/i.test(row.stop.text) && /Mitochondria produce/.test(row.stop.text), `streaming: stop view ${row.stop.text}`)
+  check(row.stop.focus !== 'BODY', 'streaming: focus dropped to <body> after Stop')
+  check(row.stop.announcements.at(-1) === 'Answer stopped.', `streaming: stop announcements ${JSON.stringify(row.stop.announcements)}`)
+  check(row.stop.receipt === 'Interrupted (partial answer)', `streaming: stop receipt ${row.stop.receipt}`)
+  await page.reload()
+  await page.locator('#answer-area [data-interrupted="stopped"]').waitFor({ timeout: 30_000 }).catch(() => {})
+  row.stopAfterReload = (await page.locator('#answer-area [data-interrupted="stopped"]').innerText().catch(() => '')).replace(/\s+/g, ' ')
+  check(/stopped/i.test(row.stopAfterReload) && /Mitochondria produce/.test(row.stopAfterReload), `streaming: stopped turn after reload ${row.stopAfterReload}`)
+
+  // A stream cut off with no event: the client's own copy.
+  await page.locator('li button', { hasText: 'cells.pdf' }).first().click()
+  mode = 'cut'
+  await ask('What makes proteins?')
+  const cutView = page.locator('#answer-area [data-interrupted="stream-error"]')
+  await cutView.waitFor({ timeout: 60_000 })
+  row.cut = (await cutView.innerText()).replace(/\s+/g, ' ')
+  check(row.cut.includes('The connection ended before the answer finished.'), `streaming: cut view ${row.cut}`)
+
+  // Reduced motion: the skeleton doesn't animate.
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  mode = 'hang'
+  await ask('Skeleton check?')
+  await page.locator('[data-answer-progress="asking"]').waitFor({ timeout: 60_000 })
+  row.reducedMotionAnimation = await page.locator('[data-answer-progress] [aria-hidden="true"] div').first().evaluate((el) => getComputedStyle(el).animationName)
+  check(row.reducedMotionAnimation === 'none', `streaming: skeleton animates under reduced motion (${row.reducedMotionAnimation})`)
+  await page.getByRole('button', { name: 'Stop' }).click()
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+
+  // A provider that can't stream: the note, and no stream requested.
+  await page.unroute(`${API}/answer`)
+  let grokBody = null
+  await page.route(`${API}/models`, (route) =>
+    route.request().method() === 'OPTIONS'
+      ? route.fulfill({ status: 204, headers: CORS })
+      : route.fulfill({ status: 200, headers: { ...CORS, 'Content-Type': 'application/json' }, body: JSON.stringify({ models: [{ id: 'grok-4', displayName: 'grok-4' }] }) }),
+  )
+  await page.route(`${API}/answer`, async (route) => {
+    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS })
+    grokBody = JSON.parse(route.request().postData())
+    await new Promise((r) => setTimeout(r, 1500))
+    const ids = [...new Set(grokBody.chunks.map((c) => c.documentId))]
+    return route.fulfill({ status: 200, headers: { ...CORS, 'Content-Type': 'application/json' }, body: JSON.stringify({ answer: 'Grok whole answer (Doc 1, page 1).', groundingWarning: false, docLabels: ids.map((d, i) => ({ label: i + 1, documentId: d })), provider: 'grok', model: 'grok-4' }) })
+  })
+  await page.getByLabel('Use your own API key').check()
+  await page.getByLabel('Provider', { exact: true }).selectOption('grok')
+  await page.getByLabel('Grok API key').fill('xai-fake-stream-0000000000')
+  await page.getByRole('button', { name: 'Find a model' }).click()
+  const useModelButton = page.getByRole('button', { name: 'Use this model' })
+  if (await useModelButton.waitFor({ timeout: 10_000 }).then(() => true, () => false)) await useModelButton.click()
+  else {
+    await page.getByText('Enter a model ID yourself').click()
+    await page.getByLabel('Model ID').fill('grok-4')
+    await page.getByRole('button', { name: 'Use this ID' }).click()
+  }
+  await ask('What powers the cell (grok)?')
+  const note = page.getByText("Streaming isn't available for this provider yet; your answer will appear when it is complete.")
+  row.nonStreaming = { noteShown: await note.waitFor({ timeout: 10_000 }).then(() => true, () => false) }
+  await page.getByText('Grok whole answer').first().waitFor({ timeout: 30_000 })
+  row.nonStreaming.stream = grokBody.stream ?? null
+  row.nonStreaming.noteIsError = await note.evaluate((el) => !!el.closest('[role="alert"]')).catch(() => false)
+  check(row.nonStreaming.noteShown && row.nonStreaming.stream === null && !row.nonStreaming.noteIsError, `streaming: non-streaming provider ${JSON.stringify(row.nonStreaming)}`)
+
+  results.push(row)
+  await context.close()
+  server.close()
 }
 
 // v1.2 branching: regenerate an answer (sibling, same question), step between versions with

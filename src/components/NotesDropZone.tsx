@@ -102,7 +102,7 @@ export function NotesDropZone() {
             // diagrams in typed PDFs, not handwriting, so reusing it here would be a
             // category error.
             const embed = () => embedDocument([{ page: 1, text: result.text, hasImage: false }], {
-              onModelProgress: (msg) => setModelProgress(msg.percent),
+              onModelProgress: (msg) => setModelProgress(msg.percent, msg.loaded, msg.total),
               onBackend: (msg) => setBackend(msg.backend, msg.detail),
               onModelReady: () => {},
               onChunked: () => {},

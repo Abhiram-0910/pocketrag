@@ -29,6 +29,7 @@ const STATUS_STYLE: Record<EgressRecord['outcome'], { icon: Icon; className: str
   'http-error': { icon: XCircle, className: 'text-red-700 dark:text-red-400' },
   'network-error': { icon: XCircle, className: 'text-red-700 dark:text-red-400' },
   aborted: { icon: Warning, className: 'text-amber-700 dark:text-amber-400' },
+  interrupted: { icon: Warning, className: 'text-amber-700 dark:text-amber-400' },
 }
 
 const PURPOSE_LABEL: Record<EgressPurpose, string> = {

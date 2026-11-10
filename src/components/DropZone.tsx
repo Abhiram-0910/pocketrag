@@ -34,7 +34,7 @@ export function DropZone() {
           .then((pages) => {
             updateDocument(id, { status: 'loading-model' })
             const embed = () => embedDocument(pages, {
-              onModelProgress: (msg) => setModelProgress(msg.percent),
+              onModelProgress: (msg) => setModelProgress(msg.percent, msg.loaded, msg.total),
               onBackend: (msg) => setBackend(msg.backend, msg.detail),
               onModelReady: () => {},
               onChunked: () => {},

@@ -37,7 +37,8 @@ export type WorkerRequest =
 
 export type WorkerResponse =
   | { type: 'backend'; backend: BackendState; detail: string }
-  | { type: 'model-progress'; percent: number }
+  // loaded/total: bytes across the model's files (v1.3, for "61 MB of 135 MB").
+  | { type: 'model-progress'; percent: number; loaded?: number; total?: number }
   | { type: 'model-ready' }
   | { type: 'chunked'; chunkCount: number }
   | { type: 'embed-progress'; done: number; total: number }

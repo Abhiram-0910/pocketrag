@@ -31,7 +31,8 @@ export function forwardedHost(record: Pick<EgressRecord, 'upstream'>): string | 
 export function statusLabel(record: Pick<EgressRecord, 'outcome' | 'httpStatus'>): string {
   switch (record.outcome) {
     case 'in-flight':
-      return 'Sending…'
+      // A streamed answer that has started arriving.
+      return record.httpStatus === null ? 'Sending…' : 'Receiving…'
     case 'ok':
       return 'OK'
     case 'http-error':
@@ -40,6 +41,8 @@ export function statusLabel(record: Pick<EgressRecord, 'outcome' | 'httpStatus'>
       return 'No response (network)'
     case 'aborted':
       return 'Stopped (timed out or cancelled)'
+    case 'interrupted':
+      return 'Interrupted (partial answer)'
   }
 }
 

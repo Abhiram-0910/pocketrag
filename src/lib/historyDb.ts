@@ -75,6 +75,11 @@ export interface TurnRecord {
   // notes") or a worked example it follows with new numbers ('method', sent with
   // followMethod). Absent on turns saved before v1.1, and null when neither matched.
   sourceMatch?: SourceMatch | null
+  // v1.3: why an 'interrupted' turn ended — the user's Stop, or the stream failing part-way
+  // (`failure` then holds the Worker's copy). Absent when the tab closed mid-request (the
+  // pre-v1.3 meaning, set by sweepInterruptedTurns). A partial answer's text is kept in
+  // `answer`, but an interrupted turn is never sent upstream as history.
+  interruption?: 'stopped' | 'stream-error'
 }
 
 interface HistoryDB extends DBSchema {

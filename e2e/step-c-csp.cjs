@@ -105,6 +105,7 @@ async function main() {
   const pageErrors = []
   const ortUrls = new Set()
   const answerBodies = []
+  let streamedAnswers = 0
   // Every answer carries the Search Suggestions widget (→ grounded) unless a flow turns it off.
   let groundedAnswers = true
   // Cross-origin requests as the browser made them, and the ledger rows the app rendered.
@@ -143,6 +144,22 @@ async function main() {
       const body = JSON.parse(req.postData() || '{}')
       answerBodies.push({ phase, hasImage: Boolean(body.image), history: body.history || [] })
       const ids = [...new Set((body.chunks || []).map((c) => c.documentId))]
+      // v1.3: a streamed request gets the Worker's event stream (one response body, so it
+      // reconciles as one request and one Receipt row, settled 'ok' at `done`). Simulated
+      // grounded answers stay JSON: the real Worker never streams a web-search answer.
+      if (body.stream && !groundedAnswers) {
+        streamedAnswers++
+        const ev = (event, data) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
+        return route.fulfill({
+          status: 200,
+          headers: { ...CORS, 'Content-Type': 'text/event-stream; charset=utf-8' },
+          body:
+            ev('meta', { provider: 'gemini', model: 'gemini-3.5-flash-lite' }) +
+            ev('delta', { t: `Mocked answer #${answerBodies.length} ` }) +
+            ev('delta', { t: `for ${phase} (Doc 1, page 1).` }) +
+            ev('done', { groundingWarning: false, docLabels: ids.map((d, i) => ({ label: i + 1, documentId: d })) }),
+        })
+      }
       return json({
         answer: `Mocked answer #${answerBodies.length} for ${phase} (Doc 1, page 1).`,
         groundingWarning: false,
@@ -395,6 +412,7 @@ async function main() {
   }
   const purposeMismatch = Object.values(purposeCounts).some(({ requests, rows }) => requests === 0 || requests !== rows)
   const reconciliation = {
+    streamedAnswers,
     purposeCounts,
     observedRequests: heads.length - preflights.length,
     redirectChains,
@@ -421,6 +439,8 @@ async function main() {
   for (const r of unexpected) byDirective[r.directive || 'unparsed'] = (byDirective[r.directive || 'unparsed'] || 0) + 1
   const failed = flows.filter((f) => !f.ok)
   console.log(JSON.stringify({ browser: BROWSER, webgpu: WEBGPU, app: APP, flows, ortFromJsDelivr: [...ortUrls], allowlistedWidgetStyle: allowlisted.length, violationsByDirective: byDirective, unexpected, cspBlocked, pageErrors, reconciliation }, null, 2))
+  // v1.3: the shared-tier answers above must have been streamed.
+  if (streamedAnswers === 0) failed.push({ flow: 'streaming', ok: false, error: 'no streamed answer request seen' })
   if (failed.length || unexpected.length || cspBlocked.length || unmatched.length || unpairedPreflights.length || purposeMismatch) process.exit(1)
 }
 

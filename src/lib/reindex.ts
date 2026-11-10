@@ -25,7 +25,7 @@ export function reindexDocument(doc: DocumentRecord): Promise<void> {
           embedTexts(
             chunks.map((chunk) => chunk.text),
             {
-              onModelProgress: (msg) => setModelProgress(msg.percent),
+              onModelProgress: (msg) => setModelProgress(msg.percent, msg.loaded, msg.total),
               onBackend: (msg) => setBackend(msg.backend, msg.detail),
               onModelReady: () => {},
               onEmbedProgress: (msg) => updateDocument(doc.id, { embedProgress: { done: msg.done, total: msg.total } }),

@@ -6,6 +6,7 @@ import { forgetSessionFile } from '../lib/sessionFiles'
 import { useDocumentStore, type DocEntry } from '../store/documentStore'
 import { classifyWebgpuFallback } from '../lib/errorTaxonomy'
 import { StatusBanner } from './ui/StatusBanner'
+import { formatBytes } from '../lib/receipts'
 import { Button } from './ui/Button'
 
 const BACKEND_LABEL: Record<string, string> = {
@@ -53,6 +54,7 @@ export function DocumentList({ source }: DocumentListProps) {
   const backend = useDocumentStore((s) => s.backend)
   const backendDetail = useDocumentStore((s) => s.backendDetail)
   const modelProgress = useDocumentStore((s) => s.modelProgress)
+  const modelBytes = useDocumentStore((s) => s.modelBytes)
   // The embedding worker runs one document at a time (a single message handler), so a
   // retry waits until nothing else is being processed.
   const processing = allDocuments.some((d) => d.status !== 'ready' && d.status !== 'error')
@@ -119,8 +121,15 @@ export function DocumentList({ source }: DocumentListProps) {
           <StatusBanner variant="info">{classifyWebgpuFallback(backend, backendDetail ?? '').message}</StatusBanner>
         )}
         {loadingModel && (
-          <span className="text-slate-500 motion-safe:animate-pulse dark:text-slate-400">
-            Downloading model{modelProgress != null ? ` — ${modelProgress}%` : '…'}
+          <span className="flex min-w-0 flex-1 flex-col gap-1 text-slate-600 dark:text-slate-400">
+            <span>
+              {modelBytes
+                ? `Downloading the search model (first time only) — ${formatBytes(modelBytes.loaded)} of ${formatBytes(modelBytes.total)} (${modelProgress ?? 0}%)`
+                : `Downloading the search model (first time only)${modelProgress != null ? ` — ${modelProgress}%` : '…'}`}
+            </span>
+            {modelProgress != null && (
+              <progress max={100} value={modelProgress} aria-label="Search model download" className="h-1.5 w-full max-w-sm" />
+            )}
           </span>
         )}
       </div>
@@ -148,6 +157,14 @@ export function DocumentList({ source }: DocumentListProps) {
                   >
                     {statusText(doc)}
                   </p>
+                  {doc.embedProgress && (
+                    <progress
+                      max={doc.embedProgress.total}
+                      value={doc.embedProgress.done}
+                      aria-label={`Indexing ${doc.fileName}`}
+                      className="mt-1 h-1.5 w-full"
+                    />
+                  )}
                 </button>
                 {/* A failed file was never persisted, so removing it just clears the in-memory
                     notice — retry is re-dropping the file (see ARCHITECTURE.md / TODO.md). */}

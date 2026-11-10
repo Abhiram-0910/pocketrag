@@ -70,6 +70,9 @@ export type TurnOutcome =
     }
   | { status: 'failed'; failure: TurnFailure }
   | { status: 'timed-out' }
+  // v1.3: a streamed answer stopped part-way (or before it began). The partial text is
+  // stored as it was, marked interrupted — never as complete.
+  | { status: 'interrupted'; answer: string | null; interruption: 'stopped' | 'stream-error'; failure: TurnFailure | null }
 
 // What this session keeps of a grounded result, for display only. Never written to
 // IndexedDB (the Gemini terms — SECURITY_REVIEW.md §1.1). conversationId lets deleting a
@@ -243,7 +246,8 @@ export const useChatStore = create<ChatState>((set, get) => {
       const turn = findTurn(turnId)
       if (!turn) return null
       inflight.set(turnId, turn)
-      await updateTurn(turnId, (t) => ({ ...t, ...key, status: 'pending', failure: null, completedAt: null }))
+      // A partial answer from an interrupted stream goes; the retry writes a new one.
+      await updateTurn(turnId, (t) => ({ ...t, ...key, status: 'pending', failure: null, completedAt: null, answer: null, interruption: undefined }))
       // Retry is only offered on the open conversation's leaf, so its ancestors are in `turns`.
       return contextFor(turnId, pathTo(get().turns, turn.parentId))
     },
@@ -279,6 +283,15 @@ export const useChatStore = create<ChatState>((set, get) => {
             return { ...t, status: 'failed', failure: outcome.failure, completedAt }
           case 'timed-out':
             return { ...t, status: 'timed-out', completedAt }
+          case 'interrupted':
+            return {
+              ...t,
+              status: 'interrupted',
+              answer: outcome.answer,
+              interruption: outcome.interruption,
+              failure: outcome.failure,
+              completedAt,
+            }
         }
       })
       inflight.delete(turnId)

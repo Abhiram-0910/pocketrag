@@ -40,7 +40,7 @@ env.fetch = downloadFetch(RERANK_MODEL.id, (record) => post({ type: 'egress', re
 
 function onModelProgress(info: ProgressInfo) {
   if (info.status === 'progress_total') {
-    post({ type: 'model-progress', percent: Math.round(info.progress) })
+    post({ type: 'model-progress', percent: Math.round(info.progress), loaded: info.loaded, total: info.total })
   }
 }
 

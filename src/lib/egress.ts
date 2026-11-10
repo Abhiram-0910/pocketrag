@@ -42,7 +42,9 @@ export interface EgressRecord {
   startedAt: number
   durationMs: number | null
   httpStatus: number | null
-  outcome: 'in-flight' | 'ok' | 'http-error' | 'network-error' | 'aborted'
+  // 'interrupted' (v1.3): a streamed answer that started but didn't finish — stopped by the
+  // user, or the stream failed or was cut off. Never 'ok' for a partial answer.
+  outcome: 'in-flight' | 'ok' | 'http-error' | 'network-error' | 'aborted' | 'interrupted'
 }
 
 // Every top-level request-body key any outbound call sends, and what kind of data it
@@ -62,6 +64,8 @@ const KEY_CATEGORIES: Record<string, readonly PayloadCategory[]> = {
   model: [],
   enableWebSearch: [],
   followMethod: [],
+  // v1.3: ask for a streamed answer — a setting, not user data.
+  stream: [],
   mimeType: [],
 }
 
@@ -236,6 +240,46 @@ export function egressFetch(
     new TextEncoder().encode(body).byteLength,
   )
   return send(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal: init.signal }, record, onRecord)
+}
+
+/**
+ * v1.3: an answer request that may come back as a stream. Like egressFetch, but a 2xx
+ * text/event-stream response stays 'in-flight' (with its status) until the caller knows
+ * how it ended and calls `settle('ok' | 'interrupted')`. Any other response settles at
+ * once, exactly as egressFetch does. `settle` is idempotent.
+ */
+export async function egressStream(
+  url: string,
+  init: { json: Record<string, unknown>; signal?: AbortSignal },
+  meta: { purpose: 'answer'; upstream: Provider },
+  onRecord: (record: EgressRecord) => void = recordEgress,
+): Promise<{ response: Response; settle: (outcome: 'ok' | 'interrupted') => void }> {
+  const body = JSON.stringify(init.json)
+  const record = newRecord(url, meta.purpose, 'worker', meta.upstream, 'POST', describePayload(init.json), new TextEncoder().encode(body).byteLength)
+  const started = performance.now()
+  let latest = record
+  // send() reports 'ok' when the headers arrive; hold it as in-flight until we know whether
+  // this is a stream (settled later) or a plain response (released right away).
+  const response = await send(
+    url,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal: init.signal },
+    record,
+    (r) => {
+      latest = r
+      onRecord(r.outcome === 'ok' ? { ...r, outcome: 'in-flight' } : r)
+    },
+  )
+  const streaming = response.ok && (response.headers.get('Content-Type') ?? '').includes('text/event-stream')
+  if (!streaming && latest.outcome === 'ok') onRecord(latest)
+  let settled = !streaming
+  return {
+    response,
+    settle: (outcome) => {
+      if (settled) return
+      settled = true
+      onRecord({ ...latest, outcome, durationMs: Math.round(performance.now() - started) })
+    },
+  }
 }
 
 /**
