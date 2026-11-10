@@ -15,7 +15,7 @@ Keep this updated as the project evolves.
 | Font | Inter, self-hosted (`public/fonts/`) | Not Google Fonts CDN — avoids a third-party request on every load, consistent with this app's local-first posture |
 | State | Zustand | Minimal cross-component state without Redux boilerplate |
 | PDF parsing | pdf.js | Runs entirely client-side via WASM, no server upload |
-| Embeddings | `@huggingface/transformers` (Xenova/all-MiniLM-L6-v2, q8) | Runs in-browser via WebGPU/WASM in a Worker, keeps documents local. Not `@xenova/transformers` — that package is deprecated and pulled in a critical protobufjs RCE via its bundled onnxruntime-web; `@huggingface/transformers` is the maintained successor, same API, same model IDs |
+| Embeddings | `@huggingface/transformers` (Xenova/multilingual-e5-small, q8, pinned commit — since v1.1; was all-MiniLM-L6-v2) | Runs in-browser via WebGPU/WASM in a Worker, keeps documents local. Not `@xenova/transformers` — that package is deprecated and pulled in a critical protobufjs RCE via its bundled onnxruntime-web; `@huggingface/transformers` is the maintained successor, same API, same model IDs |
 | Storage | IndexedDB (via `idb`) | Persistent client-side storage for documents/chunks/vectors |
 | Answer composition | Cloudflare Worker (TS) + Gemini 3.5 Flash-Lite | Only network hop; sees retrieved snippets + question, never the source file. Model pinned to 3.5 — `gemini-2.5-flash-lite` (originally specified) 404s as "no longer available to new users" for this project's API key |
 
@@ -42,6 +42,7 @@ pocketrag/
 │                              # ortPin.ts (pinned ONNX Runtime version + jsDelivr path)
 ├── public/                   # favicon, self-hosted fonts, _headers (CSP + security headers)
 ├── e2e/                      # Manual Playwright checks (global install, not a dependency)
+├── eval/                     # Retrieval eval (npm run eval): fixtures, generated PDFs, results
 ├── worker/                   # Cloudflare Worker — separate npm project, separate deploy
 │   └── src/                  # index.ts, validate.ts, prompt.ts, labels.ts, grounding.ts,
 │                              # rateLimit.ts, region.ts, breaker.ts, cors.ts, discord.ts,
@@ -87,7 +88,12 @@ pocketrag/
 | `src/components/LandingPage.tsx` | First-visit-only landing screen, gated by `landingVisitSetting.ts`'s localStorage flag |
 | `src/components/ui/Button.tsx`, `ui/StatusBanner.tsx` | Shared primitives (Session 14 design system) — every action button and every error/warning/info banner in the app routes through these two |
 | `src/lib/bm25.ts` | BM25 keyword scoring, fused with cosine similarity via Reciprocal Rank Fusion in `retrieval.ts`'s `hybridRankChunks()` |
-| `src/lib/reranker.ts` | Client-side cross-encoder reranking (`Xenova/ms-marco-MiniLM-L-2-v2`) over the hybrid-search pool, with graceful fallback to hybrid-only results if reranking fails |
+| `src/lib/reranker.ts` | Client-side cross-encoder reranking (`Xenova/ms-marco-MiniLM-L-2-v2`) over the hybrid-search pool, with graceful fallback to hybrid-only results if reranking fails. English questions only since v1.1 (`shouldRerank`) |
+| `src/lib/searchModels.ts` | v1.1: both search models with pinned Hugging Face revisions, the e5 query/passage prefixes, `EMBEDDING_MODEL_KEY` (stamped on each document), `shouldRerank()` (English-only reranking) |
+| `src/lib/reindex.ts` | v1.1: re-embeds documents saved under an older embedding model from their stored passage text ("Updating search index"), one at a time, in one transaction per document; never writes back a document deleted meanwhile |
+| `src/lib/sourceMatch.ts` | v1.1 worked-example fidelity: `findSourceMatch()` (verbatim / method / none, deterministic, thresholds from eval/), `expandToPage()` (display), `exampleForRequest()` (the widened example sent with `followMethod`) |
+| `src/components/SourceExample.tsx` | "From your notes (page N)" / "Method from your notes" block, quoted from IndexedDB; the method block carries the arithmetic warning |
+| `eval/` | Retrieval eval (`npm run eval`): fixture source (`fixtures.ts`), generated PDFs (`fixtures/`, committed), the harness (`retrieval.eval.ts`), results (`results/`). Not part of `npm run test` |
 | `src/lib/conversation.ts` | `buildRetrievalQuery()` — blends the immediately preceding question into retrieval only, never sent to the Worker as-is (see Key Architectural Decisions). Also the conversation-tree ops over `historyDb.ts` turns: `pathTo`, `childrenOf`, `latestLeafUnder`, `historyForRequest` (answered, non-grounded turns only), `previousQuestionFor`, `docLabelsFor` |
 | `src/lib/answerRequest.ts` | `attemptAnswer()` — one answer attempt wrapped in an `AbortController` ~60s timeout, discriminated `{outcome}` return instead of throwing |
 | `src/lib/errorTaxonomy.ts` | Maps every failure (rate-limit, provider-unavailable, network, corrupt-pdf, webgpu-unsupported, unknown) to a severity + plain-language message |
@@ -722,6 +728,70 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
   (only the browser knows the user's zone) — from numeric fields, never from `code`; the
   'exhausted' kind replaces the Worker's message. OCR shows absolute times in the
   document's status and never offers an own key.
+
+- **v1.1 — multilingual search and worked-example fidelity (Phase 7a).**
+  *Measured first.* `eval/` renders own-content fixtures to PDFs with Chromium (committed,
+  so a Chromium update can't change extraction), extracts them with pdf.js the way the app
+  does, and runs the app's chunker/hybrid search/reranker with the real q8 models in Node
+  (onnxruntime-node; same files as the browser). Correct passages are labelled by
+  character 4-gram overlap restricted to the chunk's own page. Baseline (MiniLM-L6, rerank
+  all) vs shipped, this-document recall@1: en 91.2 → 100, hi 41.2 → 64.7, es 94.4 → 100;
+  all-documents: en 100 → 100, hi 41.2 → 47.1, es 94.4 → 100; recall@3 100 everywhere
+  after. Cross-lingual (English question, Hindi/Spanish notes) all-documents recall@5 fell
+  60 → 20 (n=5, not gated). Full matrix (3 embedders × 3 extractions × rerank on/off/policy
+  × 2 scopes): `eval/results/after.json`; baseline on the pre-v1.1 code: `baseline.json`.
+  *Embedder.* `Xenova/multilingual-e5-small` (135.4 MB first download: 118.3 MB model +
+  17.1 MB tokenizer; Node cached load ~1.3 s vs 0.1 s; Node RSS +251 MB vs +41 MB) beat
+  `paraphrase-multilingual-MiniLM-L12-v2` (same size, English 94.1 vs 100, RSS +520 MB).
+  Adoption rule met: English didn't regress, Hindi/Spanish rose, download ≈ 150 MB with the
+  reranker. e5 needs `query: ` / `passage: ` prefixes (searchModels.ts). The chunker's
+  per-atom token counts overcount slightly with e5's SentencePiece tokenizer (chunks a bit
+  under 200 real tokens; e5's limit is 512) — measured as-is.
+  *BM25 bug fixed.* `\w` is ASCII-only: Hindi had no BM25 terms at all and Spanish words
+  split at accents; worse, every zero-score chunk still got a BM25 rank in pool order, which
+  RRF turned into positional noise as large as the cosine gaps. Tokens are now
+  `[\p{L}\p{N}\p{M}]+` (marks keep Devanagari vowel signs inside words) and a chunk with no
+  query term gets no BM25 term in the fusion.
+  *Reranker.* The MS MARCO cross-encoder is English-only: with e5 on clean Hindi text it cut
+  recall@1 from 100 to 23.5. A multilingual cross-encoder (smallest found ~118 MB) would
+  break the download budget, so `shouldRerank()` skips non-English questions (any non-Latin
+  letter, or no common English word). Its ceiling is in the ponytail comment.
+  *Never mismatched vectors.* Each document stores `embeddingModel`; documents without the
+  current key restore as `reindexing` and are re-embedded from stored chunk text (the PDF
+  isn't kept, so chunk boundaries stay as first cut). QueryPanel only scores chunks of
+  `ready` documents. The embedding client now queues requests: the worker has one
+  `onmessage`, and before v1.1 a question asked during an upload swapped it and the
+  upload's messages were lost.
+  *Revision pins.* Both models load from fixed commits (`/resolve/<sha>/…`, same hosts, so
+  CSP and `allowedDestinations` are unchanged; Receipts label the downloads as before). The
+  embedder is no longer built with `pipeline('feature-extraction')`: in transformers.js
+  4.2.0, `pipeline()` with a progress callback looks up file sizes without the revision, so
+  every load sent a ranged GET to `resolve/main/…onnx` that the cache never answered (step-c's
+  "model cache kept" flow caught it after a reload). `AutoModel.from_pretrained` forwards the
+  revision; `embedText` tokenizes, runs, mean-pools and normalizes as the pipeline did
+  (max abs difference 0 against the pipeline on English/Hindi/Spanish text).
+  *Worked examples.* `sourceMatch.ts` scores the top 3 passages: IDF-weighted share of the
+  question's words in the passage, share of its numbers, and cosine (a floor only — e5
+  cosines sit in 0.7-0.92). Verbatim ≥ 0.95 words + all numbers; method ≥ 0.80 words + some
+  numbers differ; the first match in rank order wins. On the fixtures (real pdf.js text):
+  exact 5/6 verbatim on the right passage, changed numbers 6/8 (doc) and 7/8 (all) method on
+  the right example, hard negatives 2/2 method on the right example, 0 false matches over
+  57 paraphrase/near/cross questions; the misses are the two Hindi questions (garbled
+  extraction; on clean text both match) and one changed-number question at 0.78. Method
+  mode sends the matched chunk joined with the next on its page (≤ 2,000 characters, the
+  Worker's cap) as the first passage with `followMethod: true`; the Worker prompt adds the
+  same-method rules and keeps the refusal and citation rules and the grounding check.
+  *Extraction findings (not changed).* pdf.js drops Devanagari glyphs that Chromium-made
+  PDFs only map through marked-content ActualText (Poppler reads them); stacked fractions
+  lose the bar and superscripts detach. pdf.js's own join (no separator + space at EOL)
+  fixes split `fi` ligatures ("pro fi t") but measured no retrieval gain, so `pdf.ts` is
+  unchanged (TODO).
+  *Release-check finding.* The Worker read only `parts[0].text` of a Gemini response; the
+  first live method answer (several parts) came back cut after the restated question.
+  `generateContent` now joins every non-thought text part (`02d949e`), which also covers
+  long `/ocr` transcriptions. The remaining unpinned request: `AutoTokenizer.from_pretrained`
+  probes `resolve/main/tokenizer_config.json` (1-byte range GET, `get_tokenizer_files()` takes
+  no options in 4.2.0); every file actually loaded comes from the pinned commit (TODO).
 
 ---
 

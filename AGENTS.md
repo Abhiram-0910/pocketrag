@@ -6,7 +6,7 @@ Claude reads this at the START of every new session to understand what happened 
 ---
 
 ## Project State
-**Last updated:** 2026-08-26
+**Last updated:** 2026-11-10 (v1.1.0, Session 43; the summary below predates it — see Session 43)
 **Current branch:** master (through Session 28's BYOK-Gemini model-default fix —
 see below)
 **Remote:** `github.com/Abhiram-0910/pocketrag` (private) — pushed through this
@@ -167,6 +167,75 @@ provider error text; the UI shows it verbatim with a per-code action (Step B). 6
   installed wrangler 4.114.0: without it, wrangler defaults to today's date, which its
   bundled workerd doesn't support, and the server never starts (step-c then fails every
   flow with `ERR_CONNECTION_REFUSED`).
+
+## Standing Rules — search models and worked examples (v1.1, Phase 7a)
+
+- **Model ids and revisions live only in `src/lib/searchModels.ts`** (pinned 40-hex commits,
+  tested). Changing the embedder changes `EMBEDDING_MODEL_KEY`, which re-indexes every stored
+  document on the next load; run `npm run eval` first and record before/after per language.
+- **Never load a pinned model with `pipeline()` and a progress callback** (transformers.js
+  4.2.0 then fetches file sizes from `resolve/main/`). Use `*.from_pretrained` with
+  `revision`; step-c's "model cache kept" flow is what catches a regression.
+- **Never compare vectors across models.** Query only `ready` documents' chunks; a document
+  without the current `embeddingModel` must go through `reindex.ts` first.
+- **Worked-example thresholds come from the eval** (`sourceMatch.ts` comments cite the
+  numbers). Re-run `npm run eval` and check `after.json → sourceMatch` before moving them.
+  The verbatim block never claims anything about new numbers; the method block always
+  carries "Check the arithmetic: the model can make calculation mistakes."
+
+## Standing release gates (from Phase 6-E, Session 41 — later phases reference this)
+
+A production deploy is authorized only with these gates; any failed gate means stop and
+roll back. Record every number in the session entry.
+
+**Before deploying**
+1. **Typecheck** with the real binaries and their direct exit codes (not through rtk or a
+   pipe that hides the status): `node_modules/.bin/tsc -b; echo $?` at the root and
+   `cd worker && node_modules/.bin/tsc --noEmit; echo $?`. Both 0.
+2. **Lint**: `node_modules/.bin/oxlint; echo $?` at the root (covers `worker/`): 0 warnings,
+   0 errors, exit 0. (`npm run lint` under rtk can exit 1 on a clean run — rtk fails to
+   parse oxlint's output; trust the binary.)
+3. **Suites with counts**: `npx vitest run` (frontend) and `cd worker && npx vitest run`,
+   reported as passed/total and before → after.
+4. **Build**: `npm run build` (tsc -b, vite build, `scripts/check-bundle-size.mjs` size guard).
+5. **Bundle hashes before/after**: the `dist/assets/index-*.js` and `index-*.css` names.
+   The CSS hash changes only when app styles change.
+6. **Headers**: `git diff 6158529 -- public/_headers` is empty, unless a CSP change is
+   justified in the report (with the measurement, per the Step C rule).
+7. **step-b, Chromium** against `vite preview`: exit 0, scenario count, `failures: []`.
+8. **step-c, Chromium and Firefox** against
+   `npx wrangler pages dev dist --port 8788 --compatibility-date=2026-07-29`: exit 0, every
+   flow passing, 0 unmatched requests, 0 unexpected CSP violations.
+
+**Deploying**
+9. **Worker first, and only if `worker/` changed**: `cd worker && npx wrangler deploy`.
+   Record the previous and new version ids. Worker post-deploy gates before Pages:
+   preflight 200, invalid body 400, BYOK `/models` with a fake key → 502 `key_rejected`.
+10. **Pages**: `npx wrangler pages deploy dist --project-name=pocketrag --branch=main`;
+    confirm it landed as Production (`wrangler pages deployment list`); record the
+    previous and new deployment ids.
+
+**After deploying (production)**
+11. Served CSP byte-identical to `_headers` (446 B today); X-Frame-Options,
+    Referrer-Policy, Permissions-Policy, COOP and nosniff present; no Set-Cookie; index
+    serves the new JS hash.
+12. Smoke (Chromium, `/answer` and `/ocr` aborted): 0 Worker POSTs, a PDF ingests, 0 CSP
+    console events/reports, 0 page errors, no horizontal overflow at 360 and 1280.
+13. **At most one shared `/answer` call per release check**, made deliberately: 200, the
+    echoed provider/model, a cited answer.
+
+**Rollback commands** (fill in the previous ids in the session entry)
+```bash
+cd worker && npx wrangler rollback <previous-worker-version-id> --message "<why>"
+npx wrangler whoami >/dev/null   # refreshes the OAuth token
+TOKEN=$(grep -oP '^oauth_token = "\K[^"]+' ~/.config/.wrangler/config/default.toml)
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+  https://api.cloudflare.com/client/v4/accounts/da55acd99cee5a43df7d397dd80af4e3/pages/projects/pocketrag/deployments/<previous-pages-deployment-id>/rollback
+```
+
+**Commits**: never a `Co-Authored-By` or any AI-attribution trailer. Two commits per
+change: the code commit(s) first, then a separate docs commit that records the deploy ids
+and gate results once they are known.
 
 ---
 
@@ -4201,6 +4270,88 @@ re-uploaded after a 204 test post. The URL was never committed. TODO's rotation 
 marked done; the positive check stays open (no real alert from the Worker's own path seen
 since). Dated update lines added after the history-scan records in SECURITY_REVIEW.md and
 Session 41 above; the scan text itself is unchanged.
+
+### Session 43 — 2026-11-09 / 2026-11-10 (Claude Code)
+**Goal:** Phase 7a (v1.1): answers from the user's documents in any subject and language —
+measure first, multilingual retrieval, worked-example fidelity, deploy, tag `v1.1.0`. Wrote
+the "Standing release gates" section above first (from Session 41's E).
+
+**A. Eval harness** (`eval/`, `npm run eval`): own-content fixtures rendered to PDFs with
+Chromium (committed; Hindi set in Noto Sans Devanagari, SIL OFL, font not committed),
+extracted with pdf.js as the app does; the app's chunker/BM25/RRF/reranker with real q8
+models in Node. 34 en / 17 hi / 18 es questions + 5 cross-lingual + 2 scanned-page.
+Baseline (pre-v1.1 code, worktree at `66200f3`) vs shipped, recall@1/3/5 · MRR:
+| | this document | all documents |
+|---|---|---|
+| en | 91.2/100/100 · .951 → 100/100/100 · 1.0 | 100/100/100 · 1.0 → same |
+| hi | 41.2/82.4/94.1 · .612 → 64.7/100/100 · .775 | 41.2/70.6/88.2 · .600 → 47.1/100/100 · .676 |
+| es | 94.4/100/100 · .972 → 100/100/100 · 1.0 | same → 100/100/100 · 1.0 |
+| cross (n=5) | 40/80/100 → 20/80/100 | 20/40/60 → 20/20/20 (worse) |
+| scanned | 0 → 0 (no text layer on the Documents tab) | |
+Clean-text track (fixture text, no pdf.js): Hindi 100/100/100 both scopes. Optional answer
+eval skipped: `/tmp/pocketrag-scratch/eval.key` absent (0 cost-bearing calls).
+
+**B. Model decision:** `Xenova/multilingual-e5-small@761b726d…` adopted — 135.4 MB first
+download (118.3 model + 17.1 tokenizer; +16.5 MB reranker on the first English question),
+Node cached load 1.3 s (MiniLM 0.1 s), Node RSS +251 MB (MiniLM +41). Rejected
+`paraphrase-multilingual-MiniLM-L12-v2` (same size, English lower, RSS +520 MB). BM25 bug
+fixed (ASCII `\w`; zero-score positional noise). Reranker English-only: **skipped for
+non-English questions** (it cut e5 Hindi recall@1 100 → 23.5 on clean text); a multilingual
+cross-encoder (~118 MB) would break the budget. Per-document `embeddingModel`, one-time
+re-index from stored text, ready-only querying, embedding-client queue. Revisions pinned
+(this replaces the roadmap item). CSP / `allowedDestinations` unchanged; Receipts list the
+downloads (12 huggingface.co rows in the production smoke).
+
+**C. Worked examples:** `sourceMatch.ts` (verbatim ≥ 0.95 IDF-weighted word cover + all
+numbers; method ≥ 0.80 + some numbers differ; cosine ≥ 0.8 floor; first match in rank order).
+Fixture results on real pdf.js text: exact 5/6 verbatim right passage, new numbers 6/8 (doc) /
+7/8 (all) method right example, hard negatives 2/2 method right example, 0 false matches in
+57 paraphrase/near/cross. Misses: Hindi (garbled extraction) and one 0.78 question.
+`followMethod` (Worker first, `4af619d`), example widened to ≤ 2,000 characters and sent
+first, prompt language rule, `SourceExample` blocks. C5 maths extraction: ² ½ survive;
+stacked fractions lose the bar ("r 100"), superscripts detach ("(1.08) 3"); `fi` ligatures
+split ("pro fi t"); pdf.js drops Devanagari glyphs mapped only via ActualText (Poppler reads
+them). No OCR work.
+
+**Commits:** `4af619d` Worker, `98f1b56` client + eval, `7c3f4ba` embedder via
+`from_pretrained` (step-c caught `pipeline()` fetching `resolve/main/…onnx` metadata after a
+reload), `02d949e` Worker joins all Gemini text parts (found by the release check). No
+attribution trailers.
+
+**Gates (final build):** tsc exit 0 both; oxlint 0 diagnostics / 147 files; frontend 385/385
+(was 362), Worker 543/543 (was 534); build + size guard pass; JS `index-B2Z5xX1f.js` →
+`index-lwyn6W2G.js`, CSS `index-B-3TNV76.css` → `index-B3t7OCzh.css` (new block styles);
+`git diff 6158529 -- public/_headers` empty; step-b Chromium exit 0, 32 scenarios (was 30),
+0 failures; step-c Chromium + Firefox exit 0, 15/15 flows, 28/28 matched, 0 unmatched, 0
+unexpected (Chromium's one allowlisted widget style), 0 model/runtime requests after reload.
+
+**Deployed:** Worker `dac8de34` → `1f23bd84` → **`54534f88-2aec-48a8-bae6-e4373bf338e0`**
+(gates each time: preflight 200, invalid 400, `followMethod` non-boolean 400, fake key 502
+`key_rejected`). Pages `57582fe2` → **`ca72b358-6ca3-4dec-9588-84859a2d5030`** (Production,
+source `7c3f4ba`): CSP byte-identical 446 B, five headers, no Set-Cookie, no HSTS. Smoke
+(`/answer` aborted): maths PDF → 7 chunks, "From your notes (page 1)" with Step 5 verbatim,
+no overflow at 360/1280, 0 CSP, 0 page errors. **ONE shared `/answer`** (changed-numbers
+question): 200, `gemini` / `gemini-3.5-flash-lite`, `followMethod: true`, example first (929
+chars, 2 passages), method block + arithmetic note, `groundingWarning: false` — but the text
+was cut after the first Gemini part → `02d949e` (unit-tested; not re-verified live, one call
+per check). Rollback:
+```bash
+cd worker && npx wrangler rollback dac8de34-dff6-494d-9fa0-bb951a3441cc --message "Revert v1.1 Worker"
+npx wrangler whoami >/dev/null
+TOKEN=$(grep -oP '^oauth_token = "\K[^"]+' ~/.config/.wrangler/config/default.toml)
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+  https://api.cloudflare.com/client/v4/accounts/da55acd99cee5a43df7d397dd80af4e3/pages/projects/pocketrag/deployments/57582fe2-209e-4db2-9d70-99d7015da444/rollback
+```
+(A Pages rollback leaves re-indexed documents stamped for e5; the v1.0.1 client ignores the
+field and would compare its MiniLM queries with e5 vectors — roll back the Worker only, or
+tell users to re-upload.)
+
+**Deviations:** extra fixtures added before any candidate run because the first baseline
+saturated (Spanish 100%); labelling fixed to page-local passages, baseline re-run on the old
+code. pdf.js extraction unchanged (native join measured no gain). One unpinned 1-byte probe
+remains (`tokenizer_config.json` on `main`, library limitation). Two post-plan code commits
+(`7c3f4ba`, `02d949e`). **Unverified:** a multi-part Gemini answer live; Safari; WebGPU;
+real-world (non-Chromium) Hindi/Telugu PDFs; in-browser memory (Node RSS only).
 
 ---
 

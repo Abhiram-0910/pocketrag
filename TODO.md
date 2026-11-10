@@ -7,6 +7,40 @@ Read this at the start of every session to know what to work on next.
 
 ## 🔴 Current Sprint
 
+### v1.1 — answers from your documents, any subject, any language (Phase 7a)
+- [x] Eval harness (`npm run eval`, `eval/`): generated own-content fixtures (maths
+      worked examples incl. new-number variants and hard negatives, finance table,
+      biology, Hindi, Spanish, one scanned page), recall@1/3/5 + MRR per language,
+      baseline recorded on the pre-v1.1 code. Optional answer eval skipped (no
+      `/tmp/pocketrag-scratch/eval.key`).
+- [x] Multilingual retrieval: `multilingual-e5-small` adopted on the numbers (ARCHITECTURE.md
+      v1.1); BM25 Unicode tokenizer + no BM25 credit for zero-score chunks; reranker
+      English-only (`shouldRerank`); per-document `embeddingModel` + one-time re-index;
+      revision pins; embedding-client request queue.
+- [x] Worked-example fidelity: verbatim "From your notes (page N)", `followMethod` method
+      mode (Worker first), example + arithmetic note beside the answer, answer language
+      follows the question.
+- [ ] **pdf.js loses Devanagari text** that Chromium-made PDFs map only via marked-content
+      ActualText (vowel signs, conjuncts; Poppler reads the same file). Options: read
+      ActualText from the operator list, an upstream pdf.js fix, or point users to Notes
+      OCR. Hindi recall@1 is 64.7% on our PDF vs 100% on clean text.
+- [ ] pdf.js's own text join (no separator, space at EOL) fixes split `fi` ligatures
+      ("pro fi t") and in-word spaces; measured no retrieval gain on the fixtures, so not
+      shipped. Revisit with a fixture whose answer depends on a ligature word.
+- [ ] Cross-lingual retrieval (English question, Hindi/Spanish notes) fell in the
+      all-documents scope (recall@5 60 → 20, n=5). A multilingual reranker would help but
+      the smallest found is ~118 MB (over the download budget).
+- [ ] Re-indexing keeps old chunk boundaries (the PDF isn't stored). A re-upload re-chunks
+      with the e5 tokenizer.
+- [ ] transformers.js 4.2.0's `AutoTokenizer.from_pretrained` sends a 1-byte range probe to
+      `resolve/main/tokenizer_config.json` (its `get_tokenizer_files()` ignores the
+      revision). Bytes loaded are pinned. Fix: rewrite `/<model>/resolve/main/` to the pinned
+      commit in `egress.ts`'s `downloadFetch`, or upgrade transformers.js once fixed.
+- [ ] Live-verify a multi-part Gemini answer end to end (`02d949e` joins all text parts;
+      unit-tested only — the release check had used its one shared call).
+- [ ] Add more Hindi/Telugu fixtures from non-Chromium producers (Word, LibreOffice) to
+      see whether the ActualText loss is producer-specific.
+
 ### Worker hardening + error UX (Steps A-D)
 - [x] **Step A** — provider failure classification (`key_rejected` /
       `provider_rate_limited` / `request_rejected` / `provider_unavailable`), error
@@ -35,10 +69,10 @@ Read this at the start of every session to know what to work on next.
       source-map-js refresh; worker wrangler 4.151.1 (+ vitest >= 4.1.11). Compare
       `wrangler deploy --dry-run` output before/after; don't redeploy the Worker unless
       it changed.
-- [ ] Pin the Hugging Face model revisions to the observed commit SHAs instead of
-      `main`: `751bff37182d3f1213fa05d7196b954e230abad9` (Xenova/all-MiniLM-L6-v2,
-      embedder), `b84c4fa7efd7b4801931e75773c940f002a494f5`
-      (Xenova/ms-marco-MiniLM-L-2-v2, reranker).
+- [x] ~~Pin the Hugging Face model revisions~~ — done in v1.1 (Phase 7a): the new
+      embedder `Xenova/multilingual-e5-small@761b726dd34fb83930e26aab4e9ac3899aa1fa78` and
+      the reranker `Xenova/ms-marco-MiniLM-L-2-v2@b84c4fa7efd7b4801931e75773c940f002a494f5`
+      (`src/lib/searchModels.ts`, tested to be full SHAs).
 - [ ] Gemini search suggestions: resolve the ToS question before promoting web search
       (terms say not to modify Search Suggestions without written permission, and
       DOMPurify currently strips Google's leading `<style>`, so the widget renders

@@ -29,7 +29,8 @@ privacy model.
 ## What it does
 
 1. Drop in a PDF, or a photo/PDF of handwritten or scanned notes.
-2. Ask a question, in plain English.
+2. Ask a question, in English or another language (search is multilingual; measured on
+   English, Hindi and Spanish).
 3. Get a grounded answer, with citations back to the source document and page.
 
 PDF parsing, chunking, embedding, and retrieval on the Documents tab all run
@@ -41,11 +42,44 @@ your documents but see your IP address. Two disclosed exceptions to "nothing lea
 (above) and an opt-in toggle that sends a page image for diagram-aware questions,
 default off — see Features below for both.
 
+## How answers are grounded
+
+1. **Search runs in your browser.** Each passage is embedded with `multilingual-e5-small`
+   (about 100 languages). A question is matched by meaning (embeddings) and by words
+   (BM25, which reads any script), the two rankings are fused, and English questions are
+   reranked by a small cross-encoder. That reranker is English-only, and on Hindi it made
+   results worse, so other languages skip it.
+2. **Your own question, word for word.** If a top passage holds your question almost
+   exactly, numbers included, the app shows **"From your notes (page N)"** with the
+   source's own solution, quoted as written and expanded to the whole page so it isn't
+   cut off. No model is involved; the check is a fixed rule (word overlap weighted by
+   rarity, plus a meaning-similarity floor).
+3. **Same method, different numbers.** If the wording matches a worked example but your
+   numbers differ, the answer request tells the model to use that example's method, steps
+   and notation with your values, show every step, name the steps it followed, never switch
+   method, and say so if your notes have no such method. The example is shown next to the
+   answer with **"Check the arithmetic: the model can make calculation mistakes."** The
+   app never claims the new numbers are exact.
+4. **Everything else** is a normal grounded answer: only from the passages, cited as
+   `(Doc N, page M)`, with a warning when the citations don't check out. Answers come in
+   the question's language; quotes stay in the source's language.
+
+**Measured, with limits.** `npm run eval` runs the app's own chunker, search and models over
+generated fixture PDFs (our own text: maths worked examples, a finance table, biology
+notes, Hindi and Spanish notes, one scanned page) and reports retrieval recall@1/3/5 and
+MRR per language. Moving to v1.1 changed recall@1 for "this document" searches from 91.2% to
+100% in English (34 questions), 41.2% to 64.7% in Hindi (17) and 94.4% to 100% in Spanish
+(18); recall@3 is now 100% for all three. These are small, hand-written fixture sets and
+measure retrieval only, not answer quality. They are not an accuracy figure. English
+questions about Hindi or Spanish notes got worse (5 questions; see Known limitations).
+Results: `eval/results/`; method and caveats: `eval/retrieval.eval.ts`.
+
 ## Stack
 
 - **Frontend:** React + Vite + TypeScript + Tailwind CSS v4 + Zustand
-- **In-browser ML:** `@huggingface/transformers` (embeddings), `pdf.js` (PDF parsing),
-  a client-side BM25 + cosine hybrid retriever with cross-encoder reranking
+- **In-browser ML:** `@huggingface/transformers` (`multilingual-e5-small` embeddings,
+  an English cross-encoder reranker, both pinned to Hugging Face commits), `pdf.js` (PDF
+  parsing), a client-side BM25 + cosine hybrid retriever
 - **Storage:** IndexedDB (documents, chunks, embeddings, and chat history in plain
   text; web-grounded answers are never stored — never source bytes for OCR'd notes, see
   [ARCHITECTURE.md](./ARCHITECTURE.md))
@@ -230,13 +264,28 @@ so they fail the build's tests if they drift.
 - Grok and OpenRouter answers are experimental: their failure paths are
   live-verified, a real successful answer isn't yet.
 - Chat history is stored unencrypted in your browser.
+- **Hindi (Devanagari) PDFs can lose vowel signs.** pdf.js drops text that some PDFs only
+  carry as "actual text" (measured on Chromium-made PDFs; Poppler reads the same file
+  correctly). Search still works, but less well: Hindi recall@1 is 64.7% on our PDF and
+  100% on the same text extracted cleanly. For such files, the Notes tab (OCR) reads the
+  page image instead.
+- **Maths layout is flattened.** A stacked fraction loses its bar (r/100 extracts as
+  "r 100") and superscripts detach ("(1.08)³" extracts as "(1.08) 3" or "(1.08)3").
+  Characters like ² and ½ survive.
+- **Changed-number answers are calculated by the model.** The method comes from your
+  notes; the arithmetic can still be wrong. Check it.
+- **English questions about notes in another language** retrieve worse than questions in
+  the notes' own language (recall@1 20% in the all-documents scope, 5 questions).
+- **A scanned page in a PDF has no text** on the Documents tab. Use the Notes tab.
+- **First visit downloads ~135 MB** for the search model (it was ~24 MB before v1.1), plus
+  ~16 MB for the reranker on the first English question. Documents saved before v1.1 are
+  re-indexed once from their stored text ("Updating search index").
 
 ## Roadmap
 
 Deferred, not started:
 - Streaming answers
 - Toolchain bump (vitest, vite, wrangler)
-- Pin the Hugging Face model revisions to commit SHAs instead of `main`
 - Durable Objects for the rate-limit counters and the breaker (exact instead of
   best-effort)
 - Safari verification
