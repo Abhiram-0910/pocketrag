@@ -81,6 +81,10 @@ export interface AnswerRequestBody {
   // example in the passages (the first passage) with different numbers, so the prompt asks
   // for that example's exact method. Optional and additive: an older client never sends it.
   followMethod?: boolean
+  // v1.3: ask for a streamed answer (text/event-stream). Optional and additive: the Worker
+  // still answers with JSON when the provider can't stream (Grok, OpenRouter) or web search
+  // is on, and the client handles either.
+  stream?: boolean
 }
 
 export type ValidationResult =
@@ -97,6 +101,7 @@ export type ValidationResult =
       // the "shared-Gemini only" restriction, not just a runtime check.
       image: ImageAttachment | undefined
       followMethod: boolean
+      stream: boolean
       // Milestone 12: deliberately NOT present on the shared branch at all — grounding
       // is BYOK-gemini-only in this project's final scope (see AnswerRequestBody's
       // enableWebSearch doc comment for why), so there is nothing for a shared-tier
@@ -118,6 +123,7 @@ export type ValidationResult =
       // validateAnswerRequest below, not just documented.
       enableWebSearch: boolean
       followMethod: boolean
+      stream: boolean
     }
   | { ok: false; error: string }
 
@@ -241,7 +247,7 @@ export function validateAnswerRequest(body: unknown): ValidationResult {
   if (typeof body !== 'object' || body === null) {
     return { ok: false, error: 'Request body must be a JSON object.' }
   }
-  const { question, chunks, keySource, apiKey, provider, model, docLabels, history, image, enableWebSearch, followMethod } =
+  const { question, chunks, keySource, apiKey, provider, model, docLabels, history, image, enableWebSearch, followMethod, stream } =
     body as Record<string, unknown>
 
   if (typeof question !== 'string' || question.trim().length === 0) {
@@ -325,6 +331,11 @@ export function validateAnswerRequest(body: unknown): ValidationResult {
   }
   const resolvedFollowMethod = followMethod ?? false
 
+  if (stream !== undefined && typeof stream !== 'boolean') {
+    return { ok: false, error: 'stream must be a boolean.' }
+  }
+  const resolvedStream = stream ?? false
+
   const trimmedQuestion = question.trim()
   const resolvedKeySource = keySource ?? 'shared'
   if (resolvedKeySource !== 'shared' && resolvedKeySource !== 'own') {
@@ -356,6 +367,7 @@ export function validateAnswerRequest(body: unknown): ValidationResult {
       history: validatedHistory,
       image: validatedImage,
       followMethod: resolvedFollowMethod,
+      stream: resolvedStream,
     }
   }
 
@@ -391,6 +403,7 @@ export function validateAnswerRequest(body: unknown): ValidationResult {
     history: validatedHistory,
     enableWebSearch: resolvedEnableWebSearch,
     followMethod: resolvedFollowMethod,
+    stream: resolvedStream,
   }
 }
 

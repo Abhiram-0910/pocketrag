@@ -47,6 +47,17 @@ export async function callAnthropic(
   return text
 }
 
+/** v1.3: starts a streamed Messages answer; same contract as streamGemini. */
+export async function streamAnthropic(fetchImpl: typeof fetch, apiKey: string, model: string, prompt: string): Promise<Response> {
+  const response = await fetchImpl(`${API_BASE}/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': ANTHROPIC_API_VERSION },
+    body: JSON.stringify({ model, max_tokens: ANTHROPIC_MAX_OUTPUT_TOKENS, messages: [{ role: 'user', content: prompt }], stream: true }),
+  })
+  if (!response.ok || !response.body) throw await providerError('Anthropic', response, apiKey, prompt)
+  return response
+}
+
 export interface ModelInfo {
   id: string
   displayName: string

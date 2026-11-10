@@ -16,6 +16,8 @@ export interface DiscordFailurePayload {
   // optional since /ocr's deliberately narrow alert carries neither.
   code?: string
   providerCode?: string
+  // v1.3: whether the failed /answer call was streamed ('stream') or not ('non-stream').
+  phase?: 'stream' | 'non-stream'
   // Overrides the "Provider call failed" title (the KV-failure alert isn't a provider call).
   title?: string
 }
@@ -39,6 +41,7 @@ export function buildDiscordPayload(payload: DiscordFailurePayload, timestamp: s
           { name: 'Code', value: payload.code ?? 'n/a', inline: true },
           { name: 'Provider code', value: payload.providerCode ? redactKeys(payload.providerCode) : 'n/a', inline: true },
           { name: 'Tier', value: payload.tier, inline: true },
+          ...(payload.phase ? [{ name: 'Phase', value: payload.phase, inline: true }] : []),
           // redactKeys is a backstop at the sink: index.ts already redacts before calling.
           { name: 'Message', value: redactKeys(payload.message).slice(0, MAX_FIELD_LENGTH) },
         ],

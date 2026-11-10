@@ -1,3 +1,4 @@
+import { ANSWER, SSE, chunked } from './fixtures/sseStreams'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import worker from './index'
 import { DEFAULT_SHARED_MODEL } from './providers/gemini'
@@ -476,6 +477,7 @@ describe('worker fetch handler — /answer, BYOK', () => {
     const logged = consoleErrorSpy.mock.calls[0][0] as string
     expect(JSON.parse(logged)).toEqual({
       event: 'provider_call_failed',
+      phase: 'non-stream',
       provider: 'grok',
       model: 'grok-4',
       keySource: 'own',
@@ -1778,3 +1780,121 @@ describe('worker fetch handler — /answer, followMethod (v1.1)', () => {
   })
 })
 
+
+describe('worker fetch handler — /answer, streaming (v1.3)', () => {
+  const discordWebhookUrl = 'https://discord.com/api/webhooks/1/token'
+  const events = (text: string) =>
+    text
+      .split('\n\n')
+      .filter(Boolean)
+      .map((block) => {
+        const event = /^event: (.*)$/m.exec(block)?.[1]
+        const data = /^data: (.*)$/m.exec(block)?.[1]
+        return { event, data: data ? JSON.parse(data) : undefined }
+      })
+
+  // Routes provider calls to a fixture body; records Discord posts.
+  function stubFetch(body: string | { status: number; json: unknown }) {
+    const spy = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === discordWebhookUrl) return { ok: true, status: 204, text: async () => '' }
+      if (typeof body === 'string') return new Response(chunked(body), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+      void init
+      return { ok: false, status: body.status, text: async () => JSON.stringify(body.json), headers: new Headers() }
+    })
+    vi.stubGlobal('fetch', spy)
+    return spy
+  }
+  const discordPayloads = (spy: ReturnType<typeof vi.fn>) =>
+    spy.mock.calls.filter(([url]) => url === discordWebhookUrl).map(([, init]) => JSON.stringify(JSON.parse((init as RequestInit).body as string)))
+
+  it('streams a shared Gemini answer: SSE with CORS, meta first, deltas, then done with the citation check on the full text', async () => {
+    const spy = stubFetch(SSE.gemini.complete)
+    const res = await worker.fetch(answerRequest({ ...validBody, stream: true }), makeEnv(), makeCtx())
+    expect(res.status).toBe(200)
+    expect(res.headers.get('Content-Type')).toContain('text/event-stream')
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('http://localhost:5173')
+    const out = events(await res.text())
+    await flushWaitUntil()
+    expect(spy.mock.calls[0][0]).toContain(':streamGenerateContent?alt=sse')
+    expect(out[0]).toEqual({ event: 'meta', data: { provider: 'gemini', model: 'gemini-3.5-flash-lite' } })
+    expect(out.filter((e) => e.event === 'delta').map((e) => e.data.t).join('')).toBe(ANSWER)
+    expect(out.at(-1)).toEqual({ event: 'done', data: { groundingWarning: false, docLabels: [{ label: 1, documentId: 'doc-1' }] } })
+  })
+
+  it('flags an uncited answer only at the end (the check needs the whole text)', async () => {
+    stubFetch(SSE.gemini.uncited)
+    const res = await worker.fetch(answerRequest({ ...validBody, stream: true }), makeEnv(), makeCtx())
+    const out = events(await res.text())
+    expect(out.at(-1)?.data.groundingWarning).toBe(true)
+  })
+
+  it.each([
+    ['openai', 'gpt-5-mini', '/chat/completions'],
+    ['anthropic', 'claude-haiku-5-5', '/messages'],
+  ] as const)('streams BYOK %s with stream: true in the provider request', async (provider, model, path) => {
+    const spy = stubFetch(SSE[provider].complete)
+    const res = await worker.fetch(answerRequest({ ...byokBody, provider, model, stream: true }), makeEnv(), makeCtx())
+    const out = events(await res.text())
+    expect(spy.mock.calls[0][0]).toContain(path)
+    expect(JSON.parse((spy.mock.calls[0][1] as RequestInit).body as string).stream).toBe(true)
+    expect(out.filter((e) => e.event === 'delta').map((e) => e.data.t).join('')).toBe(ANSWER)
+    expect(out.at(-1)?.event).toBe('done')
+  })
+
+  it('a failure before the first byte is the normal JSON 502 with CORS, and a shared 429 trips the breaker', async () => {
+    stubFetch({ status: 429, json: { error: { code: 429, status: 'RESOURCE_EXHAUSTED', message: 'Quota exceeded' } } })
+    const env = makeEnv()
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const res = await worker.fetch(answerRequest({ ...validBody, stream: true }), env, makeCtx())
+    expect(res.status).toBe(502)
+    expect(res.headers.get('Content-Type')).toBe('application/json')
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('http://localhost:5173')
+    const body = (await res.json()) as Record<string, unknown>
+    expect(body).toMatchObject({ error: SHARED_RATE_LIMITED_COPY, code: 'provider_rate_limited', source: 'shared' })
+    expect(body.retryAfterSeconds).toBeTypeOf('number')
+    // The breaker now answers the next request without a provider call.
+    const fetchSpy = stubFetch(SSE.gemini.complete)
+    const next = await worker.fetch(answerRequest({ ...validBody, stream: true }), env, makeCtx())
+    expect(next.status).toBe(502)
+    expect(fetchSpy).not.toHaveBeenCalled()
+    errorSpy.mockRestore()
+  })
+
+  it('a mid-stream failure ends with an error event (the fixed copy) and alerts Discord with phase "stream", never content', async () => {
+    const spy = stubFetch(SSE.gemini.errorEvent)
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const res = await worker.fetch(answerRequest({ ...validBody, stream: true }), makeEnv({ DISCORD_WEBHOOK_URL: discordWebhookUrl }), makeCtx())
+    const out = events(await res.text())
+    await flushWaitUntil()
+    expect(out.at(-1)).toEqual({ event: 'error', data: { error: SHARED_UNAVAILABLE_COPY, code: 'provider_unavailable' } })
+    const [payload] = discordPayloads(spy)
+    expect(payload).toContain('"name":"Phase","value":"stream"')
+    expect(payload).toContain('Stream failed: provider error event')
+    expect(payload).toContain('gemini-3.5-flash-lite')
+    expect(payload).not.toMatch(/Mitochondria|passage text|Internal error/)
+    const logged = JSON.parse(consoleErrorSpy.mock.calls[0][0] as string)
+    expect(logged).toMatchObject({ event: 'provider_call_failed', phase: 'stream', status: 200, code: 'provider_unavailable' })
+    consoleErrorSpy.mockRestore()
+  })
+
+  it('stays JSON for providers without streaming (Grok, OpenRouter) and for web search', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: 'Grok answer (Doc 1, page 1).' } }] }) }),
+    )
+    const grok = await worker.fetch(answerRequest({ ...byokBody, provider: 'grok', model: 'grok-4', stream: true }), makeEnv(), makeCtx())
+    expect(grok.headers.get('Content-Type')).toBe('application/json')
+    expect(((await grok.json()) as { answer: string }).answer).toBe('Grok answer (Doc 1, page 1).')
+
+    mockGeminiSuccess('Searched answer (Doc 1, page 1).')
+    const searched = await worker.fetch(answerRequest({ ...byokBody, enableWebSearch: true, stream: true }), makeEnv(), makeCtx())
+    expect(searched.headers.get('Content-Type')).toBe('application/json')
+    expect((fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0]).toContain(':generateContent')
+  })
+
+  it('rejects a non-boolean stream before anything else', async () => {
+    const res = await worker.fetch(answerRequest({ ...validBody, stream: 'yes' }), makeEnv(), makeCtx())
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'stream must be a boolean.' })
+  })
+})

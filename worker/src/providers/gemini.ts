@@ -151,6 +151,31 @@ export async function callGemini(
   return generateContent(fetchImpl, apiKey, model, parts, 'Gemini response did not contain any answer text.', enableWebSearch)
 }
 
+/**
+ * v1.3: starts a streamed answer (streamGenerateContent, SSE). Returns the provider's
+ * response once it has answered 2xx, for stream.ts to read; a non-2xx throws via
+ * providerError() before any byte reaches the client, so the caller's normal JSON error
+ * path (classification, breaker, copy) applies. Never grounded: web-search answers stay
+ * non-streaming (Search Suggestions must be shown with the result).
+ */
+export async function streamGemini(
+  fetchImpl: typeof fetch,
+  apiKey: string,
+  model: string,
+  prompt: string,
+  image?: GeminiImageInput,
+): Promise<Response> {
+  const parts: GeminiPart[] = [{ text: prompt }]
+  if (image) parts.push({ inlineData: { mimeType: image.mimeType, data: image.base64 } })
+  const response = await fetchImpl(`${API_BASE}/models/${model}:streamGenerateContent?alt=sse`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+    body: JSON.stringify({ contents: [{ role: 'user', parts }] }),
+  })
+  if (!response.ok || !response.body) throw await providerError('Gemini', response, apiKey, prompt)
+  return response
+}
+
 // Deliberately instructs verbatim transcription, not summarization or correction — an
 // LLM-based OCR path can otherwise "fix" spelling/grammar or paraphrase, which a real
 // OCR engine wouldn't do. [illegible] gives the model an explicit way to signal

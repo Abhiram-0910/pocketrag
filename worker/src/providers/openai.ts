@@ -34,6 +34,17 @@ export async function callOpenAI(
   return text
 }
 
+/** v1.3: starts a streamed Chat Completions answer; same contract as streamGemini. */
+export async function streamOpenAI(fetchImpl: typeof fetch, apiKey: string, model: string, prompt: string): Promise<Response> {
+  const response = await fetchImpl(`${API_BASE}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], stream: true }),
+  })
+  if (!response.ok || !response.body) throw await providerError('OpenAI', response, apiKey, prompt)
+  return response
+}
+
 export interface ModelInfo {
   id: string
   displayName: string

@@ -13,12 +13,14 @@ import { checkRateLimit, BYOK_DAILY_LIMIT, DEFAULT_DAILY_LIMIT, OCR_DAILY_LIMIT,
 import {
   callGemini,
   listGeminiModels,
+  streamGemini,
   transcribeImage,
   DEFAULT_SHARED_MODEL,
   type GeminiGroundingResult,
 } from './providers/gemini'
-import { callOpenAI, listOpenAIModels } from './providers/openai'
-import { callAnthropic, listAnthropicModels } from './providers/anthropic'
+import { callOpenAI, listOpenAIModels, streamOpenAI } from './providers/openai'
+import { callAnthropic, listAnthropicModels, streamAnthropic } from './providers/anthropic'
+import { ADAPTERS, STREAMING_PROVIDERS, pump, type StreamingProvider } from './stream'
 import { callGrok, listGrokModels } from './providers/grok'
 import { callOpenRouter, listOpenRouterModels } from './providers/openrouter'
 import { ProviderError, redactKeys, type RetryHint } from './providers/errors'
@@ -203,10 +205,11 @@ function ourRateLimitResponse(resetAt: string, origin: string | null): Response 
  * only the classified ProviderFailure: no `err`, no apiKey. safeMessage was already
  * exact-key-scrubbed in the provider file; redactKeys is the pattern-based backstop.
  */
-function logProviderError(failure: ProviderFailure): void {
+function logProviderError(failure: ProviderFailure, phase?: 'stream' | 'non-stream'): void {
   console.error(
     JSON.stringify({
       event: 'provider_call_failed',
+      phase,
       provider: failure.provider,
       model: failure.model,
       keySource: failure.keySource,
@@ -241,6 +244,7 @@ function notifyDiscordOfFailure(
   env: Env,
   failure: ProviderFailure,
   endpoint: DiscordEndpoint,
+  phase?: 'stream' | 'non-stream',
 ): void {
   if (!env.DISCORD_WEBHOOK_URL || !shouldAlert(failure)) return
   const sharedRateLimit = failure.keySource === 'shared' && failure.code === 'provider_rate_limited'
@@ -257,6 +261,7 @@ function notifyDiscordOfFailure(
             tier: failure.keySource,
             code: failure.code,
             providerCode: failure.providerCode,
+            phase,
           })
         : undefined,
     ),
@@ -394,6 +399,79 @@ async function handleAnswer(
   const apiKey = validation.keySource === 'own' ? validation.apiKey : env.GEMINI_API_KEY
   const model = validation.keySource === 'own' ? validation.model : DEFAULT_SHARED_MODEL
   const provider = validation.keySource === 'own' ? validation.provider : 'gemini'
+  const providedPairs = validation.chunks.map((chunk) => ({
+    // Non-null assertion is safe by invariant: assignDocLabels labels every distinct
+    // documentId in these chunks, so every chunk's documentId is guaranteed in labelOf.
+    label: labelOf.get(chunk.documentId)!,
+    page: chunk.page,
+  }))
+
+  // Classified failure → log, alert, breaker, JSON 502 (CORS via json()). Shared by the
+  // non-streaming call and a streaming call that fails before its first byte.
+  const failAnswer = async (err: unknown, phase: 'stream' | 'non-stream'): Promise<Response> => {
+    const failure = classify(err, provider, model, validation.keySource)
+    logProviderError(failure, phase)
+    notifyDiscordOfFailure(ctx, env, failure, 'answer', phase)
+    let retry: RetryFields = {}
+    if (failure.code === 'provider_rate_limited') {
+      if (validation.keySource === 'shared' && failure.status === 429) {
+        retry = cooldownFields(await tripBreaker(env.RATE_LIMIT_KV, failure.retryHint.seconds, reportKv))
+      } else if (failure.retryHint.seconds !== undefined) {
+        retry = { retryAfterSeconds: failure.retryHint.seconds }
+      }
+    }
+    return failureResponse(failure, 'answer', origin, retry)
+  }
+
+  // v1.3 streaming: Gemini (shared + BYOK), OpenAI, Anthropic, never with web search (its
+  // Search Suggestions must accompany the result). Everything above — region, cooldown,
+  // rate limit, validation — has already run; the provider's HTTP status is checked before
+  // our first byte, so those failures are the normal JSON response.
+  if (validation.stream && !enableWebSearch && (STREAMING_PROVIDERS as readonly string[]).includes(provider)) {
+    const streamingProvider = provider as StreamingProvider
+    let upstream: Response
+    try {
+      upstream =
+        streamingProvider === 'openai'
+          ? await streamOpenAI(fetch, apiKey, model, prompt)
+          : streamingProvider === 'anthropic'
+            ? await streamAnthropic(fetch, apiKey, model, prompt)
+            : await streamGemini(fetch, apiKey, model, prompt, image)
+    } catch (err) {
+      return failAnswer(err, 'stream')
+    }
+    const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>()
+    ctx.waitUntil(
+      pump(upstream.body!, ADAPTERS[streamingProvider], writable.getWriter(), { provider, model }, {
+        // The citation check needs the whole answer, so its verdict arrives with `done`.
+        onComplete: (text) => ({ groundingWarning: checkGrounding(text, providedPairs).groundingWarning, docLabels }),
+        onFailure: (reason) => {
+          // A fixed reason (stream.ts), never provider text or answer content.
+          const failure: ProviderFailure = {
+            provider,
+            model,
+            keySource: validation.keySource,
+            code: 'provider_unavailable',
+            status: upstream.status,
+            safeMessage: `Stream failed: ${reason}`,
+            unclassified: false,
+            retryHint: { source: 'none' },
+          }
+          logProviderError(failure, 'stream')
+          notifyDiscordOfFailure(ctx, env, failure, 'answer', 'stream')
+          return { error: failureMessage(failure, 'answer'), code: failure.code }
+        },
+      }),
+    )
+    return new Response(readable, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
+        ...corsHeaders(origin),
+      },
+    })
+  }
 
   try {
     let answer: string
@@ -422,12 +500,6 @@ async function handleAnswer(
         webGrounding = result.grounding
       }
     }
-    const providedPairs = validation.chunks.map((chunk) => ({
-      // Non-null assertion is safe by invariant: assignDocLabels labels every distinct
-      // documentId in these chunks, so every chunk's documentId is guaranteed in labelOf.
-      label: labelOf.get(chunk.documentId)!,
-      page: chunk.page,
-    }))
     const grounding = checkGrounding(answer, providedPairs)
     return json(
       {
@@ -454,18 +526,7 @@ async function handleAnswer(
       origin,
     )
   } catch (err) {
-    const failure = classify(err, provider, model, validation.keySource)
-    logProviderError(failure)
-    notifyDiscordOfFailure(ctx, env, failure, 'answer')
-    let retry: RetryFields = {}
-    if (failure.code === 'provider_rate_limited') {
-      if (validation.keySource === 'shared' && failure.status === 429) {
-        retry = cooldownFields(await tripBreaker(env.RATE_LIMIT_KV, failure.retryHint.seconds, reportKv))
-      } else if (failure.retryHint.seconds !== undefined) {
-        retry = { retryAfterSeconds: failure.retryHint.seconds }
-      }
-    }
-    return failureResponse(failure, 'answer', origin, retry)
+    return failAnswer(err, 'non-stream')
   }
 }
 
