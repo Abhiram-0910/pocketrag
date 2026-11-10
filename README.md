@@ -115,6 +115,10 @@ Milestone 16 retest):
   what it carried (question, passage and turn counts, never the text itself), its size
   and outcome, retries included — saved with the answer; a "This session" list covers
   model downloads, OCR uploads and model-list checks (see [Receipts](#receipts) below)
+- Streaming answers (Gemini on the free tier or your own key, OpenAI, Anthropic): text
+  appears as it's written, with a Stop button. A stopped answer stays marked "Stopped" and
+  is never treated as complete. Grok and OpenRouter answers arrive in one piece, and the
+  app says so. Web-search answers are never streamed
 - Edit, regenerate and branch: edit any earlier question or regenerate an answer, and each
   becomes a new version of that turn, with a fresh search. Step between versions with
   "‹ 1/2 ›"; the version you're on is what's sent as context, and it's kept across reloads
@@ -282,6 +286,10 @@ so they fail the build's tests if they drift.
 - **Maths layout is flattened.** A stacked fraction loses its bar (r/100 extracts as
   "r 100") and superscripts detach ("(1.08)³" extracts as "(1.08) 3" or "(1.08)3").
   Characters like ² and ½ survive.
+- **Streaming and the citation check.** The check needs the whole answer, so a missing or
+  wrong citation is flagged only when the stream ends. Very long OpenAI answers (around
+  2,000 tokens) come close to the server's CPU budget on Cloudflare's free plan; if one is
+  ever cut off, it shows as a stopped partial answer.
 - **Changed-number answers are calculated by the model.** The method comes from your
   notes; the arithmetic can still be wrong. Check it.
 - **English questions about notes in another language** retrieve worse than questions in
@@ -294,7 +302,7 @@ so they fail the build's tests if they drift.
 ## Roadmap
 
 Deferred, not started:
-- Streaming answers
+- Streaming for Grok and OpenRouter, and for web-search answers
 - Toolchain bump (vitest, vite, wrangler)
 - Durable Objects for the rate-limit counters and the breaker (exact instead of
   best-effort)

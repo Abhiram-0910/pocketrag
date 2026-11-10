@@ -6,7 +6,7 @@ Claude reads this at the START of every new session to understand what happened 
 ---
 
 ## Project State
-**Last updated:** 2026-11-10 (v1.2.0, Session 44; the summary below predates v1.1 — see Sessions 43-44)
+**Last updated:** 2026-11-10 (v1.3.0, Session 45; the summary below predates v1.1 — see Sessions 43-45)
 **Current branch:** master (through Session 28's BYOK-Gemini model-default fix —
 see below)
 **Remote:** `github.com/Abhiram-0910/pocketrag` (private) — pushed through this
@@ -182,6 +182,20 @@ provider error text; the UI shows it verbatim with a per-code action (Step B). 6
   numbers). Re-run `npm run eval` and check `after.json → sourceMatch` before moving them.
   The verbatim block never claims anything about new numbers; the method block always
   carries "Check the arithmetic: the model can make calculation mistakes."
+
+## Standing Rules — streaming (v1.3, Phase 7c)
+
+- **Everything that can refuse a request runs before the first byte** (region, cooldown, rate
+  limit, validation, the provider's HTTP status). After the first byte, a failure is an
+  `error` event with fixed copy — never provider text — plus `logProviderError(…, 'stream')` and
+  a Discord alert with phase `stream`. Keep it that way for any new streaming provider.
+- **A partial answer is never complete:** the Receipt row ends `interrupted`, the turn is
+  stored `status: 'interrupted'` with `interruption`, and `historyForRequest` skips it.
+- **Web-search answers never stream** (Search Suggestions must be shown with the result).
+  Streaming them needs a compliance argument first.
+- **Watch CPU on the Free plan.** Per-event work stays one JSON.parse + coalesced writes per
+  upstream read. Measure with the GraphQL Analytics API (`workersInvocationsAdaptive`,
+  `cpuTime` in µs) — `wrangler tail` gave nothing in Session 45.
 
 ## Standing release gates (from Phase 6-E, Session 41 — later phases reference this)
 
@@ -4405,6 +4419,68 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" \
 (standing rule updated). Switching to an earlier turn's other version opens that branch's newest
 leaf, not the last one viewed (TODO). No per-version delete (not asked). **Unverified:** the
 autofill state by hand; branch announcements with a real screen reader; Safari.
+
+### Session 45 — 2026-11-10 (Claude Code)
+**Goal:** Phase 7c (v1.3): streaming through the Worker for Gemini (shared + BYOK), OpenAI and
+Anthropic; Receipts and interrupted state; Discord phase; loading experience; tests; deploy;
+tag `v1.3.0`.
+
+**Built:** `7c785bf` Worker — `stream: true` (validated), `stream.ts` (SSE parser, adapters,
+pump: meta / delta / done / error, one delta per upstream read, cancels the provider when the
+client goes away), pre-first-byte failures unchanged JSON (CORS, breaker, Discord), mid-stream
+failures → fixed copy + log/alert with phase `stream`, Discord `Phase` field. `9705f29`
+client — `egressStream` (Receipt "Receiving…" → `ok` / `interrupted`), `sse.ts`, `attemptAnswer`
+`interrupted` outcome + Stop + idle timeout, turns stored `interrupted` with `interruption` and
+the partial text ("Stopped"), Grok/OpenRouter note, `AnswerProgress` (stages with
+`aria-current`, skeleton `motion-safe`, Stop), model download in bytes + `<progress>`,
+indexing bars, start/end-only announcements. Key files absent
+(`/tmp/pocketrag-scratch/{openai,anthropic}.key`): **OpenAI and Anthropic streaming are
+fixture-tested only.**
+
+**CPU (Free plan, 10 ms):** Node benchmark of the pump, median / p90 (21 runs): Gemini 60
+events 0.5 / 1.7 ms, 200 events 1.7 / 3.3; OpenAI 400 token-events 0.9 / 3.8–5.7, 2,000
+token-events 4.2 / 9.0; Anthropic 1,000 events 1.4 / 2.1 (coalescing deltas per read cut
+OpenAI-2000 from 9.5 ms median before). Production (GraphQL analytics): live streamed shared
+answer **6.83 ms CPU**, 698 ms wall; earlier non-streaming shared answers 5.14 ms. Fits for
+normal answers; a ~2,000-token OpenAI answer is the risk (would show as a stopped partial).
+
+**Gates:** tsc exit 0 both; oxlint 0 / 155 files; frontend 402/402 (was 389), Worker 569/569
+(was 543); build + size guard; JS `index-DJVdKJEQ.js` → `index-DFBGTE_o.js`, CSS
+`index-CrBJyyv2.css` → `index-FmQGoV7Y.css`; `git diff 6158529 -- public/_headers` empty;
+step-b Chromium exit 0, 34 scenarios (was 33), 0 failures — streaming runs through a local
+HTTPS mock Worker (real chunks): text grows, stages, announcements exactly ["Writing the
+answer…", "Answer complete."], Receipt OK; error event → Worker copy + Stopped partial +
+Receipt Interrupted; Stop → partial kept across reload, focus on `#answer-area`; cut-off →
+client copy; reduced motion → skeleton `animation-name: none`; Grok note shown, no `stream`
+sent. step-c Chromium + Firefox exit 0, 15/15, 28/28 matched, 0 unexpected, 5 streamed
+answers reconciled.
+
+**Deployed:** Worker `54534f88` → **`c31c8dd2-b5de-4ad1-ae09-82299d64234e`** (gates: preflight 200,
+invalid 400, `stream` non-boolean 400, fake key 502 `key_rejected`; a streamed BYOK request with a
+fake OpenAI key → JSON 502 with CORS before any byte). Pages `264dfbb6` →
+**`a039f0cc-7176-4b04-8e63-142c6bf101b5`** (Production, `9705f29`): CSP byte-identical 446 B, five
+headers, no Set-Cookie; smoke (`/answer` aborted): download line "… 2 MB of 118.3 MB (2%)",
+stages searching → asking, 0 CSP, 0 page errors, no overflow 360/1280. **ONE shared streamed
+answer:** 200 `text/event-stream`, headers 1,098 ms, **first text 1,101 ms (TTFT ≈ 1.1 s)**,
+stages searching → asking → writing, "Mitochondria produce ATP through cellular respiration
+(Doc 1, page 1).", grounded, Receipt OK · 1.1 s · gemini-3.5-flash-lite. Rollback (Worker
+first is safe either way — the old client never sends `stream`):
+```bash
+cd worker && npx wrangler rollback 54534f88-2aec-48a8-bae6-e4373bf338e0 --message "Revert v1.3 streaming"
+npx wrangler whoami >/dev/null
+TOKEN=$(grep -oP '^oauth_token = "\K[^"]+' ~/.config/.wrangler/config/default.toml)
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+  https://api.cloudflare.com/client/v4/accounts/da55acd99cee5a43df7d397dd80af4e3/pages/projects/pocketrag/deployments/264dfbb6-b390-46c2-beea-d3e85186a028/rollback
+```
+(Rolling back the Worker alone is safe: the v1.3 client falls back to JSON. Rolling back Pages
+leaves stored `interrupted` turns with partial text, which v1.2 shows with its old
+"interrupted — the tab closed" copy.)
+
+**Deviations:** the search-model download bytes cover the model file (118.3 MB), not the
+tokenizer loaded separately (17.1 MB). The step-c mock now serves JSON whenever it simulates
+grounding (the real Worker never streams those). `wrangler tail` captured nothing; CPU came
+from the GraphQL analytics API. **Unverified:** OpenAI and Anthropic streaming live (no key
+files); a provider's mid-stream error live; Safari; a screen reader.
 
 ---
 

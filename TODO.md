@@ -7,6 +7,16 @@ Read this at the start of every session to know what to work on next.
 
 ## 🔴 Current Sprint
 
+### v1.3 — streaming (Phase 7c)
+- [x] Streamed answers (Gemini shared + BYOK, OpenAI, Anthropic), Stop, interrupted turns,
+      Receipt `interrupted`, Discord phase, loading stages, download bytes, indexing bars.
+- [ ] Live-verify OpenAI and Anthropic streaming (fixture-tested only; no key files).
+- [ ] Very long OpenAI answers (~2,000 tokens) approach the Free plan's 10 ms CPU (benchmark
+      p90 9 ms for the pump alone). If it bites: Workers Paid, or cap output tokens.
+- [ ] Include the tokenizer (17.1 MB) in the download-bytes line (loaded separately today).
+- [ ] Stream web-search answers only after a Search Suggestions compliance check.
+- [ ] Streaming for Grok and OpenRouter (both offer OpenAI-shaped SSE; needs fixtures + live keys).
+
 ### v1.2 — edit / regenerate / branch, dark-mode fields, axe (Phase 7b)
 - [x] Edit any question / regenerate an answer → a sibling version with a fresh retrieval;
       "‹ n/m ›" navigator; active branch persisted; history from the active path only;

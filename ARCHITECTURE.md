@@ -794,6 +794,41 @@ Milestone 2 swapped in the real tokenizer. IndexedDB reads/writes happen on the
   probes `resolve/main/tokenizer_config.json` (1-byte range GET, `get_tokenizer_files()` takes
   no options in 4.2.0); every file actually loaded comes from the pinned commit (TODO).
 
+- **v1.3 — streaming (Phase 7c).** Additive: `/answer` takes `stream: true` (validated
+  boolean). The Worker streams only Gemini (shared + BYOK), OpenAI and Anthropic, never with
+  web search (Search Suggestions must accompany a grounded result); anything else gets the
+  unchanged JSON response, so older clients and Grok/OpenRouter are untouched. Region,
+  cooldown, rate limit and validation run first, and the provider's HTTP status is checked
+  before our first byte, so those failures are the normal JSON 502 (CORS, breaker, Discord
+  with phase `stream`). After that, `worker/src/stream.ts` reads the provider body (an
+  incremental SSE parser + one adapter per provider) and writes four events of its own:
+  `meta` {provider, model} → the client validates servedBy as before; `delta` {t}; `done`
+  {groundingWarning, docLabels} — the citation check on the complete text, so its flag
+  arrives late; `error` {error, code} — fixed copy, with a content-free log line and Discord
+  alert (`Stream failed: <reason>`, phase `stream`, existing throttling). The text from one
+  upstream read goes out as ONE delta (OpenAI sends a token per event). If the client goes
+  away (Stop), the provider stream is cancelled and nothing is reported.
+  *CPU (Free plan, 10 ms).* Node benchmark of the pump (21 runs, median / p90): Gemini 60
+  events 0.5 / 1.7 ms, 200 events 1.5–1.7 / 3.3 ms; OpenAI 400 token-events 0.9 / 3.8–5.7
+  ms, 2,000 token-events 4.2 / 9 ms; Anthropic 1,000 events 1.4 / 2.1 ms. Parsing alone is ≤
+  1.7 ms in every case; the rest is stream plumbing (native in Workers). Production (Workers
+  analytics, `workersInvocationsAdaptive.cpuTime`): the live streamed shared Gemini answer
+  6.83 ms CPU / 698 ms wall; the v1.1 and v1.2 non-streaming shared answers 5.14 ms each — so
+  ~+1.7 ms for a short streamed answer (one sample each). `wrangler tail` captured nothing
+  and the observability API refuses wrangler's OAuth token; the GraphQL API works. Ceiling: a ~2,000-token OpenAI answer is near the limit; a cut
+  stream shows as a stopped partial answer.
+  *Client.* `egressStream` keeps the Receipt row in flight ("Receiving…") until the stream
+  ends: `ok` only after `done`, else the new `interrupted`. `readAnswerStream` (`src/lib/sse.ts`,
+  a duplicated parser — the frontend never imports Worker code) feeds `attemptAnswer`, whose
+  new `interrupted` outcome carries the partial text and why (`stopped` or `error` — the
+  Worker's copy verbatim, or the client's own copy when the connection itself ended). The
+  60 s timeout becomes an idle timeout while text is arriving. A partial answer is stored as
+  `status: 'interrupted'` with `interruption` and its text, shown marked "Stopped", never
+  sent as history, and replaced by a retry. Stop is the same AbortController, for both kinds
+  of request. Loading: "Searching your documents → Asking {provider} → Writing" (the
+  current step has `aria-current`), skeleton bars (`motion-safe` only), the search-model
+  download with bytes and a native `<progress>`, an indexing bar per document; the polite
+  region announces only "Writing the answer…" and the end, never per token.
 - **v1.2 — edit, regenerate, branch (Phase 7b).** The tree was already there (`parentId`,
   `activeLeafId`, `selectBranch`); v1.2 is the UI. A turn is one question + answer, so its
   siblings are the versions of that question. **Edit** (any turn) and **Regenerate** (answered
